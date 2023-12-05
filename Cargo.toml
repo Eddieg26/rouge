@@ -6,3 +6,14 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+image = "0.24.7"
+wgpu = "0.18.0"
+winit = "0.28.0"
+
+[dependencies.bytemuck]
+version = "1.14.0"
+features = ["derive"]
+
+[dependencies.glam]
+version = "0.24.2"
+features = ["bytemuck"]

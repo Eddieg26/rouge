@@ -6,13 +6,16 @@ use self::{
 use super::core::{gpu::GpuInstance, vertex::BaseVertex};
 use std::{collections::HashMap, rc::Rc};
 
+pub use id::*;
+
 pub mod buffer;
+pub mod id;
 pub mod mesh;
 pub mod texture;
 
-type BufferId = u64;
-type MeshId = u64;
-type TextureId = u64;
+pub type BufferId = ResourceId;
+pub type MeshId = ResourceId;
+pub type TextureId = ResourceId;
 
 pub struct GraphicsResources {
     gpu: Rc<GpuInstance>,

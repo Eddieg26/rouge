@@ -190,8 +190,8 @@ impl<T: Object2D> TreeNode<T> {
         self.children.as_mut()
     }
 
-    pub fn take_objects(&mut self) -> Vec<T> {
-        std::mem::replace(&mut self.objects, vec![])
+    pub fn objects_mut(&mut self) -> &mut Vec<T> {
+        &mut self.objects
     }
 
     pub fn pop(&mut self) -> Option<T> {
@@ -247,6 +247,14 @@ impl<T: Object2D> QuadTree<T> {
         }
     }
 
+    pub fn root(&self) -> &Box<TreeNode<T>> {
+        &self.root
+    }
+
+    pub fn root_mut(&mut self) -> &mut Box<TreeNode<T>> {
+        &mut self.root
+    }
+
     pub fn insert(&mut self, object: T) {
         self.root.insert(object);
     }
@@ -262,46 +270,4 @@ impl<T: Object2D> QuadTree<T> {
     pub fn clear(&mut self) {
         self.root.clear();
     }
-}
-
-pub struct BoxObj {
-    rect: Rect,
-}
-
-impl Object2D for BoxObj {
-    type Identifier = usize;
-
-    fn id(&self) -> Self::Identifier {
-        0
-    }
-
-    fn bounds(&self) -> &Rect {
-        &self.rect
-    }
-}
-
-fn col_test() {
-    let mut tree = QuadTree::<BoxObj>::new(Rect::new(0.0, 0.0, 100.0, 100.0), 10, 10);
-
-    let node = &mut tree.root;
-
-    test(node);
-}
-
-fn test<T: Object2D>(node: &mut TreeNode<T>) -> Vec<T> {
-    let mut all_objects = Vec::new();
-    while let Some(object) = node.pop() {
-        let objects = node.query(object.bounds());
-        // Check collisions between object and all other objects
-
-        all_objects.push(object);
-    }
-
-    if let Some(children) = node.children_mut() {
-        for child in children.iter_mut() {
-            all_objects.append(&mut test(child));
-        }
-    }
-
-    all_objects
 }

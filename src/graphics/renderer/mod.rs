@@ -16,19 +16,11 @@ pub type NodeId = ResourceId;
 pub mod context;
 pub mod pass;
 
-pub enum Attachment {
-    SwapChainImage,
-    Texture(ResourceId),
-    Buffer(ResourceId),
-}
-
 pub trait RenderGraphNode: 'static {
     fn id(&self) -> &NodeId;
-    fn inputs(&self) -> Vec<Attachment>;
-    fn outputs(&self) -> Vec<Attachment>;
     fn dependencies(&self) -> &Vec<NodeId>;
     fn dependencies_mut(&mut self) -> &mut Vec<NodeId>;
-    fn with_dependency(&mut self, id: NodeId) {
+    fn add_dependency(&mut self, id: NodeId) {
         self.dependencies_mut().push(id);
     }
     fn execute(&self, ctx: &RenderContext, encoder: &mut wgpu::CommandEncoder);
@@ -79,6 +71,10 @@ impl RenderGraph {
 
             self.buffers.insert(*id, buffer);
         }
+    }
+
+    pub fn gpu(&self) -> &GpuInstance {
+        &self.gpu
     }
 
     pub fn create_texture(&mut self, id: impl Into<TextureId>, info: TextureInfo) -> TextureId {
@@ -132,12 +128,18 @@ impl RenderGraph {
         self.is_dirty = true;
     }
 
-    pub fn texture(&self, id: TextureId) -> Option<&Box<dyn Texture>> {
-        self.textures.get(&id)
+    pub fn texture<T: Texture>(&self, id: &TextureId) -> Option<&T> {
+        self.textures
+            .get(id)
+            .map(|t| t.as_any().downcast_ref::<T>().unwrap())
     }
 
-    pub fn buffer(&self, id: BufferId) -> Option<&Buffer> {
-        self.buffers.get(&id)
+    pub fn dyn_texture(&self, id: &TextureId) -> Option<&dyn Texture> {
+        self.textures.get(id).map(|t| t.as_ref())
+    }
+
+    pub fn buffer(&self, id: &BufferId) -> Option<&Buffer> {
+        self.buffers.get(id)
     }
 
     fn sort(&mut self) -> &Vec<Box<dyn RenderGraphNode>> {
@@ -218,6 +220,8 @@ impl RenderGraph {
         }
 
         self.gpu.queue().submit(std::iter::once(encoder.finish()));
+
+        surface.present();
 
         Ok(())
     }

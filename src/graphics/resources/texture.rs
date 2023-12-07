@@ -1,6 +1,20 @@
 pub type Dimension = wgpu::TextureDimension;
 pub type Format = wgpu::TextureFormat;
 
+pub trait ToTextureViewDimension {
+    fn to_texture_view_dimension(&self) -> wgpu::TextureViewDimension;
+}
+
+impl ToTextureViewDimension for Dimension {
+    fn to_texture_view_dimension(&self) -> wgpu::TextureViewDimension {
+        match self {
+            Dimension::D1 => wgpu::TextureViewDimension::D1,
+            Dimension::D2 => wgpu::TextureViewDimension::D2,
+            Dimension::D3 => wgpu::TextureViewDimension::D3,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FilterMode {
     Point,

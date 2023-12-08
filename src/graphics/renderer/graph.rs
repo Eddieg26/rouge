@@ -1,11 +1,14 @@
-use crate::graphics::{
-    core::gpu::GpuInstance,
-    resources::{
-        buffer::{Buffer, BufferInfo},
-        texture::{Texture, Texture2d, TextureDesc},
-        BufferId, GraphicsResources, TextureId,
+use crate::{
+    ecs::World,
+    graphics::{
+        core::gpu::GpuInstance,
+        resources::{
+            buffer::{Buffer, BufferInfo},
+            texture::{Texture, Texture2d, TextureDesc},
+            BufferId, GraphicsResources, TextureId,
+        },
+        state::RenderState,
     },
-    state::RenderState,
 };
 use std::{collections::HashMap, rc::Rc};
 
@@ -187,12 +190,11 @@ impl RenderGraph {
         }
     }
 
-    pub fn execute(
-        &self,
-        gpu: &GpuInstance,
-        state: &RenderState,
-        resources: &GraphicsResources,
-    ) -> Result<(), String> {
+    pub fn execute(&self, world: &World) -> Result<(), String> {
+        let graphics = world.resource::<GraphicsResources>();
+        let state = world.state::<RenderState>();
+        let gpu = graphics.gpu();
+
         let surface = gpu
             .surface()
             .get_current_texture()
@@ -202,7 +204,7 @@ impl RenderGraph {
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
 
-        let ctx = RenderContext::new(gpu, state, resources, &self.textures, &self.buffers, &view);
+        let ctx = RenderContext::new(gpu, &state, &graphics, &self.textures, &self.buffers, &view);
         let mut encoder = self.create_encoder(gpu.device());
 
         for node in &self.nodes {

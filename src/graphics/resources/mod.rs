@@ -4,12 +4,10 @@ use self::{
     texture::{Texture, Texture2d, TextureInfo},
 };
 use super::core::{gpu::GpuInstance, vertex::BaseVertex};
+use crate::ecs::{resource::ResourceId, Resource};
 use std::{collections::HashMap, rc::Rc};
 
-pub use id::*;
-
 pub mod buffer;
-pub mod id;
 pub mod mesh;
 pub mod texture;
 
@@ -110,5 +108,15 @@ impl GraphicsResources {
         self.meshes.insert(*id, mesh);
 
         self.meshes.get(id)
+    }
+}
+
+impl Resource for GraphicsResources {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
     }
 }

@@ -1,3 +1,4 @@
+pub mod ecs;
 pub mod graphics;
 pub mod primitives;
 pub mod tree;

@@ -65,6 +65,46 @@ pub trait Texture: 'static {
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
 }
 
+pub struct TextureDesc {
+    pub width: u32,
+    pub height: u32,
+    pub depth: u32,
+    pub format: wgpu::TextureFormat,
+    pub dimension: wgpu::TextureDimension,
+}
+
+impl TextureDesc {
+    pub fn new_2d(width: u32, height: u32, format: wgpu::TextureFormat) -> TextureDesc {
+        TextureDesc {
+            width,
+            height,
+            depth: 1,
+            format,
+            dimension: wgpu::TextureDimension::D2,
+        }
+    }
+
+    pub fn new_3d(width: u32, height: u32, depth: u32, format: wgpu::TextureFormat) -> TextureDesc {
+        TextureDesc {
+            width,
+            height,
+            depth,
+            format,
+            dimension: wgpu::TextureDimension::D3,
+        }
+    }
+
+    pub fn new_cube(width: u32, height: u32, format: wgpu::TextureFormat) -> TextureDesc {
+        TextureDesc {
+            width,
+            height,
+            depth: 1,
+            format,
+            dimension: wgpu::TextureDimension::D2,
+        }
+    }
+}
+
 pub struct TextureInfo {
     pub width: u32,
     pub height: u32,
@@ -78,7 +118,7 @@ pub struct TextureInfo {
 }
 
 impl TextureInfo {
-    pub fn white(format: Format) -> Self {
+    pub fn white(format: Format, width: u32, height: u32) -> Self {
         let pixels = match format {
             Format::Rgba8UnormSrgb => vec![255, 255, 255, 255],
             Format::Rgba8Unorm => vec![255, 255, 255, 255],
@@ -87,8 +127,8 @@ impl TextureInfo {
         };
 
         Self {
-            width: 1,
-            height: 1,
+            width,
+            height,
             depth: 1,
             dimension: Dimension::D2,
             format,
@@ -99,7 +139,7 @@ impl TextureInfo {
         }
     }
 
-    pub fn black(format: Format) -> Self {
+    pub fn black(format: Format, width: u32, height: u32) -> Self {
         let pixels = match format {
             Format::Rgba8UnormSrgb => vec![0, 0, 0, 255],
             Format::Rgba8Unorm => vec![0, 0, 0, 255],
@@ -108,8 +148,8 @@ impl TextureInfo {
         };
 
         Self {
-            width: 1,
-            height: 1,
+            width,
+            height,
             depth: 1,
             dimension: Dimension::D2,
             format,
@@ -120,7 +160,7 @@ impl TextureInfo {
         }
     }
 
-    pub fn gray(format: Format) -> Self {
+    pub fn gray(format: Format, width: u32, height: u32) -> Self {
         let pixels = match format {
             Format::Rgba8UnormSrgb => vec![128, 128, 128, 255],
             Format::Rgba8Unorm => vec![128, 128, 128, 255],
@@ -129,8 +169,8 @@ impl TextureInfo {
         };
 
         Self {
-            width: 1,
-            height: 1,
+            width,
+            height,
             depth: 1,
             dimension: Dimension::D2,
             format,
@@ -284,6 +324,52 @@ impl Texture2d {
             info.wrap_mode,
             info.mipmaps,
             info.pixels.clone(),
+            view,
+            sampler,
+        )
+    }
+
+    pub fn from_desc(device: &wgpu::Device, desc: &TextureDesc) -> Texture2d {
+        let gpu_texture = device.create_texture(&wgpu::TextureDescriptor {
+            dimension: desc.dimension,
+            format: desc.format,
+            label: None,
+            mip_level_count: 1,
+            sample_count: 1,
+            size: wgpu::Extent3d {
+                depth_or_array_layers: desc.depth,
+                height: desc.height,
+                width: desc.width,
+            },
+            usage: wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+
+        let view = gpu_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: None,
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Linear,
+            lod_min_clamp: 0.0,
+            lod_max_clamp: 100.0,
+            compare: None,
+            anisotropy_clamp: 1,
+            border_color: None,
+        });
+
+        Texture2d::new(
+            desc.width,
+            desc.height,
+            desc.format,
+            FilterMode::Bilinear,
+            WrapMode::Clamp,
+            false,
+            vec![],
             view,
             sampler,
         )

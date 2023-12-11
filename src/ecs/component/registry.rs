@@ -5,14 +5,6 @@ use std::{
     collections::{HashMap, HashSet},
 };
 
-pub enum QueryTarget {
-    All,
-    Created,
-    Enabled,
-    Disabled,
-    Destroyed,
-}
-
 pub struct ComponentRegistry<T: Component> {
     components: HashMap<EntityId, T>,
     created: HashSet<EntityId>,
@@ -54,6 +46,30 @@ impl<T: Component> ComponentRegistry<T> {
 
     pub fn destroyed(&self) -> impl Iterator<Item = &EntityId> {
         self.destroyed.iter()
+    }
+
+    pub fn filter<'a>(&'a self, ids: &'a [EntityId]) -> std::vec::IntoIter<&T> {
+        ids.iter()
+            .filter_map(move |id| self.components.get(id))
+            .collect::<Vec<_>>()
+            .into_iter()
+    }
+
+    pub fn filter_mut<'a>(&'a mut self, ids: &'a [EntityId]) -> impl Iterator<Item = &mut T> + 'a {
+        let mut components = self
+            .components
+            .iter_mut()
+            .filter_map(move |(id, component)| {
+                if ids.contains(id) {
+                    Some((id, component))
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+
+        components.sort_by_key(|(id, _)| ids.iter().position(|i| *i == **id));
+        components.into_iter().map(|(_, component)| component)
     }
 
     pub fn all<'a>(&'a self) -> impl Iterator<Item = (&EntityId, &T)> {

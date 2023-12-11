@@ -15,8 +15,10 @@ pub struct ComponentManager {
 }
 
 impl ComponentManager {
-    pub fn new(components: Components) -> ComponentManager {
-        ComponentManager { components }
+    pub fn new() -> ComponentManager {
+        ComponentManager {
+            components: HashMap::new(),
+        }
     }
 
     pub fn extend(&mut self, manager: ComponentManager) {
@@ -33,6 +35,7 @@ impl ComponentManager {
 
     pub fn registry<T: Component>(&self) -> Ref<'_, ComponentRegistry<T>> {
         let id: ComponentType = TypeId::of::<T>().into();
+
         let components = self
             .components
             .get(&id)

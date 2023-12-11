@@ -1,11 +1,10 @@
 use super::{
     archetype::ArchetypeManager,
-    component::{manager::ComponentManager, registry::ComponentRegistry, Component, ComponentType},
+    component::{manager::ComponentManager, registry::ComponentRegistry, Component},
     entity::registry::EntityRegistry,
-    registry::Registry,
-    resource::{manager::ResourceManager, Resource, ResourceType},
+    resource::{manager::ResourceManager, Resource},
     state::StateManager,
-    EntityId, State,
+    EntityId, ResetInterval, State,
 };
 use std::{
     cell::{Ref, RefCell, RefMut},
@@ -30,20 +29,16 @@ pub struct World {
 }
 
 impl World {
-    pub fn new(
-        components: ComponentManager,
-        resources: ResourceManager,
-        states: StateManager,
-    ) -> World {
+    pub fn new() -> World {
         let entities = Rc::new(RefCell::new(EntityRegistry::new()));
         let archetypes = Rc::new(RefCell::new(ArchetypeManager::new()));
 
         World {
-            components,
-            resources,
+            components: ComponentManager::new(),
+            resources: ResourceManager::new(),
             entities,
             archetypes,
-            states,
+            states: StateManager::new(),
         }
     }
 
@@ -59,20 +54,12 @@ impl World {
         self.components.registry_mut::<T>()
     }
 
-    pub fn components_ref(&self, type_id: &ComponentType) -> &Rc<RefCell<Box<dyn Registry>>> {
-        self.components.registry_ref(type_id)
-    }
-
     pub fn resource<T: Resource>(&self) -> Ref<'_, T> {
         self.resources.resource::<T>()
     }
 
     pub fn resource_mut<T: Resource>(&self) -> RefMut<'_, T> {
         self.resources.resource_mut::<T>()
-    }
-
-    pub fn resource_ref(&self, type_id: &ResourceType) -> &Rc<RefCell<Box<dyn Resource>>> {
-        self.resources.resource_ref(type_id)
     }
 
     pub fn entities(&self) -> Ref<'_, EntityRegistry> {
@@ -83,10 +70,6 @@ impl World {
         self.entities.borrow_mut()
     }
 
-    pub fn entities_ref(&self) -> &Rc<RefCell<EntityRegistry>> {
-        &self.entities
-    }
-
     pub fn archetypes(&self) -> Ref<'_, ArchetypeManager> {
         self.archetypes.borrow()
     }
@@ -95,16 +78,26 @@ impl World {
         self.archetypes.borrow_mut()
     }
 
-    pub fn archetypes_ref(&self) -> &Rc<RefCell<ArchetypeManager>> {
-        &self.archetypes
-    }
-
     pub fn state<T: State>(&self) -> Ref<'_, T> {
         self.states.get::<T>()
     }
 
     pub fn state_mut<T: State>(&self) -> RefMut<'_, T> {
         self.states.get_mut::<T>()
+    }
+}
+
+impl World {
+    pub fn register<T: Component>(&mut self) {
+        self.components.register::<T>();
+    }
+
+    pub fn insert_resource<T: Resource>(&mut self, resource: T) {
+        self.resources.register(resource);
+    }
+
+    pub fn insert_state<T: State>(&mut self, state: T, interval: ResetInterval) {
+        self.states.register(state, interval);
     }
 }
 

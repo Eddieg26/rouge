@@ -94,11 +94,12 @@ impl Fetch for EntityId {
     }
 }
 
-impl<T: Component> BaseFetch for T {}
+impl<T: Component> BaseFetch for &T {}
+impl<T: Component> BaseFetch for &mut T {}
 impl<T: Component> BaseFetch for Write<T> {}
 impl<T: Component + Copy> BaseFetch for Copied<T> {}
 
-impl<T: Component> Fetch for T {
+impl<T: Component> Fetch for &T {
     type Type<'a> = Ref<'a, T>;
 
     fn type_id() -> Option<ComponentType> {
@@ -108,6 +109,25 @@ impl<T: Component> Fetch for T {
     fn get(world: &World, id: EntityId) -> Self::Type<'_> {
         let registry = world.components::<T>();
         let component = Ref::map(registry, |r| r.get(&id).unwrap());
+
+        component
+    }
+
+    fn contains(world: &World, id: &EntityId) -> bool {
+        world.components::<T>().contains(id)
+    }
+}
+
+impl<T: Component> Fetch for &mut T {
+    type Type<'a> = RefMut<'a, T>;
+
+    fn type_id() -> Option<ComponentType> {
+        Some(TypeId::of::<T>().into())
+    }
+
+    fn get(world: &World, id: EntityId) -> Self::Type<'_> {
+        let registry = world.components_mut::<T>();
+        let component = RefMut::map(registry, |r| r.get_mut(&id).unwrap());
 
         component
     }

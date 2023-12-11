@@ -1,2 +1,3 @@
-pub mod gpu;
+pub mod device;
+pub mod surface;
 pub mod vertex;

@@ -1,12 +1,12 @@
 use crate::graphics::{
-    core::gpu::GpuInstance,
+    core::device::RenderDevice,
     resources::{buffer::Buffer, texture::Texture, BufferId, GraphicsResources, TextureId},
     state::RenderState,
 };
 use std::collections::HashMap;
 
 pub struct RenderContext<'a> {
-    gpu: &'a GpuInstance,
+    device: &'a RenderDevice,
     state: &'a RenderState,
     resources: &'a GraphicsResources,
     textures: &'a HashMap<TextureId, Box<dyn Texture>>,
@@ -16,7 +16,7 @@ pub struct RenderContext<'a> {
 
 impl<'a> RenderContext<'a> {
     pub fn new(
-        gpu: &'a GpuInstance,
+        device: &'a RenderDevice,
         state: &'a RenderState,
         resources: &'a GraphicsResources,
         textures: &'a HashMap<TextureId, Box<dyn Texture>>,
@@ -24,7 +24,7 @@ impl<'a> RenderContext<'a> {
         render_target: &'a wgpu::TextureView,
     ) -> RenderContext<'a> {
         RenderContext {
-            gpu,
+            device,
             state,
             resources,
             textures,
@@ -33,8 +33,8 @@ impl<'a> RenderContext<'a> {
         }
     }
 
-    pub fn gpu(&self) -> &GpuInstance {
-        self.gpu
+    pub fn device(&self) -> &RenderDevice {
+        self.device
     }
 
     pub fn state(&self) -> &RenderState {
@@ -64,7 +64,7 @@ impl<'a> RenderContext<'a> {
 }
 
 pub struct RenderUpdateContext<'a> {
-    gpu: &'a GpuInstance,
+    device: &'a RenderDevice,
     resources: &'a GraphicsResources,
     textures: &'a HashMap<TextureId, Box<dyn Texture>>,
     buffers: &'a HashMap<BufferId, Buffer>,
@@ -72,21 +72,21 @@ pub struct RenderUpdateContext<'a> {
 
 impl<'a> RenderUpdateContext<'a> {
     pub fn new(
-        gpu: &'a GpuInstance,
+        device: &'a RenderDevice,
         resources: &'a GraphicsResources,
         textures: &'a HashMap<TextureId, Box<dyn Texture>>,
         buffers: &'a HashMap<BufferId, Buffer>,
     ) -> RenderUpdateContext<'a> {
         RenderUpdateContext {
-            gpu,
+            device,
             resources,
             textures,
             buffers,
         }
     }
 
-    pub fn gpu(&self) -> &GpuInstance {
-        self.gpu
+    pub fn device(&self) -> &RenderDevice {
+        self.device
     }
 
     pub fn resources(&self) -> &GraphicsResources {

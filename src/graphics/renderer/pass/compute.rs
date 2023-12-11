@@ -174,22 +174,21 @@ impl ComputeSubpass {
         let bind_groups = layout_entries
             .iter()
             .map(|l| {
-                let layout =
-                    ctx.gpu()
-                        .device()
-                        .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                            entries: l.as_slice(),
-                            label: None,
-                        });
-
-                let bind_group = ctx
-                    .gpu()
-                    .device()
-                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                let layout = ctx.device().inner().create_bind_group_layout(
+                    &wgpu::BindGroupLayoutDescriptor {
+                        entries: l.as_slice(),
                         label: None,
-                        layout: &layout,
-                        entries: &[],
-                    });
+                    },
+                );
+
+                let bind_group =
+                    ctx.device()
+                        .inner()
+                        .create_bind_group(&wgpu::BindGroupDescriptor {
+                            label: None,
+                            layout: &layout,
+                            entries: &[],
+                        });
 
                 (layout, bind_group)
             })
@@ -197,8 +196,8 @@ impl ComputeSubpass {
 
         let pipeline_layout = if bind_groups.len() > 0 {
             Some(
-                ctx.gpu()
-                    .device()
+                ctx.device()
+                    .inner()
                     .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                         label: None,
                         bind_group_layouts: bind_groups
@@ -214,8 +213,8 @@ impl ComputeSubpass {
         };
 
         let pipeline =
-            ctx.gpu()
-                .device()
+            ctx.device()
+                .inner()
                 .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
                     label: None,
                     entry_point: &self.entry,

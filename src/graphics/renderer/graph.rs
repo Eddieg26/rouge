@@ -1,7 +1,7 @@
 use crate::{
-    ecs::World,
+    ecs::{Resource, World},
     graphics::{
-        core::gpu::GpuInstance,
+        core::{device::RenderDevice, surface::RenderSurface},
         resources::{
             buffer::{Buffer, BufferInfo},
             texture::{Texture, Texture2d, TextureDesc},
@@ -10,7 +10,7 @@ use crate::{
         state::RenderState,
     },
 };
-use std::{collections::HashMap, rc::Rc};
+use std::collections::HashMap;
 
 use super::{
     context::{RenderContext, RenderUpdateContext},
@@ -50,14 +50,13 @@ impl RenderGraph {
         }
     }
 
-    #[allow(dead_code)]
-    pub(crate) fn build(&mut self, gpu: Rc<GpuInstance>) {
+    pub fn build(&mut self, device: &RenderDevice) {
         self.sort();
 
         for (id, info) in &self.texture_infos {
             let texture: Box<dyn Texture> = match info.dimension {
                 wgpu::TextureDimension::D1 => todo!(),
-                wgpu::TextureDimension::D2 => Box::new(Texture2d::from_desc(gpu.device(), info)),
+                wgpu::TextureDimension::D2 => Box::new(Texture2d::from_desc(device.inner(), info)),
                 wgpu::TextureDimension::D3 => todo!(),
             };
 
@@ -65,7 +64,7 @@ impl RenderGraph {
         }
 
         for (id, info) in &self.buffer_infos {
-            let buffer = Buffer::from_info(gpu.device(), info);
+            let buffer = Buffer::from_info(device.inner(), info);
 
             self.buffers.insert(*id, buffer);
         }
@@ -177,13 +176,15 @@ impl RenderGraph {
         })
     }
 
-    pub fn update(&mut self, gpu: &GpuInstance, resources: &GraphicsResources) {
+    pub fn update(&mut self, world: &World) {
         if self.is_dirty {
             self.sort();
             self.is_dirty = false;
         }
+        let resources = world.resource::<GraphicsResources>();
+        let device = world.resource::<RenderDevice>();
 
-        let ctx = RenderUpdateContext::new(gpu, resources, &self.textures, &self.buffers);
+        let ctx = RenderUpdateContext::new(&device, &resources, &self.textures, &self.buffers);
 
         for node in &mut self.nodes {
             node.update(&ctx);
@@ -193,28 +194,43 @@ impl RenderGraph {
     pub fn execute(&self, world: &World) -> Result<(), String> {
         let graphics = world.resource::<GraphicsResources>();
         let state = world.state::<RenderState>();
-        let gpu = graphics.gpu();
+        let device = world.resource::<RenderDevice>();
+        let surface = world.resource::<RenderSurface>();
 
-        let surface = gpu
-            .surface()
-            .get_current_texture()
-            .map_err(|e| e.to_string())?;
+        let surface = surface.current_texture().map_err(|e| e.to_string())?;
 
         let view = surface
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
 
-        let ctx = RenderContext::new(gpu, &state, &graphics, &self.textures, &self.buffers, &view);
-        let mut encoder = self.create_encoder(gpu.device());
+        let ctx = RenderContext::new(
+            &device,
+            &state,
+            &graphics,
+            &self.textures,
+            &self.buffers,
+            &view,
+        );
+        let mut encoder = self.create_encoder(device.inner());
 
         for node in &self.nodes {
             node.execute(&ctx, &mut encoder);
         }
 
-        gpu.queue().submit(std::iter::once(encoder.finish()));
+        device.queue().submit(std::iter::once(encoder.finish()));
 
         surface.present();
 
         Ok(())
+    }
+}
+
+impl Resource for RenderGraph {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
     }
 }

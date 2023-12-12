@@ -1,12 +1,13 @@
 use self::plugin::Plugin;
-use crate::ecs::{Component, ResetInterval, Resource, State, World};
+use crate::ecs::{world::Event, Component, ResetInterval, Resource, State, World};
+use std::collections::HashSet;
 
 pub mod plugin;
 
 pub type Runner = Box<dyn Fn(Game)>;
 
 pub struct Game {
-    runner: Option<Runner>,
+    runner: Runner,
     world: World,
     plugins: Vec<Box<dyn Plugin>>,
 }
@@ -14,8 +15,16 @@ pub struct Game {
 impl Game {
     pub fn new() -> Game {
         Game {
-            runner: None,
-            world: World::new(),
+            runner: Box::new(default_runner),
+            world: World::empty(),
+            plugins: Vec::new(),
+        }
+    }
+
+    fn empty() -> Game {
+        Game {
+            runner: Box::new(default_runner),
+            world: World::empty(),
             plugins: Vec::new(),
         }
     }
@@ -44,8 +53,17 @@ impl Game {
         self
     }
 
+    pub fn observe<T: Event>(
+        &mut self,
+        observer: impl Fn(&[T::Data], &World) + 'static,
+    ) -> &mut Self {
+        self.world.observe::<T>(observer);
+
+        self
+    }
+
     pub fn with_runner<T: Fn(Game) + 'static>(&mut self, runner: T) -> &mut Self {
-        self.runner = Some(Box::new(runner));
+        self.runner = Box::new(runner);
 
         self
     }
@@ -54,9 +72,13 @@ impl Game {
         &self.world
     }
 
-    pub fn run(mut self) {
+    pub fn run(&mut self) {
         self.run_plugins();
-        (self.runner.take().unwrap())(self);
+
+        let mut app = std::mem::replace(self, Self::empty());
+        let runner = std::mem::replace(&mut app.runner, Box::new(default_runner));
+
+        (runner)(app);
     }
 
     pub fn update(&mut self) -> Option<()> {
@@ -67,8 +89,9 @@ impl Game {
 impl Game {
     fn run_plugins(&mut self) {
         let mut plugins = vec![];
+        let mut inserted = HashSet::new();
         while let Some(plugin) = self.plugins.pop() {
-            plugins.append(&mut Self::get_recursive_plugins(plugin))
+            plugins.append(&mut Self::get_recursive_plugins(plugin, &mut inserted))
         }
         plugins.reverse();
 
@@ -85,13 +108,25 @@ impl Game {
         }
     }
 
-    fn get_recursive_plugins(plugin: Box<dyn Plugin>) -> Vec<Box<dyn Plugin>> {
+    fn get_recursive_plugins(
+        plugin: Box<dyn Plugin>,
+        inserted: &mut HashSet<String>,
+    ) -> Vec<Box<dyn Plugin>> {
         let dependencies = plugin.dependencies();
         let mut plugins = vec![plugin];
         for plugin in dependencies {
-            plugins.append(&mut Self::get_recursive_plugins(plugin));
+            if inserted.contains(plugin.name()) {
+                continue;
+            }
+
+            inserted.insert(plugin.name().to_string());
+            plugins.append(&mut Self::get_recursive_plugins(plugin, inserted));
         }
 
         plugins
     }
+}
+
+fn default_runner(mut game: Game) {
+    game.update();
 }

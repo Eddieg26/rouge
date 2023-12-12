@@ -128,11 +128,22 @@ impl EventManager {
             .observe(observer);
     }
 
-    pub fn dispatch(&mut self, world: &mut World) {
+    pub fn dispatch(&mut self, world: &World) {
         let dispatchers = self.sort_dispatchers();
 
         for (_, dispatcher) in dispatchers {
             dispatcher.dispatch(world);
+        }
+    }
+
+    pub fn dispatch_type<T: Event>(&mut self, world: &World) {
+        let type_id = TypeId::of::<T>();
+        if let Some(dispatcher) = self.events.get_mut(&type_id) {
+            dispatcher
+                .as_any_mut()
+                .downcast_mut::<EventDispatcher<T::Data, T>>()
+                .unwrap()
+                .dispatch(world);
         }
     }
 

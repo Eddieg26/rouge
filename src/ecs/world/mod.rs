@@ -29,13 +29,15 @@ pub struct World {
 }
 
 impl World {
-    pub fn new() -> World {
+    pub fn empty() -> World {
         let entities = Rc::new(RefCell::new(EntityRegistry::new()));
         let archetypes = Rc::new(RefCell::new(ArchetypeManager::new()));
+        let mut resources = ResourceManager::new();
+        resources.register(EventManager::new());
 
         World {
             components: ComponentManager::new(),
-            resources: ResourceManager::new(),
+            resources,
             entities,
             archetypes,
             states: StateManager::new(),
@@ -102,12 +104,19 @@ impl World {
 }
 
 impl World {
-    pub fn add_event<T: Event>(&self, event: T) {
-        self.resource_mut::<EventManager>().add(event);
+    pub fn observe<E: Event>(&self, observer: impl Fn(&[E::Data], &World) + 'static) -> &Self {
+        self.resource_mut::<EventManager>().observe::<E>(observer);
+        self
     }
 
-    pub fn spawn(&self, entity: CreateEntity) {
+    pub fn add_event<E: Event>(&self, event: E) -> &Self {
+        self.resource_mut::<EventManager>().add(event);
+        self
+    }
+
+    pub fn spawn(&self, entity: CreateEntity) -> &Self {
         self.resource_mut::<EventManager>().add(entity);
+        self
     }
 
     pub fn spawn_empty(&self) -> EntityId {
@@ -117,17 +126,29 @@ impl World {
         id
     }
 
-    pub fn destroy(&self, id: &EntityId) {
+    pub fn destroy(&self, id: &EntityId) -> &Self {
         let event = DestroyEntity::new(*id);
         self.resource_mut::<EventManager>().add(event);
+        self
     }
 
-    pub fn remove<T: Component>(&self, _id: &EntityId) {
-        let event = RemoveComponent::<T>::new(*_id);
+    pub fn remove<C: Component>(&self, _id: &EntityId) -> &Self {
+        let event = RemoveComponent::<C>::new(*_id);
         self.resource_mut::<EventManager>().add(event);
+        self
     }
 
     pub fn has<T: Component>(&self, id: &EntityId) -> bool {
         self.components::<T>().get(id).is_some()
+    }
+
+    pub fn dispatch(&self) -> &Self {
+        self.resource_mut::<EventManager>().dispatch(self);
+        self
+    }
+
+    pub fn dispatch_type<E: Event>(&self) -> &Self {
+        self.resource_mut::<EventManager>().dispatch_type::<E>(self);
+        self
     }
 }

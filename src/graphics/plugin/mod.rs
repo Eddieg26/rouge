@@ -1,3 +1,5 @@
+use self::window::events::WindowResized;
+
 use super::{
     core::{device::RenderDevice, surface::RenderSurface},
     renderer::graph::RenderGraph,
@@ -30,6 +32,16 @@ impl Plugin for GraphicsPlugin {
         game.add_resource(RenderGraph::new());
         game.add_resource(surface);
         game.add_resource(device);
+        game.observe::<WindowResized>(|sizes, world| {
+            let event = sizes.last().unwrap();
+            if event.size.width == 0 || event.size.height == 0 {
+                return;
+            }
+            let surface = world.resource::<RenderSurface>();
+            let device = world.resource::<RenderDevice>();
+
+            surface.configure(device.inner(), event.size);
+        });
     }
 
     fn finish(&self, game: &mut crate::game::Game) {
@@ -38,6 +50,6 @@ impl Plugin for GraphicsPlugin {
     }
 
     fn dependencies(&self) -> Vec<Box<dyn Plugin>> {
-        vec![Box::new(window::WindowPlugin)]
+        vec![Box::new(window::WindowPlugin::default())]
     }
 }

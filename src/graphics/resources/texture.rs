@@ -1,6 +1,106 @@
 pub type Dimension = wgpu::TextureDimension;
 pub type Format = wgpu::TextureFormat;
 
+pub trait BytesPerRow {
+    fn bytes_per_row(&self) -> u32;
+}
+
+impl BytesPerRow for Format {
+    fn bytes_per_row(&self) -> u32 {
+        match self {
+            Format::R8Unorm
+            | Format::R8Snorm
+            | Format::R8Uint
+            | Format::R8Sint
+            | Format::Rg8Unorm
+            | Format::Rg8Snorm
+            | Format::Rg8Uint
+            | Format::Rg8Sint
+            | Format::Stencil8 => 1,
+
+            Format::R16Uint
+            | Format::R16Sint
+            | Format::R16Float
+            | Format::R16Unorm
+            | Format::R16Snorm
+            | Format::Depth16Unorm => 2,
+
+            Format::Depth24Plus => 3,
+
+            Format::Depth32Float
+            | Format::EacR11Unorm
+            | Format::EacR11Snorm
+            | Format::Etc2Rgb8Unorm
+            | Format::Etc2Rgb8UnormSrgb
+            | Format::Etc2Rgb8A1Unorm
+            | Format::Etc2Rgb8A1UnormSrgb
+            | Format::Depth24PlusStencil8
+            | Format::R32Uint
+            | Format::R32Sint
+            | Format::R32Float
+            | Format::Rg16Uint
+            | Format::Rg16Sint
+            | Format::Rg16Float
+            | Format::Rgba8Unorm
+            | Format::Rgba8UnormSrgb
+            | Format::Rgba8Snorm
+            | Format::Rgba8Uint
+            | Format::Rgba8Sint
+            | Format::Bgra8Unorm
+            | Format::Bgra8UnormSrgb
+            | Format::Rgb10a2Unorm
+            | Format::Rg11b10Float
+            | Format::Rg16Unorm
+            | Format::Rg16Snorm
+            | Format::Rgb9e5Ufloat
+            | Format::Bc1RgbaUnorm
+            | Format::Bc1RgbaUnormSrgb
+            | Format::Bc4RUnorm
+            | Format::Bc4RSnorm
+            | Format::Rgb10a2Uint => 4,
+
+            Format::Depth32FloatStencil8 => 5,
+
+            Format::Rg32Uint
+            | Format::Rg32Sint
+            | Format::Rg32Float
+            | Format::Rgba16Uint
+            | Format::Rgba16Sint
+            | Format::Rgba16Float
+            | Format::Rgba16Unorm
+            | Format::Rgba16Snorm
+            | Format::EacRg11Unorm
+            | Format::EacRg11Snorm => 8,
+
+            Format::Bc2RgbaUnorm
+            | Format::Bc3RgbaUnorm
+            | Format::Bc5RgUnorm
+            | Format::Bc6hRgbUfloat
+            | Format::Bc7RgbaUnorm
+            | Format::Bc5RgSnorm
+            | Format::Bc7RgbaUnormSrgb
+            | Format::Rgba32Uint
+            | Format::Rgba32Sint
+            | Format::Rgba32Float
+            | Format::Bc2RgbaUnormSrgb
+            | Format::Bc3RgbaUnormSrgb
+            | Format::Bc6hRgbFloat
+            | Format::Etc2Rgba8Unorm
+            | Format::Etc2Rgba8UnormSrgb => 16,
+
+            Format::Astc { channel, .. } => {
+                let bytes_per_block = 16;
+                let bytes_per_channel = match channel {
+                    wgpu::AstcChannel::Unorm => 1,
+                    wgpu::AstcChannel::UnormSrgb => 1,
+                    wgpu::AstcChannel::Hdr => 2,
+                };
+                bytes_per_block * bytes_per_channel
+            }
+        }
+    }
+}
+
 pub trait ToTextureViewDimension {
     fn to_texture_view_dimension(&self) -> wgpu::TextureViewDimension;
 }
@@ -118,13 +218,10 @@ pub struct TextureInfo {
 }
 
 impl TextureInfo {
-    pub fn white(format: Format, width: u32, height: u32) -> Self {
-        let pixels = match format {
-            Format::Rgba8UnormSrgb => vec![255, 255, 255, 255],
-            Format::Rgba8Unorm => vec![255, 255, 255, 255],
-            Format::Rgba32Float => vec![255, 255, 255, 255],
-            _ => panic!("Unsupported format: {:?}", format),
-        };
+    pub fn white(width: u32, height: u32) -> Self {
+        let format = Format::Rgba8UnormSrgb;
+        let bytes_per_row = format.bytes_per_row();
+        let pixels = vec![255; (width * height * bytes_per_row) as usize];
 
         Self {
             width,
@@ -139,13 +236,10 @@ impl TextureInfo {
         }
     }
 
-    pub fn black(format: Format, width: u32, height: u32) -> Self {
-        let pixels = match format {
-            Format::Rgba8UnormSrgb => vec![0, 0, 0, 255],
-            Format::Rgba8Unorm => vec![0, 0, 0, 255],
-            Format::Rgba32Float => vec![0, 0, 0, 255],
-            _ => panic!("Unsupported format: {:?}", format),
-        };
+    pub fn black(width: u32, height: u32) -> Self {
+        let format = Format::Rgba8UnormSrgb;
+        let bytes_per_row = format.bytes_per_row();
+        let pixels = vec![0; (width * height * bytes_per_row) as usize];
 
         Self {
             width,
@@ -160,13 +254,37 @@ impl TextureInfo {
         }
     }
 
-    pub fn gray(format: Format, width: u32, height: u32) -> Self {
-        let pixels = match format {
-            Format::Rgba8UnormSrgb => vec![128, 128, 128, 255],
-            Format::Rgba8Unorm => vec![128, 128, 128, 255],
-            Format::Rgba32Float => vec![128, 128, 128, 255],
-            _ => panic!("Unsupported format: {:?}", format),
-        };
+    pub fn gray(width: u32, height: u32) -> Self {
+        let format = Format::Rgba8UnormSrgb;
+        let bytes_per_row = format.bytes_per_row();
+        let pixels = vec![128; (width * height * bytes_per_row) as usize];
+
+        Self {
+            width,
+            height,
+            depth: 1,
+            dimension: Dimension::D2,
+            format,
+            filter_mode: FilterMode::Point,
+            wrap_mode: WrapMode::Clamp,
+            mipmaps: false,
+            pixels,
+        }
+    }
+
+    pub fn red(width: u32, height: u32) -> Self {
+        let format = Format::Rgba8UnormSrgb;
+        let bytes_per_row = format.bytes_per_row();
+        let mut pixels = vec![0; (width * height * bytes_per_row) as usize];
+        for x in 0..width {
+            for y in 0..height {
+                let index = (x + y * width) as usize;
+                pixels[index * 4 + 0] = 255;
+                pixels[index * 4 + 1] = 0;
+                pixels[index * 4 + 2] = 0;
+                pixels[index * 4 + 3] = 255;
+            }
+        }
 
         Self {
             width,
@@ -264,11 +382,17 @@ impl Texture2d {
     }
 
     pub fn from_info(device: &wgpu::Device, queue: &wgpu::Queue, info: &TextureInfo) -> Texture2d {
+        let mip_levels = if info.mipmaps {
+            let size = std::cmp::max(info.width, info.height);
+            (size as f32).log2().floor() as u32 + 1
+        } else {
+            1
+        };
         let gpu_texture = device.create_texture(&wgpu::TextureDescriptor {
             dimension: wgpu::TextureDimension::D2,
             format: info.format,
             label: None,
-            mip_level_count: if info.mipmaps { 1 } else { 0 },
+            mip_level_count: mip_levels,
             sample_count: 1,
             size: wgpu::Extent3d {
                 depth_or_array_layers: 1,
@@ -289,7 +413,7 @@ impl Texture2d {
             &info.pixels,
             wgpu::ImageDataLayout {
                 offset: 0,
-                bytes_per_row: Some(info.width * 4),
+                bytes_per_row: Some(info.format.bytes_per_row() * info.width),
                 rows_per_image: Some(info.height),
             },
             wgpu::Extent3d {
@@ -299,7 +423,20 @@ impl Texture2d {
             },
         );
 
-        let view = gpu_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let view = gpu_texture.create_view(&wgpu::TextureViewDescriptor {
+            array_layer_count: Some(info.depth),
+            aspect: wgpu::TextureAspect::All,
+            base_array_layer: 0,
+            base_mip_level: 0,
+            dimension: Some(match info.dimension {
+                wgpu::TextureDimension::D1 => wgpu::TextureViewDimension::D1,
+                wgpu::TextureDimension::D2 => wgpu::TextureViewDimension::D2,
+                wgpu::TextureDimension::D3 => wgpu::TextureViewDimension::D3,
+            }),
+            format: Some(info.format),
+            mip_level_count: Some(mip_levels),
+            label: None,
+        });
 
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: None,

@@ -1,5 +1,5 @@
 use game::Game;
-use graphics::plugin::GraphicsPlugin;
+use graphics::{plugin::GraphicsPlugin, renderer::simple::SimpleRendererPlugin};
 
 pub mod ecs;
 pub mod game;
@@ -8,5 +8,5 @@ pub mod primitives;
 pub mod tree;
 
 fn main() {
-    Game::new().add_plugin(GraphicsPlugin).run();
+    Game::new().add_plugin(SimpleRendererPlugin).run();
 }

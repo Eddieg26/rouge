@@ -8,12 +8,15 @@ use crate::ecs::{resource::ResourceId, Resource};
 use std::collections::HashMap;
 
 pub mod buffer;
+pub mod material;
 pub mod mesh;
+pub mod shader;
 pub mod texture;
 
 pub type BufferId = ResourceId;
 pub type MeshId = ResourceId;
 pub type TextureId = ResourceId;
+pub type MaterialId = ResourceId;
 
 pub struct GraphicsResources {
     textures: HashMap<TextureId, Box<dyn Texture>>,

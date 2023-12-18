@@ -10,6 +10,8 @@ use crate::{
     graphics::resources::material::{BlendMode, ShaderModel},
 };
 
+pub mod nodes;
+
 pub type NodeId = ResourceId;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -91,26 +93,6 @@ impl Attribute {
             (Attribute::Color, Attribute::Vec2) => format!("{}.rg", name),
             (Attribute::Color, Attribute::Vec3) => format!("{}.rgb", name),
             (Attribute::Color, Attribute::Vec4) => format!("{}.rgba", name),
-            (Attribute::Bool, Attribute::Bool) => format!("{}", name),
-            (Attribute::Texture2D, Attribute::Float) => {
-                format!("textureSample({}, {}_sampler).r", name, name)
-            }
-            (Attribute::Texture2D, Attribute::Vec2) => {
-                format!("textureSample({}, {}_sampler).rg", name, name)
-            }
-            (Attribute::Texture2D, Attribute::Vec3) => {
-                format!("textureSample({}, {}_sampler).rgb", name, name)
-            }
-            (Attribute::Texture2D, Attribute::Vec4) => {
-                format!("textureSample({}, {}_sampler).rgba", name, name)
-            }
-            (Attribute::Texture2D, Attribute::Color) => {
-                format!("textureSample({}, {}_sampler).rgba", name, name)
-            }
-            (Attribute::Texture2D, Attribute::Texture2D) => format!("{}", name),
-            (Attribute::Texture3D, Attribute::Texture3D) => format!("{}", name),
-            (Attribute::Texture2DArray, Attribute::Texture2DArray) => format!("{}", name),
-            (Attribute::CubeMap, Attribute::CubeMap) => format!("{}", name),
             _ => panic!("Cannot cast {:?} to {:?}", self, other),
         }
     }
@@ -212,13 +194,15 @@ impl ShaderOutput {
 pub struct NodeInput {
     name: String,
     attribute: Attribute,
+    index: usize,
 }
 
 impl NodeInput {
-    pub fn new(name: &str, attribute: Attribute) -> NodeInput {
+    pub fn new(name: &str, attribute: Attribute, index: usize) -> NodeInput {
         NodeInput {
             name: name.to_string(),
             attribute,
+            index,
         }
     }
 
@@ -228,6 +212,10 @@ impl NodeInput {
 
     pub fn attribute(&self) -> &Attribute {
         &self.attribute
+    }
+
+    pub fn index(&self) -> usize {
+        self.index
     }
 
     pub fn cast(&self, attribute: &Attribute) -> String {
@@ -489,8 +477,7 @@ impl ShaderGraph {
         while !nodes.is_empty() {
             let removed = nodes
                 .iter()
-                .enumerate()
-                .filter_map(|(index, node)| {
+                .filter_map(|node| {
                     let target_edges = self
                         .edges
                         .values()
@@ -498,7 +485,7 @@ impl ShaderGraph {
                         .collect_vec();
 
                     if target_edges.is_empty() {
-                        Some(index)
+                        Some(node.name())
                     } else {
                         if target_edges.iter().any(|edge| {
                             nodes
@@ -507,7 +494,7 @@ impl ShaderGraph {
                         }) {
                             None
                         } else {
-                            Some(index)
+                            Some(node.name())
                         }
                     }
                 })
@@ -517,7 +504,11 @@ impl ShaderGraph {
                 panic!("Cyclic dependency detected");
             }
 
-            for index in removed {
+            for name in &removed {
+                let index = nodes
+                    .iter()
+                    .position(|n| n.name() == *name)
+                    .expect("Node not found");
                 sorted.push(nodes.remove(index));
             }
         }
@@ -688,6 +679,7 @@ impl ShaderGraph {
             for edge in self.edges.values() {
                 if edge.target().node() == NodeId::from(node.name()) {
                     let source = edge.source();
+                    let slot = source.output();
                     let source_node = self
                         .nodes
                         .iter()
@@ -697,10 +689,12 @@ impl ShaderGraph {
                         .output(source.output())
                         .expect("Source output not found");
 
-                    let input = NodeInput::new(source.name(), source.attribute);
+                    let input = NodeInput::new(source.name(), source.attribute, slot);
                     inputs.push(input);
                 }
             }
+
+            inputs.sort_by(|a, b| a.index().cmp(&b.index()));
 
             fs_inner_block.push_str(&node.run(&inputs));
         }
@@ -785,7 +779,7 @@ impl ShaderOutputNode {
     pub fn new(name: &str) -> ShaderOutputNode {
         ShaderOutputNode {
             name: name.to_string(),
-            input: NodeInput::new(name, Attribute::Color),
+            input: NodeInput::new(name, Attribute::Color, 0),
         }
     }
 }

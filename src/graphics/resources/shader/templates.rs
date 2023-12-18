@@ -1,6 +1,7 @@
 use crate::graphics::resources::material::{
     BlendMode, InputNames, Material, ShaderInput, ShaderModel,
 };
+use itertools::Itertools;
 
 pub enum FieldKind {
     Scalar,
@@ -16,12 +17,24 @@ impl FieldKind {
     pub fn type_name(&self) -> &str {
         match self {
             FieldKind::Scalar => "f32",
-            FieldKind::Vec2 => "vec2f",
-            FieldKind::Vec3 => "vec3f",
-            FieldKind::Vec4 => "vec4f",
+            FieldKind::Vec2 => "vec2<f32>",
+            FieldKind::Vec3 => "vec3<f32>",
+            FieldKind::Vec4 => "vec4<f32>",
             FieldKind::Mat2 => "mat2x2f",
             FieldKind::Mat3 => "mat3x3f",
             FieldKind::Mat4 => "mat4x4f",
+        }
+    }
+
+    pub fn size(&self) -> u32 {
+        match self {
+            FieldKind::Scalar => 1,
+            FieldKind::Vec2 => 2,
+            FieldKind::Vec3 => 3,
+            FieldKind::Vec4 => 4,
+            FieldKind::Mat2 => 4,
+            FieldKind::Mat3 => 9,
+            FieldKind::Mat4 => 16,
         }
     }
 
@@ -33,17 +46,17 @@ impl FieldKind {
     ) -> Option<String> {
         match (dst, src) {
             (FieldKind::Scalar, FieldKind::Vec2) => Some(format!(
-                "{dst} = vec2<f32>({src}).x;\n",
+                "{dst} = ({src}).x;\n",
                 dst = dst_name,
                 src = src_name
             )),
             (FieldKind::Scalar, FieldKind::Vec3) => Some(format!(
-                "{dst} = vec3<f32>({src}).x;\n",
+                "{dst} = ({src}).x;\n",
                 dst = dst_name,
                 src = src_name
             )),
             (FieldKind::Scalar, FieldKind::Vec4) => Some(format!(
-                "{dst} = vec4<f32>({src}).x;\n",
+                "{dst} = ({src}).x;\n",
                 dst = dst_name,
                 src = src_name
             )),
@@ -122,12 +135,35 @@ impl FieldKind {
                 dst = dst_name,
                 src = src_name
             )),
+            (FieldKind::Mat2, FieldKind::Mat2) => {
+                Some(format!("{dst} = {src};\n", dst = dst_name, src = src_name))
+            }
+            (FieldKind::Mat3, FieldKind::Mat3) => {
+                Some(format!("{dst} = {src};\n", dst = dst_name, src = src_name))
+            }
+            (FieldKind::Mat4, FieldKind::Mat4) => {
+                Some(format!("{dst} = {src};\n", dst = dst_name, src = src_name))
+            }
+            (FieldKind::Vec4, FieldKind::Vec4) => {
+                Some(format!("{dst} = {src};\n", dst = dst_name, src = src_name))
+            }
+            (FieldKind::Vec3, FieldKind::Vec3) => {
+                Some(format!("{dst} = {src};\n", dst = dst_name, src = src_name))
+            }
+            (FieldKind::Vec2, FieldKind::Vec2) => {
+                Some(format!("{dst} = {src};\n", dst = dst_name, src = src_name))
+            }
+            (FieldKind::Scalar, FieldKind::Scalar) => {
+                Some(format!("{dst} = {src};\n", dst = dst_name, src = src_name))
+            }
+
             _ => None,
         }
     }
 }
 
-pub enum BuiltinName {
+pub enum Attribute {
+    Location(u32),
     VertexIndex,
     InstanceIndex,
     Position,
@@ -142,21 +178,22 @@ pub enum BuiltinName {
     NumWorkgroups,
 }
 
-impl BuiltinName {
-    pub fn name(&self) -> &str {
+impl Attribute {
+    pub fn name(&self) -> String {
         match self {
-            BuiltinName::VertexIndex => "@builtin(vertex_index)",
-            BuiltinName::InstanceIndex => "@builtin(instance_index)",
-            BuiltinName::Position => "@builtin(position)",
-            BuiltinName::FrontFacing => "@builtin(front_facing)",
-            BuiltinName::FragDepth => "@builtin(frag_depth)",
-            BuiltinName::SampleIndex => "@builtin(sample_index)",
-            BuiltinName::SampleMask => "@builtin(sample_mask)",
-            BuiltinName::LocalInvocationId => "@builtin(local_invocation_id)",
-            BuiltinName::LocalInvocationIndex => "@builtin(local_invocation_index)",
-            BuiltinName::GlobalInvocationId => "@builtin(global_invocation_id)",
-            BuiltinName::WorkgroupId => "@builtin(work_group_id)",
-            BuiltinName::NumWorkgroups => "@builtin(num_work_groups)",
+            Attribute::Location(idx) => format!("@location({})", idx),
+            Attribute::VertexIndex => String::from("@builtin(vertex_index)"),
+            Attribute::InstanceIndex => String::from("@builtin(instance_index)"),
+            Attribute::Position => String::from("@builtin(position)"),
+            Attribute::FrontFacing => String::from("@builtin(front_facing)"),
+            Attribute::FragDepth => String::from("@builtin(frag_depth)"),
+            Attribute::SampleIndex => String::from("@builtin(sample_index)"),
+            Attribute::SampleMask => String::from("@builtin(sample_mask)"),
+            Attribute::LocalInvocationId => String::from("@builtin(local_invocation_id)"),
+            Attribute::LocalInvocationIndex => String::from("@builtin(local_invocation_index)"),
+            Attribute::GlobalInvocationId => String::from("@builtin(global_invocation_id)"),
+            Attribute::WorkgroupId => String::from("@builtin(work_group_id)"),
+            Attribute::NumWorkgroups => String::from("@builtin(num_work_groups)"),
         }
     }
 }
@@ -164,15 +201,15 @@ impl BuiltinName {
 pub struct Field {
     pub name: String,
     pub kind: FieldKind,
-    pub builtin: Option<BuiltinName>,
+    pub attribute: Option<Attribute>,
 }
 
 impl Field {
-    pub fn new(name: impl Into<String>, kind: FieldKind, builtin: Option<BuiltinName>) -> Self {
+    pub fn new(name: impl Into<String>, kind: FieldKind, attribute: Option<Attribute>) -> Self {
         Self {
             name: name.into(),
             kind,
-            builtin,
+            attribute,
         }
     }
 
@@ -199,55 +236,55 @@ impl Uniform {
     }
 
     pub fn from_material(material: &Material) -> Uniform {
-        let mut uniform = Uniform::new("Material");
-        match material.shader_model() {
-            ShaderModel::Lit(model) => {
-                uniform.add_optional_input(InputNames::COLOR, &model.color);
-                uniform.add_optional_input(InputNames::NORMAL, &model.normal);
-                uniform.add_optional_input(InputNames::EMISSION, &model.emission);
-                uniform.add_optional_input(InputNames::METALLIC, &model.metallic);
-                uniform.add_optional_input(InputNames::ROUGHNESS, &model.roughness);
-                uniform.add_optional_input(InputNames::SPECULAR, &model.specular);
+        let mut uniform =
+            Uniform::new("Material").add_optional_input(InputNames::COLOR, material.color());
 
-                match model.blend_mode {
-                    BlendMode::Opaque => {}
-                    BlendMode::Transparent(input) => {
-                        uniform.add_optional_input(InputNames::SPECULAR, &input)
-                    }
-                }
+        match material.shader_model() {
+            ShaderModel::Lit {
+                normal,
+                specular,
+                metallic,
+                roughness,
+                emission,
+            } => {
+                uniform = uniform
+                    .add_optional_input(InputNames::NORMAL, normal)
+                    .add_optional_input(InputNames::EMISSION, emission)
+                    .add_optional_input(InputNames::METALLIC, metallic)
+                    .add_optional_input(InputNames::ROUGHNESS, roughness)
+                    .add_optional_input(InputNames::SPECULAR, specular);
             }
-            ShaderModel::Unlit(model) => {
-                uniform.add_optional_input(InputNames::COLOR, &model.color);
-                match model.blend_mode {
-                    BlendMode::Opaque => {}
-                    BlendMode::Transparent(input) => {
-                        uniform.add_optional_input(InputNames::SPECULAR, &input)
-                    }
-                }
+            ShaderModel::Unlit => {}
+        }
+
+        match material.blend_mode() {
+            BlendMode::Opaque => {}
+            BlendMode::Transparent(input) => {
+                uniform = uniform.add_optional_input(InputNames::OPACITY, &input);
             }
         }
 
         uniform
     }
 
-    fn add_optional_input(&mut self, name: &str, input: &ShaderInput) {
-        if let Some(field) = Field::from_input(name, input) {
-            self.add_field(&field.name, field.kind);
-        }
+    pub fn size(&self) -> u32 {
+        self.fields.iter().map(|f| f.kind.size()).sum()
     }
 
-    pub fn add_field(&mut self, name: &str, kind: FieldKind) -> &mut Self {
-        self.fields.push(Field::new(name, kind, None));
+    pub fn is_empty(&self) -> bool {
+        self.fields.is_empty()
+    }
+
+    fn add_optional_input(self, name: &str, input: &ShaderInput) -> Self {
+        if let Some(field) = Field::from_input(name, input) {
+            return self.add_field(&field.name, field.kind, None);
+        }
+
         self
     }
 
-    pub fn add_builtin_field(
-        &mut self,
-        name: &str,
-        kind: FieldKind,
-        builtin: BuiltinName,
-    ) -> &mut Self {
-        self.fields.push(Field::new(name, kind, Some(builtin)));
+    pub fn add_field(mut self, name: &str, kind: FieldKind, attribute: Option<Attribute>) -> Self {
+        self.fields.push(Field::new(name, kind, attribute));
         self
     }
 
@@ -265,16 +302,20 @@ impl Uniform {
 
     pub fn create_def(&self) -> String {
         let mut def = String::new();
-        if !self.fields.is_empty() {
+        if self.fields.is_empty() {
             return def;
         }
 
         def.push_str(&format!("struct {} {{\n", self.type_name));
         for field in &self.fields {
-            let builtin = field.builtin.as_ref().map(|b| b.name()).unwrap_or("");
+            let attribute = field
+                .attribute
+                .as_ref()
+                .map(|b| b.name())
+                .unwrap_or(String::new());
             def.push_str(&format!(
                 "{} {}: {};\n",
-                builtin,
+                attribute,
                 field.name,
                 field.kind.type_name()
             ));
@@ -285,19 +326,45 @@ impl Uniform {
     }
 
     pub fn create_binding(&self, group: u32, binding: u32, name: &str) -> String {
-        if !self.fields.is_empty() {
+        if self.fields.is_empty() {
             return String::new();
         }
 
         format!(
             r#"@group({}) @binding({})
-                {}: {};
+                var {}: {};
             "#,
             group, binding, name, self.type_name
         )
     }
+
+    pub fn create_field_values(&self, src: &str, dst: &str, fields: &[Field]) -> String {
+        if self.fields.is_empty() {
+            return String::new();
+        }
+
+        let mut values = String::new();
+
+        for field in fields {
+            if let Some(src_field) = self.field(&field.name) {
+                let src_name = format!("{}.{}", src, field.name);
+                let dst_name = format!("{}.{}", dst, field.name);
+                let value = FieldKind::convert(&src_field.kind, &field.kind, &src_name, &dst_name)
+                    .expect(&format!(
+                        "Could not convert {} field: {} to {}",
+                        field.name,
+                        src_field.kind.type_name(),
+                        field.kind.type_name()
+                    ));
+                values.push_str(&value);
+            }
+        }
+
+        values
+    }
 }
 
+#[derive(Clone)]
 pub struct TextureBinding(String);
 
 impl TextureBinding {
@@ -312,16 +379,16 @@ impl TextureBinding {
     pub fn create_binding(&self, group: u32, binding: u32) -> String {
         format!(
             r#"@group({}) @binding({})
-                var {}_texture: texture2d<f32>;
+                var {}_texture: texture_2d<f32>;
             "#,
             group, binding, self.0
         )
     }
 
     pub fn get_field_value(&self, uniform: &str, field: &Field) -> String {
-        let dst_name = format!("{}_{}", uniform, field.name);
+        let dst_name = format!("{}.{}", uniform, field.name);
         let src_name = format!(
-            "textureSample({name}_texture, {name}_sampler, input.uv.xy)",
+            "textureSample({name}_texture, {name}_sampler, in.uv.xy)",
             name = self.name()
         );
         let src_field = Field::new(&src_name, FieldKind::Vec4, None);
@@ -329,8 +396,46 @@ impl TextureBinding {
             .unwrap()
             .to_string()
     }
+
+    pub fn from_material(material: &Material) -> Vec<TextureBinding> {
+        let mut bindings = vec![];
+        bindings.push(Self::from_input(InputNames::COLOR, material.color()));
+        match material.shader_model() {
+            ShaderModel::Lit {
+                normal,
+                specular,
+                metallic,
+                roughness,
+                emission,
+            } => {
+                bindings.push(Self::from_input(InputNames::NORMAL, normal));
+                bindings.push(Self::from_input(InputNames::SPECULAR, specular));
+                bindings.push(Self::from_input(InputNames::METALLIC, metallic));
+                bindings.push(Self::from_input(InputNames::ROUGHNESS, roughness));
+                bindings.push(Self::from_input(InputNames::EMISSION, emission));
+            }
+            ShaderModel::Unlit => {}
+        }
+
+        match material.blend_mode() {
+            BlendMode::Opaque => {}
+            BlendMode::Transparent(opacity) => {
+                bindings.push(Self::from_input(InputNames::OPACITY, opacity));
+            }
+        }
+
+        bindings.iter().filter_map(|i| i.clone()).collect_vec()
+    }
+
+    pub fn from_input(name: &str, input: &ShaderInput) -> Option<TextureBinding> {
+        match input {
+            ShaderInput::Texture(_) => Some(TextureBinding(name.to_string())),
+            _ => None,
+        }
+    }
 }
 
+#[derive(Clone)]
 pub struct SamplerBinding(String);
 
 impl SamplerBinding {
@@ -350,6 +455,13 @@ impl SamplerBinding {
             group, binding, self.0
         )
     }
+
+    pub fn from_textures(textures: &[TextureBinding]) -> Vec<SamplerBinding> {
+        textures
+            .iter()
+            .map(|texture| SamplerBinding(texture.0.clone()))
+            .collect_vec()
+    }
 }
 
 pub struct ShaderBindGroup {
@@ -364,6 +476,17 @@ impl ShaderBindGroup {
             uniforms: Vec::new(),
             textures: Vec::new(),
             samplers: Vec::new(),
+        }
+    }
+
+    pub fn from_material(material: &Material) -> ShaderBindGroup {
+        let textures = TextureBinding::from_material(material);
+        let samplers = SamplerBinding::from_textures(&textures);
+
+        Self {
+            uniforms: vec![],
+            textures,
+            samplers,
         }
     }
 
@@ -394,58 +517,62 @@ impl ShaderBindGroup {
         &self.samplers
     }
 
-    pub fn create_def(&self) -> String {
-        let mut def = String::new();
-        for uniform in &self.uniforms {
-            def.push_str(&uniform.create_def());
-        }
-
-        def
+    fn texture(&self, name: &str) -> Option<&TextureBinding> {
+        self.textures.iter().find(|t| t.name() == name)
     }
 
-    pub fn create_bindings(&self, group: u32) -> String {
+    pub fn create_bindings(&self, group: u32, start_binding: u32) -> String {
         let mut bindings = String::new();
+        let mut bind_idx = start_binding;
+
         for uniform in &self.uniforms {
             bindings.push_str(&format!(
                 "{}",
-                uniform.create_binding(group, bindings.len() as u32, &uniform.type_name)
+                uniform.create_binding(group, bind_idx, &uniform.type_name)
             ));
+            bind_idx += 1;
         }
 
         for texture in &self.textures {
-            bindings.push_str(&format!(
-                "{}",
-                texture.create_binding(group, bindings.len() as u32)
-            ));
+            bindings.push_str(&format!("{}", texture.create_binding(group, bind_idx)));
+            bind_idx += 1;
         }
 
         for sampler in &self.samplers {
-            bindings.push_str(&format!(
-                "{}",
-                sampler.create_binding(group, bindings.len() as u32)
-            ));
+            bindings.push_str(&format!("{}", sampler.create_binding(group, bind_idx)));
+            bind_idx += 1;
         }
 
         bindings
     }
+
+    pub fn create_field_values(&self, name: &str, fields: &[Field]) -> String {
+        let mut values = String::new();
+
+        for field in fields {
+            if let Some(binding) = self.texture(&field.name) {
+                values.push_str(&binding.get_field_value(name, field))
+            }
+        }
+
+        values
+    }
 }
 
-pub fn vertex_input_struct() -> String {
-    String::from(
-        r#"struct VertexInput {
-            @location(0) normal: vec3<f32>;
-            @location(1) position: vec3<f32>;
-            @location(2) uv: vec2<f32>;
-        }"#,
-    )
-}
+pub mod common {
+    use super::{Attribute, FieldKind, Uniform};
 
-pub fn vertex_output_struct() -> String {
-    String::from(
-        r#"struct VertexOutput {
-            @builtin(position) position: vec4<f32>;
-            @location(0) normal: vec3<f32>;
-            @location(1) uv: vec2<f32>;
-        }"#,
-    )
+    pub fn vertex_input() -> Uniform {
+        Uniform::new("VertexInput")
+            .add_field("position", FieldKind::Vec3, Some(Attribute::Location(0)))
+            .add_field("normal", FieldKind::Vec3, Some(Attribute::Location(1)))
+            .add_field("uv", FieldKind::Vec2, Some(Attribute::Location(2)))
+    }
+
+    pub fn vertex_output() -> Uniform {
+        Uniform::new("VertexOutput")
+            .add_field("position", FieldKind::Vec4, Some(Attribute::Position))
+            .add_field("normal", FieldKind::Vec3, Some(Attribute::Location(0)))
+            .add_field("uv", FieldKind::Vec2, Some(Attribute::Location(1)))
+    }
 }

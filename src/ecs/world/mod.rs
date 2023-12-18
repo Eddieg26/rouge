@@ -2,7 +2,7 @@ use super::{
     archetype::ArchetypeManager,
     component::{manager::ComponentManager, registry::ComponentRegistry, Component},
     entity::registry::EntityRegistry,
-    resource::{manager::ResourceManager, Resource},
+    resource::{manager::ResourceManager, Res, Resource},
     state::StateManager,
     EntityId, ResetInterval, State,
 };
@@ -62,6 +62,12 @@ impl World {
 
     pub fn resource_mut<T: Resource>(&self) -> RefMut<'_, T> {
         self.resources.resource_mut::<T>()
+    }
+
+    pub fn resource_ref<T: Resource>(&self) -> Res<T> {
+        let type_id = std::any::TypeId::of::<T>().into();
+        let resource = self.resources.resource_ref(&type_id);
+        Res::new(&resource)
     }
 
     pub fn entities(&self) -> Ref<'_, EntityRegistry> {

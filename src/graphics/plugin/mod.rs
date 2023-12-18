@@ -1,5 +1,4 @@
 use self::window::events::WindowResized;
-
 use super::{
     core::{device::RenderDevice, surface::RenderSurface},
     renderer::graph::RenderGraph,
@@ -7,6 +6,7 @@ use super::{
 use crate::game::plugin::Plugin;
 use winit::window::Window;
 
+pub mod renderer;
 pub mod window;
 
 pub struct GraphicsPlugin;

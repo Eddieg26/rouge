@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     hash::{Hash, Hasher},
 };
 
@@ -334,14 +334,36 @@ impl Edge {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum DepthWrite {
+    Auto,
+    Enable,
+    Disable,
+}
+
 pub struct ShaderConfig {
     model: ShaderModel,
     blend_mode: BlendMode,
+    depth_write: DepthWrite,
+}
+
+impl Default for ShaderConfig {
+    fn default() -> Self {
+        Self {
+            model: ShaderModel::Unlit,
+            blend_mode: BlendMode::Opaque,
+            depth_write: DepthWrite::Auto,
+        }
+    }
 }
 
 impl ShaderConfig {
-    pub fn new(model: ShaderModel, blend_mode: BlendMode) -> ShaderConfig {
-        ShaderConfig { model, blend_mode }
+    pub fn new(model: ShaderModel, blend_mode: BlendMode, depth_write: DepthWrite) -> ShaderConfig {
+        ShaderConfig {
+            model,
+            blend_mode,
+            depth_write,
+        }
     }
 
     pub fn model(&self) -> &ShaderModel {
@@ -352,6 +374,10 @@ impl ShaderConfig {
         &self.blend_mode
     }
 
+    pub fn depth_write(&self) -> &DepthWrite {
+        &self.depth_write
+    }
+
     pub fn set_model(&mut self, model: ShaderModel) {
         self.model = model;
     }
@@ -359,9 +385,18 @@ impl ShaderConfig {
     pub fn set_blend_mode(&mut self, blend_mode: BlendMode) {
         self.blend_mode = blend_mode;
     }
+
+    pub fn set_depth_write(&mut self, depth_write: DepthWrite) {
+        self.depth_write = depth_write;
+    }
 }
 
-pub struct ShaderInfo;
+pub struct Shader {
+    module: wgpu::ShaderModule,
+    global_layout: wgpu::BindGroupLayout,
+    material_layout: wgpu::BindGroupLayout,
+    object_layout: wgpu::BindGroupLayout,
+}
 
 pub struct ShaderConstants;
 
@@ -384,10 +419,16 @@ pub struct ShaderGraph {
     outputs: Vec<ShaderOutput>,
 }
 
+impl Default for ShaderGraph {
+    fn default() -> Self {
+        Self::new(ShaderConfig::default())
+    }
+}
+
 impl ShaderGraph {
-    pub fn new() -> ShaderGraph {
+    pub fn new(config: ShaderConfig) -> ShaderGraph {
         ShaderGraph {
-            config: ShaderConfig::new(ShaderModel::Unlit, BlendMode::Opaque),
+            config,
             nodes: Vec::new(),
             edges: HashMap::new(),
             inputs: Vec::new(),
@@ -470,8 +511,46 @@ impl ShaderGraph {
         self.remove_node(name.into());
     }
 
+    fn purge(&self) -> Vec<&Box<dyn Node>> {
+        let mut marked_nodes = HashSet::new();
+
+        for output in &self.outputs {
+            let mut stack = vec![output.name()];
+            while let Some(name) = stack.pop() {
+                let node = self
+                    .nodes
+                    .iter()
+                    .find(|n| n.name() == name)
+                    .expect("Node not found");
+
+                if marked_nodes.contains(node.name()) {
+                    continue;
+                }
+
+                marked_nodes.insert(node.name().to_string());
+
+                for edge in self.edges.values() {
+                    if edge.target().node() == NodeId::from(node.name()) {
+                        stack.push(
+                            self.nodes
+                                .iter()
+                                .find(|n| NodeId::from(n.name()) == edge.source().node())
+                                .expect("Source node not found")
+                                .name(),
+                        );
+                    }
+                }
+            }
+        }
+
+        self.nodes
+            .iter()
+            .filter(|n| !marked_nodes.contains(n.name()))
+            .collect_vec()
+    }
+
     pub fn generate(&self) -> String {
-        let mut nodes = self.nodes.iter().collect_vec();
+        let mut nodes = self.purge();
         let mut sorted = vec![];
 
         while !nodes.is_empty() {

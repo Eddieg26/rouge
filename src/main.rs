@@ -7,7 +7,7 @@ use graphics::{
     resources::{
         material::{BlendMode, Material, ShaderInput, ShaderModel},
         shader::{
-            graph::{nodes::SampleTexture2D, Attribute, ShaderGraph, Slot},
+            graph::{nodes::SampleTexture2D, Attribute, ShaderConfig, ShaderGraph, Slot},
             unlit::UnlitShaderTemplate,
         },
         TextureId,
@@ -21,7 +21,7 @@ pub mod primitives;
 pub mod tree;
 
 fn main() {
-    let mut graph = ShaderGraph::new();
+    let mut graph = ShaderGraph::default();
     // graph.add_input("color", Attribute::Color);
     graph.add_input("texture", Attribute::Texture2D);
     graph.add_input("uv", Attribute::Vec2);

@@ -393,9 +393,9 @@ impl ShaderConfig {
 
 pub struct Shader {
     module: wgpu::ShaderModule,
-    global_layout: wgpu::BindGroupLayout,
     material_layout: wgpu::BindGroupLayout,
-    object_layout: wgpu::BindGroupLayout,
+    model: ShaderModel,
+    mode: BlendMode,
 }
 
 pub struct ShaderConstants;

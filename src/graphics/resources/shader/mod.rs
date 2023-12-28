@@ -1,181 +1,263 @@
-use itertools::Itertools;
-
-use super::{material::Material, texture::Texture, GraphicsResources, MaterialId, PipelineId};
-use std::collections::HashMap;
+use self::graph::{
+    attribute::{BufferProperty, PropertyBlock},
+    ShaderConstants,
+};
+use super::{
+    material::{BlendMode, Material, ShaderModel},
+    GpuResources,
+};
+use crate::graphics::core::vertex::{BaseVertex, Vertex};
 
 pub mod graph;
-pub mod lit;
-pub mod templates;
-pub mod unlit;
 
-pub trait ShaderTemplate {
-    const MATERIAL_BIND_GROUP: u32;
-    fn create_shader(device: &wgpu::Device, material: &Material) -> Shader;
+pub trait ShaderPipeline: 'static {}
+
+pub struct ShaderInfo<'a> {
+    pub model: ShaderModel,
+    pub mode: BlendMode,
+    pub module: wgpu::ShaderModule,
+    pub global_layout: &'a wgpu::BindGroupLayout,
+    pub object_layout: &'a wgpu::BindGroupLayout,
+    pub properties: &'a PropertyBlock,
 }
 
 pub struct Shader {
-    entry: String,
+    model: ShaderModel,
+    mode: BlendMode,
     module: wgpu::ShaderModule,
-    layout: wgpu::BindGroupLayout,
-    group_index: u32,
-    buffer_size: u32,
-    bind_groups: HashMap<MaterialId, wgpu::BindGroup>,
-    pipelines: HashMap<PipelineId, wgpu::RenderPipeline>,
+    material_layout: MaterialLayout,
+    pipeline_layout: wgpu::PipelineLayout,
 }
 
 impl Shader {
-    pub fn new(
-        entry: &str,
-        module: wgpu::ShaderModule,
-        layout: wgpu::BindGroupLayout,
-        group_index: u32,
-        buffer_size: u32,
-    ) -> Shader {
-        Shader {
-            entry: entry.to_string(),
+    pub fn new(device: &wgpu::Device, info: ShaderInfo) -> Shader {
+        let ShaderInfo {
             module,
-            layout,
-            group_index,
-            buffer_size,
-            bind_groups: HashMap::new(),
-            pipelines: HashMap::new(),
+            mode,
+            model,
+            global_layout,
+            object_layout,
+            properties,
+        } = info;
+
+        let inputs = properties.inputs();
+        let padded = BufferProperty::add_padding(inputs);
+        let buffer_size = padded.iter().map(|a| a.input().size()).sum::<u32>();
+        let mut entries = vec![];
+        if !inputs.is_empty() {
+            entries.push(wgpu::BindGroupLayoutEntry {
+                binding: ShaderConstants::MATERIAL_BINDING as u32,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: wgpu::BufferSize::new(buffer_size as u64),
+                },
+                count: None,
+            });
         }
-    }
 
-    fn contains(&self, id: &MaterialId) -> bool {
-        self.bind_groups.contains_key(id)
-    }
+        let textures = properties.textures();
+        for texture in textures {
+            entries.push(wgpu::BindGroupLayoutEntry {
+                binding: entries.len() as u32,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    multisampled: false,
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    view_dimension: texture.dimension(),
+                },
+                count: None,
+            });
+        }
 
-    pub fn pipeline(&self, id: &PipelineId) -> Option<&wgpu::RenderPipeline> {
-        self.pipelines.get(id)
-    }
+        for _ in textures {
+            entries.push(wgpu::BindGroupLayoutEntry {
+                binding: entries.len() as u32,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                count: None,
+            });
+        }
 
-    pub fn entry(&self) -> &str {
-        &self.entry
-    }
+        let material_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Material Bind Group Layout"),
+            entries: &entries,
+        });
 
-    pub fn buffer_size(&self) -> u32 {
-        self.buffer_size
+        let mut layouts = vec![];
+        layouts.insert(ShaderConstants::GLOBAL_BIND_GROUP, global_layout);
+        layouts.insert(ShaderConstants::OBJECT_BIND_GROUP, object_layout);
+        layouts.insert(ShaderConstants::MATERIAL_BIND_GROUP, &material_layout);
+
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Material Pipeline Layout"),
+            bind_group_layouts: &layouts,
+            push_constant_ranges: &[],
+        });
+
+        let material_layout = {
+            let buffer = if padded.is_empty() {
+                None
+            } else {
+                Some(device.create_buffer(&wgpu::BufferDescriptor {
+                    label: None,
+                    size: buffer_size as u64,
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                }))
+            };
+            MaterialLayout::new(material_layout, buffer, properties.clone())
+        };
+
+        Shader {
+            module,
+            material_layout,
+            pipeline_layout,
+            model,
+            mode,
+        }
     }
 
     pub fn module(&self) -> &wgpu::ShaderModule {
         &self.module
     }
 
-    pub fn bind_group(&self, id: &MaterialId) -> Option<&wgpu::BindGroup> {
-        self.bind_groups.get(id)
+    pub fn material_layout(&self) -> &MaterialLayout {
+        &self.material_layout
     }
 
-    pub fn create_buffer(&self, device: &wgpu::Device) -> wgpu::Buffer {
-        device.create_buffer(&wgpu::BufferDescriptor {
-            label: None,
-            size: self.buffer_size as u64,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        })
+    pub fn pipeline_layout(&self) -> &wgpu::PipelineLayout {
+        &self.pipeline_layout
+    }
+
+    pub fn model(&self) -> ShaderModel {
+        self.model
+    }
+
+    pub fn mode(&self) -> BlendMode {
+        self.mode
     }
 
     pub fn create_bind_group(
-        &mut self,
+        &self,
         device: &wgpu::Device,
-        resources: &GraphicsResources,
-        id: &MaterialId,
+        resources: &GpuResources,
         material: &Material,
-    ) {
-        if self.contains(id) {
-            return;
-        }
-
-        let textures = Shader::get_textures(material, resources);
+    ) -> Option<wgpu::BindGroup> {
         let mut entries = vec![];
 
-        let mut _buffer = None;
-        if self.buffer_size > 0 {
-            _buffer = Some(self.create_buffer(device));
+        if let Some(buffer) = &self.material_layout.buffer() {
             entries.push(wgpu::BindGroupEntry {
-                binding: entries.len() as u32,
+                binding: ShaderConstants::MATERIAL_BINDING as u32,
                 resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                    buffer: _buffer.as_ref().unwrap(),
+                    buffer,
                     offset: 0,
                     size: None,
                 }),
             });
         }
 
-        for texture in &textures {
-            entries.push(wgpu::BindGroupEntry {
-                binding: (entries.len() + 1) as u32,
-                resource: wgpu::BindingResource::TextureView(texture.view()),
-            });
+        let textures = material.textures();
+        for property in textures {
+            if let Some(texture) = resources.texture_view(&property.texture()) {
+                entries.push(wgpu::BindGroupEntry {
+                    binding: entries.len() as u32,
+                    resource: wgpu::BindingResource::TextureView(&texture),
+                });
+            }
         }
 
-        for texture in &textures {
-            entries.push(wgpu::BindGroupEntry {
-                binding: (entries.len() + 1) as u32,
-                resource: wgpu::BindingResource::Sampler(texture.sampler()),
-            });
+        for property in textures {
+            if let Some(sampler) = resources.sampler(&property.texture()) {
+                entries.push(wgpu::BindGroupEntry {
+                    binding: entries.len() as u32,
+                    resource: wgpu::BindingResource::Sampler(&sampler),
+                });
+            }
         }
 
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &self.layout,
+        Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Material Bind Group"),
+            layout: self.material_layout.layout(),
             entries: &entries,
-            label: None,
-        });
-
-        self.bind_groups.insert(*id, bind_group);
+        }))
     }
 
     pub fn create_pipeline(
-        &mut self,
+        &self,
         device: &wgpu::Device,
-        layouts: &[&wgpu::BindGroupLayout],
-        info: &PipelineInfo,
-    ) -> &wgpu::RenderPipeline {
-        let mut layouts = layouts.iter().map(|l| *l).collect_vec();
-        layouts.insert(self.group_index as usize, &self.layout);
+        color_format: wgpu::TextureFormat,
+        depth_write: DepthWrite,
+    ) -> wgpu::RenderPipeline {
+        let vertex = wgpu::VertexState {
+            module: &self.module,
+            entry_point: "vs_main",
+            buffers: &[wgpu::VertexBufferLayout {
+                array_stride: std::mem::size_of::<Vertex>() as u64,
+                step_mode: wgpu::VertexStepMode::Vertex,
+                attributes: &Vertex::attributes(),
+            }],
+        };
 
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: None,
-            bind_group_layouts: &layouts,
-            push_constant_ranges: &[],
+        let depth_stencil = Some(wgpu::DepthStencilState {
+            format: depth_write.format,
+            depth_write_enabled: depth_write.enabled,
+            depth_compare: wgpu::CompareFunction::LessEqual,
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState::default(),
         });
 
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: None,
-            layout: Some(&pipeline_layout),
-            vertex: info.vertex.clone(),
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Render Pipeline"),
+            layout: Some(&self.pipeline_layout),
+            vertex,
             fragment: Some(wgpu::FragmentState {
                 module: &self.module,
-                entry_point: &self.entry,
-                targets: &info.targets,
+                entry_point: "fs_main",
+                targets: &[Some(self.mode.color_target_state(color_format))],
             }),
-            primitive: info.primitive,
-            depth_stencil: info.depth_stencil.clone(),
+            depth_stencil,
+            primitive: wgpu::PrimitiveState::default(),
             multisample: wgpu::MultisampleState::default(),
             multiview: None,
-        });
-
-        self.pipelines
-            .entry(info.pipeline_id)
-            .or_insert_with(|| pipeline)
-    }
-
-    fn get_textures<'a>(
-        material: &Material,
-        resources: &'a GraphicsResources,
-    ) -> Vec<&'a dyn Texture> {
-        material
-            .textures()
-            .iter()
-            .filter_map(|id| resources.dyn_texture(id))
-            .collect()
+        })
     }
 }
 
-pub struct PipelineInfo<'a> {
-    pub pipeline_id: PipelineId,
-    pub vertex: wgpu::VertexState<'a>,
-    pub targets: Vec<Option<wgpu::ColorTargetState>>,
-    pub depth_stencil: Option<wgpu::DepthStencilState>,
-    pub primitive: wgpu::PrimitiveState,
+pub struct MaterialLayout {
+    layout: wgpu::BindGroupLayout,
+    buffer: Option<wgpu::Buffer>,
+    properties: PropertyBlock,
+}
+
+impl MaterialLayout {
+    pub fn new(
+        layout: wgpu::BindGroupLayout,
+        buffer: Option<wgpu::Buffer>,
+        properties: PropertyBlock,
+    ) -> MaterialLayout {
+        MaterialLayout {
+            layout,
+            buffer,
+            properties,
+        }
+    }
+
+    pub fn layout(&self) -> &wgpu::BindGroupLayout {
+        &self.layout
+    }
+
+    pub fn buffer(&self) -> &Option<wgpu::Buffer> {
+        &self.buffer
+    }
+
+    pub fn properties(&self) -> &PropertyBlock {
+        &self.properties
+    }
+}
+
+pub struct DepthWrite {
+    pub enabled: bool,
+    pub format: wgpu::TextureFormat,
 }

@@ -1,17 +1,8 @@
 use std::io::Write;
 
 use game::Game;
-use graphics::{
-    plugin::GraphicsPlugin,
-    renderer::simple::SimpleRendererPlugin,
-    resources::{
-        material::{BlendMode, Material, ShaderInput, ShaderModel},
-        shader::{
-            graph::{nodes::SampleTexture2D, Attribute, ShaderConfig, ShaderGraph, Slot},
-            unlit::UnlitShaderTemplate,
-        },
-        TextureId,
-    },
+use graphics::resources::shader::graph::{
+    attribute::Attribute, nodes::SampleTexture2D, ShaderGraph, Slot,
 };
 
 pub mod ecs;

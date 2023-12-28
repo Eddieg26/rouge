@@ -5,7 +5,7 @@ use crate::{
         resources::{
             buffer::{Buffer, BufferInfo},
             texture::{Texture, Texture2d, TextureDesc},
-            BufferId, GraphicsResources, TextureId,
+            BufferId, GpuResources, TextureId,
         },
         state::RenderState,
     },
@@ -181,7 +181,7 @@ impl RenderGraph {
             self.sort();
             self.is_dirty = false;
         }
-        let resources = world.resource::<GraphicsResources>();
+        let resources = world.resource::<GpuResources>();
         let device = world.resource::<RenderDevice>();
 
         let ctx = RenderUpdateContext::new(&device, &resources, &self.textures, &self.buffers);
@@ -192,7 +192,7 @@ impl RenderGraph {
     }
 
     pub fn execute(&self, world: &World) -> Result<(), String> {
-        let graphics = world.resource::<GraphicsResources>();
+        let graphics = world.resource::<GpuResources>();
         let state = world.state::<RenderState>();
         let device = world.resource::<RenderDevice>();
         let surface = world.resource::<RenderSurface>();

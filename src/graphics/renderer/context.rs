@@ -1,6 +1,6 @@
 use crate::graphics::{
     core::device::RenderDevice,
-    resources::{buffer::Buffer, texture::Texture, BufferId, GraphicsResources, TextureId},
+    resources::{buffer::Buffer, texture::Texture, BufferId, GpuResources, TextureId},
     state::RenderState,
 };
 use std::collections::HashMap;
@@ -8,7 +8,7 @@ use std::collections::HashMap;
 pub struct RenderContext<'a> {
     device: &'a RenderDevice,
     state: &'a RenderState,
-    resources: &'a GraphicsResources,
+    resources: &'a GpuResources,
     textures: &'a HashMap<TextureId, Box<dyn Texture>>,
     buffers: &'a HashMap<BufferId, Buffer>,
     render_target: &'a wgpu::TextureView,
@@ -18,7 +18,7 @@ impl<'a> RenderContext<'a> {
     pub fn new(
         device: &'a RenderDevice,
         state: &'a RenderState,
-        resources: &'a GraphicsResources,
+        resources: &'a GpuResources,
         textures: &'a HashMap<TextureId, Box<dyn Texture>>,
         buffers: &'a HashMap<BufferId, Buffer>,
         render_target: &'a wgpu::TextureView,
@@ -41,7 +41,7 @@ impl<'a> RenderContext<'a> {
         self.state
     }
 
-    pub fn resources(&self) -> &GraphicsResources {
+    pub fn resources(&self) -> &GpuResources {
         self.resources
     }
 
@@ -65,7 +65,7 @@ impl<'a> RenderContext<'a> {
 
 pub struct RenderUpdateContext<'a> {
     device: &'a RenderDevice,
-    resources: &'a GraphicsResources,
+    resources: &'a GpuResources,
     textures: &'a HashMap<TextureId, Box<dyn Texture>>,
     buffers: &'a HashMap<BufferId, Buffer>,
 }
@@ -73,7 +73,7 @@ pub struct RenderUpdateContext<'a> {
 impl<'a> RenderUpdateContext<'a> {
     pub fn new(
         device: &'a RenderDevice,
-        resources: &'a GraphicsResources,
+        resources: &'a GpuResources,
         textures: &'a HashMap<TextureId, Box<dyn Texture>>,
         buffers: &'a HashMap<BufferId, Buffer>,
     ) -> RenderUpdateContext<'a> {
@@ -89,7 +89,7 @@ impl<'a> RenderUpdateContext<'a> {
         self.device
     }
 
-    pub fn resources(&self) -> &GraphicsResources {
+    pub fn resources(&self) -> &GpuResources {
         self.resources
     }
 

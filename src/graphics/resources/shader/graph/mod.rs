@@ -1,140 +1,23 @@
+use self::attribute::{Attribute, BufferProperty, PropertyBlock};
+use crate::{
+    ecs::resource::ResourceId,
+    graphics::resources::{
+        material::{BlendMode, ShaderModel},
+        TextureId,
+    },
+};
+use itertools::Itertools;
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     hash::{Hash, Hasher},
 };
 
-use itertools::Itertools;
-
-use crate::{
-    ecs::resource::ResourceId,
-    graphics::resources::material::{BlendMode, ShaderModel},
-};
-
+pub mod attribute;
 pub mod nodes;
 
 pub type NodeId = ResourceId;
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Attribute {
-    Float,
-    Vec2,
-    Vec3,
-    Vec4,
-    Mat2,
-    Mat3,
-    Mat4,
-    Color,
-    Bool,
-    Texture2D,
-    Texture3D,
-    Texture2DArray,
-    CubeMap,
-}
-
-impl Attribute {
-    pub fn cast(&self, name: &str, other: &Attribute) -> String {
-        if self == other {
-            return name.to_string();
-        }
-
-        match (self, other) {
-            (Attribute::Float, Attribute::Vec2) => format!("vec2({})", name),
-            (Attribute::Float, Attribute::Vec3) => format!("vec3({})", name),
-            (Attribute::Float, Attribute::Vec4) => format!("vec4({})", name),
-            (Attribute::Float, Attribute::Color) => format!("vec4({}, 1.0)", name),
-            (Attribute::Float, Attribute::Mat2) => format!("mat2({})", name),
-            (Attribute::Float, Attribute::Mat3) => {
-                format!("mat3({}, vec3(0.0, 0.0, 1.0))", name)
-            }
-            (Attribute::Float, Attribute::Mat4) => {
-                format!("mat4({}, vec4(0.0, 0.0, 1.0, 0.0))", name)
-            }
-            (Attribute::Vec2, Attribute::Float) => format!("{}.x", name),
-            (Attribute::Vec2, Attribute::Vec3) => format!("vec3({}, 0.0)", name),
-            (Attribute::Vec2, Attribute::Vec4) => format!("vec4({}, 0.0, 0.0)", name),
-            (Attribute::Vec2, Attribute::Color) => format!("vec4({}, 0.0, 0.0)", name),
-            (Attribute::Vec2, Attribute::Mat2) => format!("mat2({})", name),
-            (Attribute::Vec2, Attribute::Mat3) => {
-                format!("mat3({}, vec3(0.0, 0.0, 1.0))", name)
-            }
-            (Attribute::Vec2, Attribute::Mat4) => {
-                format!("mat4({}, vec4(0.0, 0.0, 1.0, 0.0))", name)
-            }
-
-            (Attribute::Vec3, Attribute::Float) => format!("{}.x", name),
-            (Attribute::Vec3, Attribute::Vec2) => format!("{}.xy", name),
-            (Attribute::Vec3, Attribute::Vec4) => format!("vec4({}, 1.0)", name),
-            (Attribute::Vec3, Attribute::Color) => format!("vec4({}, 1.0)", name),
-            (Attribute::Vec3, Attribute::Mat3) => format!("mat3({})", name),
-            (Attribute::Vec3, Attribute::Mat4) => {
-                format!("mat4({}, vec4(0.0, 0.0, 1.0, 0.0))", name)
-            }
-            (Attribute::Vec4, Attribute::Float) => format!("{}.x", name),
-            (Attribute::Vec4, Attribute::Vec2) => format!("{}.xy", name),
-            (Attribute::Vec4, Attribute::Vec3) => format!("{}.xyz", name),
-            (Attribute::Vec4, Attribute::Color) => format!("{}", name),
-            (Attribute::Vec4, Attribute::Mat4) => format!("mat4({})", name),
-            (Attribute::Mat2, Attribute::Float) => format!("{}.x", name),
-            (Attribute::Mat2, Attribute::Vec2) => format!("{}.x", name),
-            (Attribute::Mat2, Attribute::Vec3) => format!("{}.xy", name),
-            (Attribute::Mat2, Attribute::Vec4) => format!("{}.xyz", name),
-            (Attribute::Mat2, Attribute::Color) => format!("{}.xyz", name),
-            (Attribute::Mat3, Attribute::Float) => format!("{}.x", name),
-            (Attribute::Mat3, Attribute::Vec2) => format!("{}.x", name),
-            (Attribute::Mat3, Attribute::Vec3) => format!("{}.xyz", name),
-            (Attribute::Mat3, Attribute::Vec4) => format!("{}.xyz", name),
-            (Attribute::Mat3, Attribute::Color) => format!("{}.xyz", name),
-            (Attribute::Mat4, Attribute::Float) => format!("{}.x", name),
-            (Attribute::Mat4, Attribute::Vec2) => format!("{}.x", name),
-            (Attribute::Mat4, Attribute::Vec3) => format!("{}.xyz", name),
-            (Attribute::Mat4, Attribute::Vec4) => format!("{}.xyz", name),
-            (Attribute::Mat4, Attribute::Color) => format!("{}.xyz", name),
-            (Attribute::Color, Attribute::Float) => format!("{}.r", name),
-            (Attribute::Color, Attribute::Vec2) => format!("{}.rg", name),
-            (Attribute::Color, Attribute::Vec3) => format!("{}.rgb", name),
-            (Attribute::Color, Attribute::Vec4) => format!("{}.rgba", name),
-            _ => panic!("Cannot cast {:?} to {:?}", self, other),
-        }
-    }
-
-    pub fn definition(&self, name: &str, prefix: &str) -> String {
-        match self {
-            Attribute::Float => format!("{} {} : f32;\n", prefix, name),
-            Attribute::Vec2 => format!("{} {} : vec2<f32>;\n", prefix, name),
-            Attribute::Vec3 => format!("{} {} : vec3<f32>;\n", prefix, name),
-            Attribute::Vec4 => format!("{} {} : vec4<f32>;\n", prefix, name),
-            Attribute::Mat2 => format!("{} {} : mat2x2<f32>;\n", prefix, name),
-            Attribute::Mat3 => format!("{} {} : mat3x3<f32>;\n", prefix, name),
-            Attribute::Mat4 => format!("{} {} : mat4x4<f32>;\n", prefix, name),
-            Attribute::Color => format!("{} {} : vec4<f32>;\n", prefix, name),
-            Attribute::Bool => format!("{} {} : bool;\n", prefix, name),
-            Attribute::Texture2D => {
-                format!("{} var {} : texture_2d<f32>;\n", prefix, name)
-            }
-            Attribute::Texture3D => {
-                format!("{} var {} : texture_3d<f32>;\n", prefix, name)
-            }
-            Attribute::Texture2DArray => {
-                format!("{} var {} : texture_2d_array<f32>;\n", prefix, name)
-            }
-            Attribute::CubeMap => {
-                format!("{} var {} : texture_cube<f32>;\n", prefix, name)
-            }
-        }
-    }
-
-    pub fn is_texture(&self) -> bool {
-        match self {
-            Attribute::Texture2D
-            | Attribute::Texture3D
-            | Attribute::Texture2DArray
-            | Attribute::CubeMap => true,
-            _ => false,
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Ord)]
 pub struct ShaderInput {
     name: String,
     attribute: Attribute,
@@ -158,6 +41,16 @@ impl ShaderInput {
 
     pub fn definition(&self, prefix: &str) -> String {
         self.attribute.definition(&self.name, prefix)
+    }
+}
+
+impl PartialOrd for ShaderInput {
+    fn partial_cmp(&self, other: &ShaderInput) -> Option<std::cmp::Ordering> {
+        if self.attribute == other.attribute {
+            Some(self.name.cmp(&other.name))
+        } else {
+            Some(self.attribute.size().cmp(&other.attribute.size()))
+        }
     }
 }
 
@@ -334,17 +227,9 @@ impl Edge {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum DepthWrite {
-    Auto,
-    Enable,
-    Disable,
-}
-
 pub struct ShaderConfig {
     model: ShaderModel,
     blend_mode: BlendMode,
-    depth_write: DepthWrite,
 }
 
 impl Default for ShaderConfig {
@@ -352,18 +237,13 @@ impl Default for ShaderConfig {
         Self {
             model: ShaderModel::Unlit,
             blend_mode: BlendMode::Opaque,
-            depth_write: DepthWrite::Auto,
         }
     }
 }
 
 impl ShaderConfig {
-    pub fn new(model: ShaderModel, blend_mode: BlendMode, depth_write: DepthWrite) -> ShaderConfig {
-        ShaderConfig {
-            model,
-            blend_mode,
-            depth_write,
-        }
+    pub fn new(model: ShaderModel, blend_mode: BlendMode) -> ShaderConfig {
+        ShaderConfig { model, blend_mode }
     }
 
     pub fn model(&self) -> &ShaderModel {
@@ -374,10 +254,6 @@ impl ShaderConfig {
         &self.blend_mode
     }
 
-    pub fn depth_write(&self) -> &DepthWrite {
-        &self.depth_write
-    }
-
     pub fn set_model(&mut self, model: ShaderModel) {
         self.model = model;
     }
@@ -385,17 +261,6 @@ impl ShaderConfig {
     pub fn set_blend_mode(&mut self, blend_mode: BlendMode) {
         self.blend_mode = blend_mode;
     }
-
-    pub fn set_depth_write(&mut self, depth_write: DepthWrite) {
-        self.depth_write = depth_write;
-    }
-}
-
-pub struct Shader {
-    module: wgpu::ShaderModule,
-    material_layout: wgpu::BindGroupLayout,
-    model: ShaderModel,
-    mode: BlendMode,
 }
 
 pub struct ShaderConstants;
@@ -442,6 +307,29 @@ impl ShaderGraph {
 
     pub fn config_mut(&mut self) -> &mut ShaderConfig {
         &mut self.config
+    }
+
+    pub fn property_block(&self) -> PropertyBlock {
+        let mut block = PropertyBlock::new();
+        let mut inputs = self.inputs.iter().collect_vec();
+        inputs.sort();
+
+        for input in &inputs {
+            if input.attribute.is_texture() {
+                let dimension = match input.attribute {
+                    Attribute::Texture2D => wgpu::TextureViewDimension::D2,
+                    Attribute::Texture3D => wgpu::TextureViewDimension::D3,
+                    Attribute::CubeMap => wgpu::TextureViewDimension::Cube,
+                    Attribute::Texture2DArray => wgpu::TextureViewDimension::D2Array,
+                    _ => panic!("Invalid texture attribute"),
+                };
+                block.set_texture(input.name(), &TextureId::zero(), dimension);
+            } else {
+                block.set_input(BufferProperty::new(input.name(), input.attribute().into()));
+            }
+        }
+
+        block
     }
 
     pub fn add_input(&mut self, name: &str, attribute: Attribute) {
@@ -511,46 +399,8 @@ impl ShaderGraph {
         self.remove_node(name.into());
     }
 
-    fn purge(&self) -> Vec<&Box<dyn Node>> {
-        let mut marked_nodes = HashSet::new();
-
-        for output in &self.outputs {
-            let mut stack = vec![output.name()];
-            while let Some(name) = stack.pop() {
-                let node = self
-                    .nodes
-                    .iter()
-                    .find(|n| n.name() == name)
-                    .expect("Node not found");
-
-                if marked_nodes.contains(node.name()) {
-                    continue;
-                }
-
-                marked_nodes.insert(node.name().to_string());
-
-                for edge in self.edges.values() {
-                    if edge.target().node() == NodeId::from(node.name()) {
-                        stack.push(
-                            self.nodes
-                                .iter()
-                                .find(|n| NodeId::from(n.name()) == edge.source().node())
-                                .expect("Source node not found")
-                                .name(),
-                        );
-                    }
-                }
-            }
-        }
-
-        self.nodes
-            .iter()
-            .filter(|n| !marked_nodes.contains(n.name()))
-            .collect_vec()
-    }
-
     pub fn generate(&self) -> String {
-        let mut nodes = self.purge();
+        let mut nodes = self.nodes.iter().collect_vec();
         let mut sorted = vec![];
 
         while !nodes.is_empty() {

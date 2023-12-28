@@ -1,15 +1,11 @@
-use self::{
-    buffer::Buffer,
-    material::{Material, ShaderModel},
-    mesh::{Mesh, MeshInfo},
-    shader::{
-        lit::LitShaderTemplate, unlit::UnlitShaderTemplate, PipelineInfo, Shader, ShaderTemplate,
-    },
-    texture::{Texture, Texture2d, TextureInfo},
-};
-use super::core::{device::RenderDevice, vertex::BaseVertex};
+use self::shader::ShaderPipeline;
 use crate::ecs::{resource::ResourceId, Resource};
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    hash::{Hash, Hasher},
+};
+
+use super::core::device::RenderDevice;
 
 pub mod buffer;
 pub mod material;
@@ -20,139 +16,250 @@ pub mod texture;
 pub type BufferId = ResourceId;
 pub type MeshId = ResourceId;
 pub type TextureId = ResourceId;
+pub type SamplerId = ResourceId;
 pub type MaterialId = ResourceId;
 pub type ShaderId = ResourceId;
-pub type PipelineId = ResourceId;
+pub type ShaderGraphId = ResourceId;
 
-pub struct GraphicsResources {
-    textures: HashMap<TextureId, Box<dyn Texture>>,
-    buffers: HashMap<BufferId, Buffer>,
-    meshes: HashMap<MeshId, Mesh>,
-    materials: HashMap<MaterialId, Material>,
-    shaders: HashMap<ShaderId, Shader>,
+pub type Resources<T> = HashMap<ResourceId, T>;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct PipelineId(u64);
+
+impl PipelineId {
+    pub fn new<T: ShaderPipeline>(id: &ShaderId) -> PipelineId {
+        let type_id = std::any::TypeId::of::<T>();
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        (type_id, id).hash(&mut hasher);
+        PipelineId(hasher.finish())
+    }
 }
 
-impl GraphicsResources {
-    pub fn new() -> GraphicsResources {
-        GraphicsResources {
-            textures: HashMap::new(),
-            buffers: HashMap::new(),
-            meshes: HashMap::new(),
-            materials: HashMap::new(),
-            shaders: HashMap::new(),
-        }
-    }
+pub struct GpuResources {
+    textures: Resources<wgpu::Texture>,
+    views: Resources<wgpu::TextureView>,
+    samplers: Resources<wgpu::Sampler>,
+    uniform_buffers: Resources<wgpu::Buffer>,
+    vertex_buffers: Resources<wgpu::Buffer>,
+    index_buffers: Resources<wgpu::Buffer>,
+    bind_groups: Resources<wgpu::BindGroup>,
+    pipelines: HashMap<PipelineId, wgpu::RenderPipeline>,
+}
 
-    pub fn texture<T: Texture>(&self, id: &TextureId) -> Option<&T> {
-        self.textures
-            .get(id)
-            .and_then(|t| t.as_any().downcast_ref::<T>())
-    }
+impl GpuResources {
+    pub fn new(device: &RenderDevice) -> GpuResources {
+        let queue = device.queue();
+        let device = device.inner();
 
-    pub fn dyn_texture(&self, id: &TextureId) -> Option<&dyn Texture> {
-        self.textures.get(id).and_then(|t| Some(t.as_ref()))
-    }
+        let white_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("White Texture"),
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::STORAGE_BINDING
+                | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
 
-    pub fn buffer(&self, id: &BufferId) -> Option<&Buffer> {
-        self.buffers.get(id)
-    }
-
-    pub fn mesh(&self, id: &MeshId) -> Option<&Mesh> {
-        self.meshes.get(id)
-    }
-
-    pub fn shader(&self, material: &Material) -> Option<&Shader> {
-        self.shaders.get(&material.shader_id())
-    }
-
-    pub fn add_texture<T: Texture>(&mut self, id: &TextureId, texture: T) {
-        self.textures.insert(*id, Box::new(texture));
-    }
-
-    pub fn add_buffer(&mut self, id: &BufferId, buffer: Buffer) {
-        self.buffers.insert(*id, buffer);
-    }
-
-    pub fn add_mesh(&mut self, id: &MeshId, mesh: Mesh) {
-        self.meshes.insert(*id, mesh);
-    }
-
-    pub fn add_material(&mut self, device: &wgpu::Device, id: &MaterialId, material: Material) {
-        let shader_id = material.shader_id();
-        if !self.shaders.contains_key(&shader_id) {
-            let shader = match material.shader_model() {
-                ShaderModel::Lit { .. } => LitShaderTemplate::create_shader(device, &material),
-                ShaderModel::Unlit => UnlitShaderTemplate::create_shader(device, &material),
-            };
-
-            self.shaders.insert(shader_id, shader);
-        }
-
-        self.materials.insert(*id, material);
-    }
-
-    pub fn create_pipelines(
-        &mut self,
-        device: &wgpu::Device,
-        layouts: &[&wgpu::BindGroupLayout],
-        info: &PipelineInfo,
-    ) {
-        for shader in self.shaders.values_mut() {
-            shader.create_pipeline(device, layouts, info);
-        }
-    }
-
-    pub fn create_buffer<T: bytemuck::Pod + bytemuck::Zeroable>(
-        &mut self,
-        device: &RenderDevice,
-        usage: wgpu::BufferUsages,
-        id: &BufferId,
-        data: T,
-    ) -> Option<&Buffer> {
-        let buffer = Buffer::from_data::<T>(device.inner(), usage, &data);
-        self.buffers.insert(*id, buffer);
-
-        self.buffers.get(id)
-    }
-
-    pub fn create_texture(
-        &mut self,
-        device: &RenderDevice,
-        id: &TextureId,
-        info: &TextureInfo,
-    ) -> Option<&dyn Texture> {
-        let texture: Box<dyn Texture> = match info.dimension {
-            wgpu::TextureDimension::D1 => todo!(),
-            wgpu::TextureDimension::D2 => {
-                Box::new(Texture2d::from_info(device.inner(), device.queue(), &info))
-            }
-            wgpu::TextureDimension::D3 => todo!(),
-        };
-
-        self.textures.insert(*id, texture);
-
-        self.dyn_texture(id)
-    }
-
-    pub fn create_mesh<T: BaseVertex>(
-        &mut self,
-        device: &RenderDevice,
-        id: &MeshId,
-        info: &MeshInfo<'_, T>,
-    ) -> Option<&Mesh> {
-        let mesh = Mesh::from_data(
-            device.inner(),
-            info.vertices,
-            info.indices,
-            info.submeshes.to_vec(),
+        queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &white_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &[255u8, 255u8, 255u8, 255u8],
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: None,
+                rows_per_image: Some(1),
+            },
+            wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
         );
-        self.meshes.insert(*id, mesh);
 
-        self.meshes.get(id)
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("White Texture Sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            lod_min_clamp: -100.0,
+            lod_max_clamp: 100.0,
+            compare: None,
+            anisotropy_clamp: 1,
+            border_color: None,
+        });
+
+        let mut textures = HashMap::new();
+        let mut views = HashMap::new();
+        let mut samplers = HashMap::new();
+
+        views.insert(
+            Self::WHITE_TEXTURE.into(),
+            white_texture.create_view(&wgpu::TextureViewDescriptor {
+                label: None,
+                array_layer_count: Some(white_texture.depth_or_array_layers()),
+                aspect: wgpu::TextureAspect::All,
+                base_array_layer: 0,
+                base_mip_level: 0,
+                dimension: Some(match white_texture.dimension() {
+                    wgpu::TextureDimension::D1 => wgpu::TextureViewDimension::D1,
+                    wgpu::TextureDimension::D2 => wgpu::TextureViewDimension::D2,
+                    wgpu::TextureDimension::D3 => wgpu::TextureViewDimension::D3,
+                }),
+                format: Some(white_texture.format()),
+                mip_level_count: Some(white_texture.mip_level_count()),
+            }),
+        );
+        samplers.insert(Self::WHITE_TEXTURE.into(), sampler);
+        textures.insert(Self::WHITE_TEXTURE.into(), white_texture);
+
+        GpuResources {
+            textures,
+            views,
+            samplers,
+            uniform_buffers: HashMap::new(),
+            vertex_buffers: HashMap::new(),
+            index_buffers: HashMap::new(),
+            bind_groups: HashMap::new(),
+            pipelines: HashMap::new(),
+        }
+    }
+
+    pub const WHITE_TEXTURE: &'static str = "DEFAULT_WHITE_TEXTURE";
+
+    pub fn white_texture(&self) -> &wgpu::Texture {
+        self.textures
+            .get(&Self::WHITE_TEXTURE.into())
+            .expect("White texture not found")
+    }
+
+    pub fn texture(&self, id: &TextureId) -> Option<&wgpu::Texture> {
+        self.textures.get(id)
+    }
+
+    pub fn texture_view(&self, id: &TextureId) -> Option<&wgpu::TextureView> {
+        self.views.get(id)
+    }
+
+    pub fn sampler(&self, id: &SamplerId) -> Option<&wgpu::Sampler> {
+        self.samplers.get(id)
+    }
+
+    pub fn uniform_buffer(&self, id: &BufferId) -> Option<&wgpu::Buffer> {
+        self.uniform_buffers.get(id)
+    }
+
+    pub fn vertex_buffer(&self, id: &BufferId) -> Option<&wgpu::Buffer> {
+        self.vertex_buffers.get(id)
+    }
+
+    pub fn index_buffer(&self, id: &BufferId) -> Option<&wgpu::Buffer> {
+        self.index_buffers.get(id)
+    }
+
+    pub fn bind_group(&self, id: &BufferId) -> Option<&wgpu::BindGroup> {
+        self.bind_groups.get(id)
+    }
+
+    pub fn pipeline<T: ShaderPipeline>(&self, id: &ShaderId) -> Option<&wgpu::RenderPipeline> {
+        self.pipelines.get(&PipelineId::new::<T>(id))
+    }
+
+    pub fn add_texture(&mut self, id: TextureId, texture: wgpu::Texture) {
+        let view = texture.create_view(&wgpu::TextureViewDescriptor {
+            label: None,
+            array_layer_count: Some(texture.depth_or_array_layers()),
+            aspect: wgpu::TextureAspect::All,
+            base_array_layer: 0,
+            base_mip_level: 0,
+            dimension: Some(match texture.dimension() {
+                wgpu::TextureDimension::D1 => wgpu::TextureViewDimension::D1,
+                wgpu::TextureDimension::D2 => wgpu::TextureViewDimension::D2,
+                wgpu::TextureDimension::D3 => wgpu::TextureViewDimension::D3,
+            }),
+            format: Some(texture.format()),
+            mip_level_count: Some(texture.mip_level_count()),
+        });
+        self.textures.insert(id, texture);
+        self.views.insert(id, view);
+    }
+
+    pub fn add_sampler(&mut self, id: SamplerId, sampler: wgpu::Sampler) {
+        self.samplers.insert(id, sampler);
+    }
+
+    pub fn add_uniform_buffer(&mut self, id: BufferId, buffer: wgpu::Buffer) {
+        self.uniform_buffers.insert(id, buffer);
+    }
+
+    pub fn add_vertex_buffer(&mut self, id: BufferId, buffer: wgpu::Buffer) {
+        self.vertex_buffers.insert(id, buffer);
+    }
+
+    pub fn add_index_buffer(&mut self, id: BufferId, buffer: wgpu::Buffer) {
+        self.index_buffers.insert(id, buffer);
+    }
+
+    pub fn add_bind_group(&mut self, id: BufferId, bind_group: wgpu::BindGroup) {
+        self.bind_groups.insert(id, bind_group);
+    }
+
+    pub fn add_pipeline<T: ShaderPipeline>(
+        &mut self,
+        id: &ShaderId,
+        pipeline: wgpu::RenderPipeline,
+    ) {
+        self.pipelines.insert(PipelineId::new::<T>(id), pipeline);
+    }
+
+    pub fn remove_texture(&mut self, id: &TextureId) -> Option<wgpu::Texture> {
+        self.views.remove(id);
+        self.textures.remove(id)
+    }
+
+    pub fn remove_sampler(&mut self, id: &SamplerId) -> Option<wgpu::Sampler> {
+        self.samplers.remove(id)
+    }
+
+    pub fn remove_uniform_buffer(&mut self, id: &BufferId) -> Option<wgpu::Buffer> {
+        self.uniform_buffers.remove(id)
+    }
+
+    pub fn remove_vertex_buffer(&mut self, id: &BufferId) -> Option<wgpu::Buffer> {
+        self.vertex_buffers.remove(id)
+    }
+
+    pub fn remove_index_buffer(&mut self, id: &BufferId) -> Option<wgpu::Buffer> {
+        self.index_buffers.remove(id)
+    }
+
+    pub fn remove_bind_group(&mut self, id: &BufferId) -> Option<wgpu::BindGroup> {
+        self.bind_groups.remove(id)
+    }
+
+    pub fn remove_pipeline<T: ShaderPipeline>(
+        &mut self,
+        id: &ShaderId,
+    ) -> Option<wgpu::RenderPipeline> {
+        self.pipelines.remove(&PipelineId::new::<T>(id))
     }
 }
 
-impl Resource for GraphicsResources {
+impl Resource for GpuResources {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }

@@ -139,50 +139,50 @@ impl Shader {
         self.mode
     }
 
-    pub fn create_bind_group(
-        &self,
-        device: &wgpu::Device,
-        resources: &GpuResources,
-        material: &Material,
-    ) -> Option<wgpu::BindGroup> {
-        let mut entries = vec![];
+    // pub fn create_bind_group(
+    //     &self,
+    //     device: &wgpu::Device,
+    //     resources: &GpuResources,
+    //     material: &Material,
+    // ) -> Option<wgpu::BindGroup> {
+    //     let mut entries = vec![];
 
-        if let Some(buffer) = &self.material_layout.buffer() {
-            entries.push(wgpu::BindGroupEntry {
-                binding: ShaderConstants::MATERIAL_BINDING as u32,
-                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                    buffer,
-                    offset: 0,
-                    size: None,
-                }),
-            });
-        }
+    //     if let Some(buffer) = &self.material_layout.buffer() {
+    //         entries.push(wgpu::BindGroupEntry {
+    //             binding: ShaderConstants::MATERIAL_BINDING as u32,
+    //             resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+    //                 buffer,
+    //                 offset: 0,
+    //                 size: None,
+    //             }),
+    //         });
+    //     }
 
-        let textures = material.textures();
-        for property in textures {
-            if let Some(texture) = resources.texture_view(&property.texture()) {
-                entries.push(wgpu::BindGroupEntry {
-                    binding: entries.len() as u32,
-                    resource: wgpu::BindingResource::TextureView(&texture),
-                });
-            }
-        }
+    //     let textures = material.textures();
+    //     for property in textures {
+    //         if let Some(texture) = resources.texture_view(&property.texture()) {
+    //             entries.push(wgpu::BindGroupEntry {
+    //                 binding: entries.len() as u32,
+    //                 resource: wgpu::BindingResource::TextureView(&texture),
+    //             });
+    //         }
+    //     }
 
-        for property in textures {
-            if let Some(sampler) = resources.sampler(&property.texture()) {
-                entries.push(wgpu::BindGroupEntry {
-                    binding: entries.len() as u32,
-                    resource: wgpu::BindingResource::Sampler(&sampler),
-                });
-            }
-        }
+    //     for property in textures {
+    //         if let Some(sampler) = resources.sampler(&property.texture()) {
+    //             entries.push(wgpu::BindGroupEntry {
+    //                 binding: entries.len() as u32,
+    //                 resource: wgpu::BindingResource::Sampler(&sampler),
+    //             });
+    //         }
+    //     }
 
-        Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Material Bind Group"),
-            layout: self.material_layout.layout(),
-            entries: &entries,
-        }))
-    }
+    //     Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
+    //         label: Some("Material Bind Group"),
+    //         layout: self.material_layout.layout(),
+    //         entries: &entries,
+    //     }))
+    // }
 
     pub fn create_pipeline(
         &self,

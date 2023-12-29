@@ -1,7 +1,4 @@
-use crate::graphics::resources::{
-    material::{BlendMode, ShaderModel},
-    GpuResources, TextureId,
-};
+use crate::graphics::resources::TextureId;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Attribute {
@@ -420,6 +417,22 @@ impl PropertyBlock {
         self
     }
 
+    pub fn set_texture_2d(&mut self, name: &str, id: &TextureId) -> &mut PropertyBlock {
+        self.set_texture(name, id, wgpu::TextureViewDimension::D2)
+    }
+
+    pub fn set_texture_3d(&mut self, name: &str, id: &TextureId) -> &mut PropertyBlock {
+        self.set_texture(name, id, wgpu::TextureViewDimension::D3)
+    }
+
+    pub fn set_texture_2d_array(&mut self, name: &str, id: &TextureId) -> &mut PropertyBlock {
+        self.set_texture(name, id, wgpu::TextureViewDimension::D2Array)
+    }
+
+    pub fn set_cube_map(&mut self, name: &str, id: &TextureId) -> &mut PropertyBlock {
+        self.set_texture(name, id, wgpu::TextureViewDimension::Cube)
+    }
+
     pub fn set_texture(
         &mut self,
         name: &str,
@@ -438,126 +451,5 @@ impl PropertyBlock {
         }
 
         self
-    }
-}
-
-pub trait Material: 'static {
-    fn blend_mode() -> BlendMode;
-    fn model() -> ShaderModel;
-    fn bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout;
-    fn create_bind_group(&self, device: &wgpu::Device, resources: &GpuResources)
-        -> wgpu::BindGroup;
-}
-
-pub struct UnlitTexture {
-    texture: TextureId,
-}
-
-impl UnlitTexture {
-    pub fn set_texture(&mut self, texture: TextureId) {
-        self.texture = texture;
-    }
-}
-
-impl Material for UnlitTexture {
-    fn bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
-        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("UnlitTexture"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        multisampled: false,
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
-                },
-            ],
-        })
-    }
-
-    fn create_bind_group(
-        &self,
-        device: &wgpu::Device,
-        resources: &GpuResources,
-    ) -> wgpu::BindGroup {
-        device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("UnlitTexture"),
-            layout: &Self::bind_group_layout(device),
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(
-                        resources.texture_view(&self.texture).unwrap_or_else(|| {
-                            resources
-                                .texture_view(&GpuResources::WHITE_TEXTURE.into())
-                                .unwrap()
-                        }),
-                    ),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(
-                        resources.sampler(&self.texture).unwrap_or_else(|| {
-                            resources
-                                .sampler(&GpuResources::WHITE_TEXTURE.into())
-                                .unwrap()
-                        }),
-                    ),
-                },
-            ],
-        })
-    }
-
-    fn blend_mode() -> BlendMode {
-        BlendMode::Opaque
-    }
-
-    fn model() -> ShaderModel {
-        ShaderModel::Unlit
-    }
-}
-
-pub struct MaterialShader<M: Material> {
-    model: ShaderModel,
-    blend_mode: BlendMode,
-    module: wgpu::ShaderModule,
-    layout: wgpu::BindGroupLayout,
-    _marker: std::marker::PhantomData<M>,
-}
-
-impl<M: Material> MaterialShader<M> {
-    pub fn new(device: &wgpu::Device, module: wgpu::ShaderModule) -> MaterialShader<M> {
-        MaterialShader {
-            module,
-            model: M::model(),
-            blend_mode: M::blend_mode(),
-            layout: M::bind_group_layout(device),
-            _marker: std::marker::PhantomData,
-        }
-    }
-
-    pub fn model(&self) -> ShaderModel {
-        self.model
-    }
-
-    pub fn blend_mode(&self) -> BlendMode {
-        self.blend_mode
-    }
-
-    pub fn module(&self) -> &wgpu::ShaderModule {
-        &self.module
-    }
-
-    pub fn layout(&self) -> &wgpu::BindGroupLayout {
-        &self.layout
     }
 }

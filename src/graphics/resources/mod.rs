@@ -1,15 +1,12 @@
-use self::shader::ShaderPipeline;
 use crate::ecs::{resource::ResourceId, Resource};
-use std::{
-    collections::HashMap,
-    hash::{Hash, Hasher},
-};
+use std::collections::HashMap;
 
 use super::core::device::RenderDevice;
 
 pub mod buffer;
 pub mod material;
 pub mod mesh;
+pub mod pipeline;
 pub mod shader;
 pub mod texture;
 
@@ -20,20 +17,7 @@ pub type SamplerId = ResourceId;
 pub type MaterialId = ResourceId;
 pub type ShaderId = ResourceId;
 pub type ShaderGraphId = ResourceId;
-
 pub type Resources<T> = HashMap<ResourceId, T>;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct PipelineId(u64);
-
-impl PipelineId {
-    pub fn new<T: ShaderPipeline>(id: &ShaderId) -> PipelineId {
-        let type_id = std::any::TypeId::of::<T>();
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        (type_id, id).hash(&mut hasher);
-        PipelineId(hasher.finish())
-    }
-}
 
 pub struct GpuResources {
     textures: Resources<wgpu::Texture>,
@@ -43,108 +27,23 @@ pub struct GpuResources {
     vertex_buffers: Resources<wgpu::Buffer>,
     index_buffers: Resources<wgpu::Buffer>,
     bind_groups: Resources<wgpu::BindGroup>,
-    pipelines: HashMap<PipelineId, wgpu::RenderPipeline>,
+    shaders: Resources<wgpu::ShaderModule>,
+    defaults: DefaultResources,
 }
 
 impl GpuResources {
     pub fn new(device: &RenderDevice) -> GpuResources {
-        let queue = device.queue();
-        let device = device.inner();
-
-        let white_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("White Texture"),
-            size: wgpu::Extent3d {
-                width: 1,
-                height: 1,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING
-                | wgpu::TextureUsages::STORAGE_BINDING
-                | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
-
-        queue.write_texture(
-            wgpu::ImageCopyTexture {
-                texture: &white_texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            &[255u8, 255u8, 255u8, 255u8],
-            wgpu::ImageDataLayout {
-                offset: 0,
-                bytes_per_row: None,
-                rows_per_image: Some(1),
-            },
-            wgpu::Extent3d {
-                width: 1,
-                height: 1,
-                depth_or_array_layers: 1,
-            },
-        );
-
-        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("White Texture Sampler"),
-            address_mode_u: wgpu::AddressMode::ClampToEdge,
-            address_mode_v: wgpu::AddressMode::ClampToEdge,
-            address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Nearest,
-            min_filter: wgpu::FilterMode::Nearest,
-            mipmap_filter: wgpu::FilterMode::Nearest,
-            lod_min_clamp: -100.0,
-            lod_max_clamp: 100.0,
-            compare: None,
-            anisotropy_clamp: 1,
-            border_color: None,
-        });
-
-        let mut textures = HashMap::new();
-        let mut views = HashMap::new();
-        let mut samplers = HashMap::new();
-
-        views.insert(
-            Self::WHITE_TEXTURE.into(),
-            white_texture.create_view(&wgpu::TextureViewDescriptor {
-                label: None,
-                array_layer_count: Some(white_texture.depth_or_array_layers()),
-                aspect: wgpu::TextureAspect::All,
-                base_array_layer: 0,
-                base_mip_level: 0,
-                dimension: Some(match white_texture.dimension() {
-                    wgpu::TextureDimension::D1 => wgpu::TextureViewDimension::D1,
-                    wgpu::TextureDimension::D2 => wgpu::TextureViewDimension::D2,
-                    wgpu::TextureDimension::D3 => wgpu::TextureViewDimension::D3,
-                }),
-                format: Some(white_texture.format()),
-                mip_level_count: Some(white_texture.mip_level_count()),
-            }),
-        );
-        samplers.insert(Self::WHITE_TEXTURE.into(), sampler);
-        textures.insert(Self::WHITE_TEXTURE.into(), white_texture);
-
         GpuResources {
-            textures,
-            views,
-            samplers,
+            textures: HashMap::new(),
+            views: HashMap::new(),
+            samplers: HashMap::new(),
             uniform_buffers: HashMap::new(),
             vertex_buffers: HashMap::new(),
             index_buffers: HashMap::new(),
             bind_groups: HashMap::new(),
-            pipelines: HashMap::new(),
+            shaders: HashMap::new(),
+            defaults: DefaultResources::new(device),
         }
-    }
-
-    pub const WHITE_TEXTURE: &'static str = "DEFAULT_WHITE_TEXTURE";
-
-    pub fn white_texture(&self) -> &wgpu::Texture {
-        self.textures
-            .get(&Self::WHITE_TEXTURE.into())
-            .expect("White texture not found")
     }
 
     pub fn texture(&self, id: &TextureId) -> Option<&wgpu::Texture> {
@@ -175,8 +74,8 @@ impl GpuResources {
         self.bind_groups.get(id)
     }
 
-    pub fn pipeline<T: ShaderPipeline>(&self, id: &ShaderId) -> Option<&wgpu::RenderPipeline> {
-        self.pipelines.get(&PipelineId::new::<T>(id))
+    pub fn shader(&self, id: &ShaderId) -> Option<&wgpu::ShaderModule> {
+        self.shaders.get(id)
     }
 
     pub fn add_texture(&mut self, id: TextureId, texture: wgpu::Texture) {
@@ -218,12 +117,8 @@ impl GpuResources {
         self.bind_groups.insert(id, bind_group);
     }
 
-    pub fn add_pipeline<T: ShaderPipeline>(
-        &mut self,
-        id: &ShaderId,
-        pipeline: wgpu::RenderPipeline,
-    ) {
-        self.pipelines.insert(PipelineId::new::<T>(id), pipeline);
+    pub fn add_shader(&mut self, id: ShaderId, shader: wgpu::ShaderModule) {
+        self.shaders.insert(id, shader);
     }
 
     pub fn remove_texture(&mut self, id: &TextureId) -> Option<wgpu::Texture> {
@@ -251,11 +146,8 @@ impl GpuResources {
         self.bind_groups.remove(id)
     }
 
-    pub fn remove_pipeline<T: ShaderPipeline>(
-        &mut self,
-        id: &ShaderId,
-    ) -> Option<wgpu::RenderPipeline> {
-        self.pipelines.remove(&PipelineId::new::<T>(id))
+    pub fn remove_shader(&mut self, id: &ShaderId) -> Option<wgpu::ShaderModule> {
+        self.shaders.remove(id)
     }
 }
 
@@ -266,5 +158,147 @@ impl Resource for GpuResources {
 
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
+    }
+}
+
+pub struct DefaultResources {
+    pub texture_2d: wgpu::Texture,
+    pub texture_2d_view: wgpu::TextureView,
+    pub sampler: wgpu::Sampler,
+    pub texture_cube: wgpu::Texture,
+    pub texture_cube_view: wgpu::TextureView,
+}
+
+impl DefaultResources {
+    pub fn new(device: &RenderDevice) -> DefaultResources {
+        let queue = device.queue();
+        let device = device.inner();
+
+        let white_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("White Texture"),
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::STORAGE_BINDING
+                | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+
+        queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &white_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &[255u8, 255u8, 255u8, 255u8],
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: None,
+                rows_per_image: Some(1),
+            },
+            wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
+
+        let white_texture_view = white_texture.create_view(&wgpu::TextureViewDescriptor {
+            label: None,
+            array_layer_count: Some(white_texture.depth_or_array_layers()),
+            aspect: wgpu::TextureAspect::All,
+            base_array_layer: 0,
+            base_mip_level: 0,
+            dimension: Some(match white_texture.dimension() {
+                wgpu::TextureDimension::D1 => wgpu::TextureViewDimension::D1,
+                wgpu::TextureDimension::D2 => wgpu::TextureViewDimension::D2,
+                wgpu::TextureDimension::D3 => wgpu::TextureViewDimension::D3,
+            }),
+            format: Some(white_texture.format()),
+            mip_level_count: Some(white_texture.mip_level_count()),
+        });
+
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("White Texture Sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            lod_min_clamp: -100.0,
+            lod_max_clamp: 100.0,
+            compare: None,
+            anisotropy_clamp: 1,
+            border_color: None,
+        });
+
+        let texture_cube = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Default Cube Texture"),
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 6,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::STORAGE_BINDING
+                | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+
+        queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &texture_cube,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &[255u8, 255u8, 255u8, 255u8],
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: None,
+                rows_per_image: Some(1),
+            },
+            wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 6,
+            },
+        );
+
+        let texture_cube_view = texture_cube.create_view(&wgpu::TextureViewDescriptor {
+            label: None,
+            array_layer_count: Some(texture_cube.depth_or_array_layers()),
+            aspect: wgpu::TextureAspect::All,
+            base_array_layer: 0,
+            base_mip_level: 0,
+            dimension: Some(match texture_cube.dimension() {
+                wgpu::TextureDimension::D1 => wgpu::TextureViewDimension::D1,
+                wgpu::TextureDimension::D2 => wgpu::TextureViewDimension::D2,
+                wgpu::TextureDimension::D3 => wgpu::TextureViewDimension::D3,
+            }),
+            format: Some(texture_cube.format()),
+            mip_level_count: Some(texture_cube.mip_level_count()),
+        });
+
+        DefaultResources {
+            texture_2d: white_texture,
+            texture_2d_view: white_texture_view,
+            sampler,
+            texture_cube,
+            texture_cube_view,
+        }
     }
 }

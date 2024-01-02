@@ -6,7 +6,10 @@ use self::{
         EndFrame, EndScene, GameContext, GamePhase, InitGame, Render, Shutdown, StartScene, Update,
     },
 };
-use crate::ecs::{world::Event, Component, ResetInterval, Resource, State, System, World};
+use crate::{
+    asset::{self, Asset, AssetLoader, AssetManager, Assets},
+    ecs::{world::Event, Component, ResetInterval, Resource, State, System, World},
+};
 use std::collections::{HashMap, HashSet};
 
 pub mod plugin;
@@ -30,6 +33,13 @@ impl Game {
     pub fn new() -> Game {
         let mut world = World::empty();
         world.insert_resource(SceneManager::new());
+        world.insert_resource(AssetManager::new("assets"));
+
+        let load_schedule = Schedule::new("Load Assets")
+            .add_system(asset::load_assets)
+            .build();
+        let mut global_plan = SchedulePlan::new();
+        global_plan.add_schedule(GamePhase::Init, load_schedule);
 
         Game {
             world,
@@ -98,6 +108,26 @@ impl Game {
 
     pub fn add_sub_app(&mut self, name: impl Into<SubAppName>, sub_app: SubApp) -> &mut Self {
         self.sub_apps.insert(name.into(), sub_app);
+
+        self
+    }
+
+    pub fn add_asset<A: Asset>(&mut self) -> &mut Self {
+        self.world.insert_resource(Assets::<A>::new());
+
+        self
+    }
+
+    pub fn add_loader<L: AssetLoader>(&mut self) -> &mut Self {
+        self.world
+            .resource_mut::<AssetManager>()
+            .register_loader::<L>();
+
+        self
+    }
+
+    pub fn add_asset_path(&mut self, path: &str) -> &mut Self {
+        self.world.resource_mut::<AssetManager>().add_path(path);
 
         self
     }

@@ -1,6 +1,5 @@
-use winit::window::Window;
-
 use crate::ecs::Resource;
+use winit::window::Window;
 
 pub struct RenderSurface {
     surface: wgpu::Surface,
@@ -9,11 +8,14 @@ pub struct RenderSurface {
     depth_format: wgpu::TextureFormat,
     present_mode: wgpu::PresentMode,
     alpha_mode: wgpu::CompositeAlphaMode,
+    width: u32,
+    height: u32,
 }
 
 impl RenderSurface {
     pub fn new(window: &Window, instance: &wgpu::Instance) -> RenderSurface {
         let surface = unsafe { instance.create_surface(window) }.expect("Failed to create surface");
+        let size = window.inner_size();
 
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
@@ -40,6 +42,8 @@ impl RenderSurface {
             depth_format: wgpu::TextureFormat::Depth32Float,
             present_mode,
             alpha_mode,
+            width: size.width,
+            height: size.height,
         }
     }
 
@@ -67,6 +71,14 @@ impl RenderSurface {
         &self.adapter
     }
 
+    pub fn width(&self) -> u32 {
+        self.width
+    }
+
+    pub fn height(&self) -> u32 {
+        self.height
+    }
+
     pub fn current_texture(&self) -> Result<wgpu::SurfaceTexture, wgpu::SurfaceError> {
         self.surface.get_current_texture()
     }
@@ -81,9 +93,11 @@ impl RenderSurface {
             .unwrap()
     }
 
-    pub fn configure(&self, device: &wgpu::Device, size: winit::dpi::PhysicalSize<u32>) {
+    pub fn resize(&mut self, device: &wgpu::Device, size: winit::dpi::PhysicalSize<u32>) {
         let config = self.default_config(size.width, size.height);
 
+        self.width = size.width;
+        self.height = size.height;
         self.surface.configure(device, &config);
     }
 }

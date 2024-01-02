@@ -7,7 +7,19 @@ use std::{
     path::Path,
 };
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default)]
+#[derive(
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Debug,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+)]
 pub struct ResourceId(u64);
 
 impl Display for ResourceId {
@@ -23,6 +35,12 @@ impl ResourceId {
 
     pub fn zero() -> ResourceId {
         ResourceId(0)
+    }
+}
+
+impl From<ulid::Ulid> for ResourceId {
+    fn from(value: ulid::Ulid) -> Self {
+        value.to_string().into()
     }
 }
 
@@ -53,6 +71,12 @@ impl From<String> for ResourceId {
     }
 }
 
+impl From<u64> for ResourceId {
+    fn from(value: u64) -> Self {
+        ResourceId(value)
+    }
+}
+
 impl Deref for ResourceId {
     type Target = u64;
 
@@ -67,7 +91,9 @@ impl DerefMut for ResourceId {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash, PartialOrd, Ord)]
+#[derive(
+    Clone, Copy, PartialEq, Eq, Debug, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub struct ResourceType(u64);
 
 impl ResourceType {

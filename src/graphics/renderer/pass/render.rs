@@ -127,6 +127,7 @@ impl RenderPassNode {
                     resolve_target: color.resolve_target.as_ref().map(|t| match t {
                         TextureAttachment::SwapChainImage => ctx.render_target(),
                         TextureAttachment::Texture(id) => ctx
+                            .resources()
                             .dyn_texture(id)
                             .expect("Texture attachement not found.")
                             .view(),
@@ -134,10 +135,11 @@ impl RenderPassNode {
                     ops: color.ops,
                 }),
                 TextureAttachment::Texture(id) => Some(wgpu::RenderPassColorAttachment {
-                    view: ctx.dyn_texture(id).unwrap().view(),
+                    view: ctx.resources().dyn_texture(id).unwrap().view(),
                     resolve_target: color.resolve_target.as_ref().map(|t| match t {
                         TextureAttachment::SwapChainImage => ctx.render_target(),
                         TextureAttachment::Texture(id) => ctx
+                            .resources()
                             .dyn_texture(id)
                             .expect("Texture attachement not found.")
                             .view(),
@@ -160,6 +162,7 @@ impl RenderPassNode {
             let depth_stencil = match &ds.depth_stencil {
                 TextureAttachment::SwapChainImage => ctx.render_target(),
                 TextureAttachment::Texture(id) => ctx
+                    .resources()
                     .dyn_texture(id)
                     .expect("Texture attachement not found.")
                     .view(),

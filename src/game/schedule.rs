@@ -59,7 +59,7 @@ impl Schedule {
         self
     }
 
-    pub fn finish(&mut self) -> Self {
+    pub fn build(&mut self) -> Self {
         std::mem::take(self)
     }
 

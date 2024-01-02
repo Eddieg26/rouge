@@ -86,7 +86,10 @@ impl ShaderBindGroup {
                 visibility: binding.visibility,
                 ty: match &binding.ty {
                     AttachmentBindingType::Texture(id) => {
-                        let texture = ctx.dyn_texture(&id).expect("Texture not found.");
+                        let texture = ctx
+                            .resources()
+                            .dyn_texture(&id)
+                            .expect("Texture not found.");
 
                         wgpu::BindingType::Texture {
                             sample_type: wgpu::TextureSampleType::Float { filterable: true },

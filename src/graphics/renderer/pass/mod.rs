@@ -8,7 +8,7 @@ mod tests {
         compute::{ComputePassNode, ComputeSubpass, ShaderBindGroup},
         render::{ColorInput, DepthStencilInput, Pass, RenderPassNode, TextureAttachment},
     };
-    use crate::graphics::{renderer::graph::RenderGraph, resources::texture::TextureDesc};
+    use crate::graphics::renderer::graph::RenderGraph;
 
     type OpaquePass = Pass;
     type TransparentPass = Pass;
@@ -17,19 +17,11 @@ mod tests {
     pub fn test() {
         let mut render_graph = RenderGraph::new();
 
-        let surface_size = wgpu::Extent3d {
-            width: 0,
-            height: 0,
-            depth_or_array_layers: 0,
-        };
-
         let depth_stencil = render_graph.create_texture(
             "depth-stencil",
-            TextureDesc::new_2d(
-                surface_size.width,
-                surface_size.height,
-                wgpu::TextureFormat::Depth16Unorm,
-            ),
+            wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
+            wgpu::TextureFormat::Depth16Unorm,
+            wgpu::TextureDimension::D2,
         );
 
         let forward_pass = RenderPassNode::new("forward")

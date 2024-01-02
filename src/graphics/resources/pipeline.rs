@@ -1,8 +1,10 @@
-use super::{
-    material::{BlendMode, Material, ShaderModel},
-    shader::graph::attribute::PropertyBlock,
-    GpuResources, ShaderId,
+use super::{bind_group::BindGroups, shader::Shader};
+use crate::{
+    asset::Assets,
+    ecs::{resource::ResourceType, Resource},
+    graphics::{core::BlendMode, resources::ShaderId},
 };
+use itertools::Itertools;
 use std::{any::TypeId, collections::HashMap};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -12,126 +14,156 @@ pub enum DepthWrite {
     Disabled,
 }
 
-pub trait PipelineConfig: 'static {
-    fn depth_write(&self) -> DepthWrite;
-    fn vertex(&self) -> wgpu::VertexState;
-    fn primitive(&self) -> wgpu::PrimitiveState;
-    fn color_format(&self) -> wgpu::TextureFormat;
-    fn depth_format(&self) -> wgpu::TextureFormat;
-    fn bind_group_layouts(&self) -> Vec<&wgpu::BindGroupLayout>;
+pub trait ShaderPipeline: 'static {
+    fn vertex() -> ShaderId;
+    fn depth_write() -> DepthWrite;
+    fn primitive() -> wgpu::PrimitiveState;
+    fn color_format() -> wgpu::TextureFormat;
+    fn depth_format() -> wgpu::TextureFormat;
 }
 
-pub trait MaterialPipeline: 'static {
-    fn vertex_shader(&self) -> &ShaderId;
-    fn fragment_shader(&self) -> &ShaderId;
-    fn pipeline_layout(&self, device: &wgpu::Device) -> wgpu::PipelineLayout;
+pub struct PipelineConfig {
+    vertex: ShaderId,
+    depth_write: DepthWrite,
+    primitive: wgpu::PrimitiveState,
+    color_format: wgpu::TextureFormat,
+    depth_format: wgpu::TextureFormat,
 }
 
-pub struct MaterialShader {
-    model: ShaderModel,
-    blend_mode: BlendMode,
-    properties: PropertyBlock,
-    shader: wgpu::ShaderModule,
-}
-
-impl MaterialShader {
-    pub fn new(
-        model: ShaderModel,
-        blend_mode: BlendMode,
-        properties: PropertyBlock,
-        shader: wgpu::ShaderModule,
-    ) -> MaterialShader {
-        MaterialShader {
-            model,
-            blend_mode,
-            properties,
-            shader,
+impl PipelineConfig {
+    pub fn new<P: ShaderPipeline>() -> PipelineConfig {
+        PipelineConfig {
+            vertex: P::vertex(),
+            depth_write: P::depth_write(),
+            primitive: P::primitive(),
+            color_format: P::color_format(),
+            depth_format: P::depth_format(),
         }
     }
 
-    pub fn model(&self) -> ShaderModel {
-        self.model
+    pub fn vertex(&self) -> &ShaderId {
+        &self.vertex
     }
 
-    pub fn blend_mode(&self) -> BlendMode {
-        self.blend_mode
+    pub fn depth_write(&self) -> DepthWrite {
+        self.depth_write
     }
 
-    pub fn properties(&self) -> &PropertyBlock {
-        &self.properties
+    pub fn primitive(&self) -> &wgpu::PrimitiveState {
+        &self.primitive
     }
 
-    pub fn shader(&self) -> &wgpu::ShaderModule {
-        &self.shader
+    pub fn color_format(&self) -> wgpu::TextureFormat {
+        self.color_format
+    }
+
+    pub fn depth_format(&self) -> wgpu::TextureFormat {
+        self.depth_format
     }
 }
 
-pub struct MaterialPipelines {
-    configs: HashMap<TypeId, Box<dyn PipelineConfig>>,
-    pipelines: HashMap<TypeId, HashMap<ShaderId, wgpu::RenderPipeline>>,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct PipelineKey {
+    config: ResourceType,
+    fragment: ShaderId,
 }
 
-impl MaterialPipelines {
-    pub fn new() -> MaterialPipelines {
-        MaterialPipelines {
+impl PipelineKey {
+    pub fn new(config: ResourceType, fragment: ShaderId) -> PipelineKey {
+        PipelineKey { config, fragment }
+    }
+
+    pub fn config(&self) -> ResourceType {
+        self.config
+    }
+
+    pub fn fragment(&self) -> ShaderId {
+        self.fragment
+    }
+}
+
+pub struct Pipelines {
+    configs: HashMap<ResourceType, PipelineConfig>,
+    pipelines: HashMap<PipelineKey, wgpu::RenderPipeline>,
+}
+
+impl Pipelines {
+    pub fn new() -> Pipelines {
+        Pipelines {
             configs: HashMap::new(),
             pipelines: HashMap::new(),
         }
     }
 
-    pub fn add_config<T: PipelineConfig>(&mut self, config: T) {
-        self.configs.insert(TypeId::of::<T>(), Box::new(config));
+    pub fn register<P: ShaderPipeline>(&mut self) {
+        self.configs
+            .insert(TypeId::of::<P>().into(), PipelineConfig::new::<P>());
     }
 
-    pub fn get<P: PipelineConfig>(&self, shader: &ShaderId) -> Option<&wgpu::RenderPipeline> {
-        self.pipelines
-            .get(&TypeId::of::<P>())
-            .and_then(|p| p.get(shader))
+    pub fn config<P: ShaderPipeline>(&self) -> Option<&PipelineConfig> {
+        self.configs.get(&TypeId::of::<P>().into())
     }
 
-    pub fn create_pipelines<M: Material>(
+    pub fn pipeline<P: ShaderPipeline>(&self, fragment: ShaderId) -> Option<&wgpu::RenderPipeline> {
+        let key = PipelineKey::new(TypeId::of::<P>().into(), fragment);
+        self.pipelines.get(&key)
+    }
+
+    pub fn add_pipelines(
         &mut self,
         device: &wgpu::Device,
-        material: &M,
-        resources: &GpuResources,
+        fragment_id: ShaderId,
+        blend_mode: BlendMode,
+        shaders: &Assets<Shader>,
+        bind_groups: &BindGroups,
     ) {
-        for (_, config) in &self.configs {
-            let mut pipelines = HashMap::new();
+        for (config, pipeline) in self.configs.iter() {
+            let key = PipelineKey::new(*config, fragment_id);
 
-            let fragment_shader = resources
-                .shader(&material.fragment_shader())
-                .expect("Shader not found");
+            if self.pipelines.contains_key(&key) {
+                continue;
+            }
 
-            let material_layout = material.properties().create_bind_group_layout(device);
+            let vertex = shaders
+                .get(pipeline.vertex())
+                .expect("Missing vertex shader");
 
-            let mut layouts = config.bind_group_layouts();
-            layouts.push(&material_layout);
+            let fragment = shaders.get(&fragment_id).expect("Missing fragment shader");
 
-            let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("Material Pipeline Layout"),
+            if !vertex.validate(fragment) {
+                panic!("Vertex shader output does not match fragment shader input");
+            }
+
+            let shaders = &[vertex, fragment];
+            let layouts = Self::get_layouts(&bind_groups, shaders);
+
+            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Pipeline Layout"),
                 bind_group_layouts: &layouts,
                 push_constant_ranges: &[],
             });
 
-            let color_format = config.color_format();
-            let depth_format = config.depth_format();
-
             let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("Material Pipeline"),
-                layout: Some(&pipeline_layout),
-                vertex: config.vertex(),
+                label: Some("Render Pipeline"),
+                layout: Some(&layout),
+                vertex: wgpu::VertexState {
+                    module: &vertex.module(),
+                    entry_point: vertex.meta().entry(),
+                    buffers: &[],
+                },
                 fragment: Some(wgpu::FragmentState {
-                    entry_point: "main",
-                    module: fragment_shader,
-                    targets: &[Some(material.blend_mode().color_target_state(color_format))],
+                    module: &fragment.module(),
+                    entry_point: fragment.meta().entry(),
+                    targets: &[Some(blend_mode.color_target_state(pipeline.color_format()))],
                 }),
-                primitive: wgpu::PrimitiveState::default(),
+                primitive: pipeline.primitive().clone(),
                 depth_stencil: Some(wgpu::DepthStencilState {
-                    format: depth_format,
-                    depth_write_enabled: match config.depth_write() {
-                        DepthWrite::Auto => match material.blend_mode() {
-                            BlendMode::Opaque => true,
-                            BlendMode::Transparent => false,
+                    format: pipeline.depth_format(),
+                    depth_write_enabled: match pipeline.depth_write() {
+                        DepthWrite::Auto => match pipeline.primitive().topology {
+                            wgpu::PrimitiveTopology::TriangleList
+                            | wgpu::PrimitiveTopology::TriangleStrip => true,
+                            _ => false,
                         },
                         DepthWrite::Enabled => true,
                         DepthWrite::Disabled => false,
@@ -140,15 +172,46 @@ impl MaterialPipelines {
                     stencil: wgpu::StencilState::default(),
                     bias: wgpu::DepthBiasState::default(),
                 }),
-                multisample: wgpu::MultisampleState {
-                    count: 1,
-                    mask: !0,
-                    alpha_to_coverage_enabled: false,
-                },
+                multisample: wgpu::MultisampleState::default(),
                 multiview: None,
             });
 
-            pipelines.insert(material.fragment_shader(), pipeline);
+            self.pipelines.insert(key, pipeline);
         }
+    }
+
+    fn get_layouts<'a>(
+        bind_groups: &'a BindGroups,
+        shaders: &'a [&Shader],
+    ) -> Vec<&'a wgpu::BindGroupLayout> {
+        let mut groups = HashMap::new();
+        for shader in shaders {
+            for binding in shader.meta().bindings() {
+                if let Some(prev) = groups.insert(binding.group(), binding.clone()) {
+                    if prev != *binding {
+                        panic!("Mismatched binding layouts");
+                    }
+                }
+            }
+        }
+
+        groups
+            .values()
+            .map(|binding| {
+                bind_groups
+                    .layout(&binding.into())
+                    .expect("Missing bind group layout")
+            })
+            .collect_vec()
+    }
+}
+
+impl Resource for Pipelines {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
     }
 }

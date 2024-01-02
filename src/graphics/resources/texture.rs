@@ -1,3 +1,13 @@
+use std::cell::Ref;
+
+use crate::{
+    asset::{Asset, Assets},
+    ecs::{Resource, World},
+    graphics::core::device::RenderDevice,
+};
+
+use super::TextureId;
+
 pub type Dimension = wgpu::TextureDimension;
 pub type Format = wgpu::TextureFormat;
 
@@ -149,7 +159,7 @@ impl Into<wgpu::AddressMode> for WrapMode {
     }
 }
 
-pub trait Texture: 'static {
+pub trait Texture: 'static + Asset {
     fn width(&self) -> u32;
     fn height(&self) -> u32;
     fn depth(&self) -> u32;
@@ -160,7 +170,6 @@ pub trait Texture: 'static {
     fn mipmaps(&self) -> bool;
     fn pixels(&self) -> &[u8];
     fn view(&self) -> &wgpu::TextureView;
-    fn sampler(&self) -> &wgpu::Sampler;
     fn as_any(&self) -> &dyn std::any::Any;
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
 }
@@ -309,7 +318,6 @@ pub struct Texture2d {
     mipmaps: bool,
     pixels: Vec<u8>,
     view: wgpu::TextureView,
-    sampler: wgpu::Sampler,
 }
 
 impl Texture2d {
@@ -322,7 +330,6 @@ impl Texture2d {
         mipmaps: bool,
         pixels: Vec<u8>,
         view: wgpu::TextureView,
-        sampler: wgpu::Sampler,
     ) -> Texture2d {
         Texture2d {
             width,
@@ -333,7 +340,6 @@ impl Texture2d {
             mipmaps,
             pixels,
             view,
-            sampler,
         }
     }
     pub fn from_texture(
@@ -342,21 +348,6 @@ impl Texture2d {
         filter_mode: FilterMode,
         wrap_mode: WrapMode,
     ) -> Self {
-        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: None,
-            address_mode_u: wrap_mode.into(),
-            address_mode_v: wrap_mode.into(),
-            address_mode_w: wrap_mode.into(),
-            mag_filter: filter_mode.into(),
-            min_filter: filter_mode.into(),
-            mipmap_filter: filter_mode.into(),
-            lod_min_clamp: 0.0,
-            lod_max_clamp: 100.0,
-            compare: None,
-            anisotropy_clamp: 1,
-            border_color: None,
-        });
-
         let view = texture.create_view(&wgpu::TextureViewDescriptor {
             array_layer_count: Some(texture.depth_or_array_layers()),
             aspect: wgpu::TextureAspect::All,
@@ -377,7 +368,6 @@ impl Texture2d {
             texture.mip_level_count() > 1,
             vec![],
             view,
-            sampler,
         )
     }
 
@@ -438,21 +428,6 @@ impl Texture2d {
             label: None,
         });
 
-        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: None,
-            address_mode_u: info.wrap_mode.into(),
-            address_mode_v: info.wrap_mode.into(),
-            address_mode_w: info.wrap_mode.into(),
-            mag_filter: info.filter_mode.into(),
-            min_filter: info.filter_mode.into(),
-            mipmap_filter: info.filter_mode.into(),
-            lod_min_clamp: 0.0,
-            lod_max_clamp: 100.0,
-            compare: None,
-            anisotropy_clamp: 1,
-            border_color: None,
-        });
-
         Texture2d::new(
             info.width,
             info.height,
@@ -462,7 +437,6 @@ impl Texture2d {
             info.mipmaps,
             info.pixels.clone(),
             view,
-            sampler,
         )
     }
 
@@ -484,21 +458,6 @@ impl Texture2d {
 
         let view = gpu_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
-        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: None,
-            address_mode_u: wgpu::AddressMode::ClampToEdge,
-            address_mode_v: wgpu::AddressMode::ClampToEdge,
-            address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::FilterMode::Linear,
-            lod_min_clamp: 0.0,
-            lod_max_clamp: 100.0,
-            compare: None,
-            anisotropy_clamp: 1,
-            border_color: None,
-        });
-
         Texture2d::new(
             desc.width,
             desc.height,
@@ -508,7 +467,6 @@ impl Texture2d {
             false,
             vec![],
             view,
-            sampler,
         )
     }
 }
@@ -554,10 +512,440 @@ impl Texture for Texture2d {
         &self.view
     }
 
-    fn sampler(&self) -> &wgpu::Sampler {
-        &self.sampler
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+}
+
+impl Asset for Texture2d {}
+
+pub struct TextureCube {
+    width: u32,
+    height: u32,
+    layers: u32,
+    format: Format,
+    filter_mode: FilterMode,
+    wrap_mode: WrapMode,
+    mipmaps: bool,
+    pixels: Vec<u8>,
+    view: wgpu::TextureView,
+}
+
+impl TextureCube {
+    pub fn new(
+        width: u32,
+        height: u32,
+        layers: u32,
+        format: Format,
+        filter_mode: FilterMode,
+        wrap_mode: WrapMode,
+        mipmaps: bool,
+        pixels: Vec<u8>,
+        view: wgpu::TextureView,
+    ) -> TextureCube {
+        TextureCube {
+            width,
+            height,
+            layers,
+            format,
+            filter_mode,
+            wrap_mode,
+            mipmaps,
+            pixels,
+            view,
+        }
+    }
+
+    pub fn from_info(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        info: &TextureInfo,
+    ) -> TextureCube {
+        let mip_levels = if info.mipmaps {
+            let size = std::cmp::max(info.width, info.height);
+            (size as f32).log2().floor() as u32 + 1
+        } else {
+            1
+        };
+        let gpu_texture = device.create_texture(&wgpu::TextureDescriptor {
+            dimension: wgpu::TextureDimension::D2,
+            format: info.format,
+            label: None,
+            mip_level_count: mip_levels,
+            sample_count: 1,
+            size: wgpu::Extent3d {
+                depth_or_array_layers: info.depth,
+                height: info.height,
+                width: info.width,
+            },
+            usage: wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+
+        queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &gpu_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &info.pixels,
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(info.format.bytes_per_row() * info.width),
+                rows_per_image: Some(info.height),
+            },
+            wgpu::Extent3d {
+                depth_or_array_layers: info.depth,
+                height: info.height,
+                width: info.width,
+            },
+        );
+
+        let view = gpu_texture.create_view(&wgpu::TextureViewDescriptor {
+            array_layer_count: Some(info.depth),
+            aspect: wgpu::TextureAspect::All,
+            base_array_layer: 0,
+            base_mip_level: 0,
+            dimension: Some(match info.dimension {
+                wgpu::TextureDimension::D1 => wgpu::TextureViewDimension::D1,
+                wgpu::TextureDimension::D2 => wgpu::TextureViewDimension::D2,
+                wgpu::TextureDimension::D3 => wgpu::TextureViewDimension::D3,
+            }),
+            format: Some(info.format),
+            mip_level_count: Some(mip_levels),
+            label: None,
+        });
+
+        TextureCube::new(
+            info.width,
+            info.height,
+            info.depth,
+            info.format,
+            info.filter_mode,
+            info.wrap_mode,
+            info.mipmaps,
+            info.pixels.clone(),
+            view,
+        )
+    }
+
+    pub fn from_desc(device: &wgpu::Device, desc: &TextureDesc) -> TextureCube {
+        let gpu_texture = device.create_texture(&wgpu::TextureDescriptor {
+            dimension: desc.dimension,
+            format: desc.format,
+            label: None,
+            mip_level_count: 1,
+            sample_count: 1,
+            size: wgpu::Extent3d {
+                depth_or_array_layers: desc.depth,
+                height: desc.height,
+                width: desc.width,
+            },
+            usage: wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+
+        let view = gpu_texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        TextureCube::new(
+            desc.width,
+            desc.height,
+            desc.depth,
+            desc.format,
+            FilterMode::Bilinear,
+            WrapMode::Clamp,
+            false,
+            vec![],
+            view,
+        )
+    }
+}
+
+impl Texture for TextureCube {
+    fn width(&self) -> u32 {
+        self.width
+    }
+
+    fn height(&self) -> u32 {
+        self.height
+    }
+
+    fn depth(&self) -> u32 {
+        self.layers
+    }
+
+    fn dimension(&self) -> Dimension {
+        Dimension::D2
+    }
+
+    fn format(&self) -> Format {
+        self.format
+    }
+
+    fn filter_mode(&self) -> FilterMode {
+        self.filter_mode
+    }
+
+    fn wrap_mode(&self) -> WrapMode {
+        self.wrap_mode
+    }
+
+    fn mipmaps(&self) -> bool {
+        self.mipmaps
+    }
+
+    fn pixels(&self) -> &[u8] {
+        &self.pixels
+    }
+
+    fn view(&self) -> &wgpu::TextureView {
+        &self.view
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+}
+
+impl Asset for TextureCube {}
+
+pub struct Sampler {
+    sampler: wgpu::Sampler,
+    wrap_mode: WrapMode,
+    filter_mode: FilterMode,
+}
+
+impl Sampler {
+    pub fn new(device: &wgpu::Device, wrap_mode: WrapMode, filter_mode: FilterMode) -> Sampler {
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: None,
+            address_mode_u: wrap_mode.into(),
+            address_mode_v: wrap_mode.into(),
+            address_mode_w: wrap_mode.into(),
+            mag_filter: filter_mode.into(),
+            min_filter: filter_mode.into(),
+            mipmap_filter: filter_mode.into(),
+            lod_min_clamp: 0.0,
+            lod_max_clamp: 100.0,
+            compare: None,
+            anisotropy_clamp: 1,
+            border_color: None,
+        });
+
+        Sampler {
+            sampler,
+            wrap_mode,
+            filter_mode,
+        }
+    }
+
+    pub fn inner(&self) -> &wgpu::Sampler {
+        &self.sampler
+    }
+}
+
+impl Asset for Sampler {}
+
+pub struct TextureResources<'a> {
+    texture_2ds: Ref<'a, Assets<Texture2d>>,
+    texture_cubes: Ref<'a, Assets<TextureCube>>,
+    samplers: Ref<'a, Assets<Sampler>>,
+    defaults: Ref<'a, DefaultTextures>,
+}
+
+impl<'a> TextureResources<'a> {
+    pub fn new(
+        texture_2ds: Ref<'a, Assets<Texture2d>>,
+        texture_cubes: Ref<'a, Assets<TextureCube>>,
+        samplers: Ref<'a, Assets<Sampler>>,
+        defaults: Ref<'a, DefaultTextures>,
+    ) -> TextureResources<'a> {
+        TextureResources {
+            texture_2ds,
+            texture_cubes,
+            samplers,
+            defaults,
+        }
+    }
+
+    pub fn from_world(world: &'a World) -> TextureResources<'a> {
+        let texture_2ds = world.resource::<Assets<Texture2d>>();
+        let texture_cubes = world.resource::<Assets<TextureCube>>();
+        let samplers = world.resource::<Assets<Sampler>>();
+        let defaults = world.resource::<DefaultTextures>();
+
+        TextureResources::new(texture_2ds, texture_cubes, samplers, defaults)
+    }
+
+    pub fn texture_2d(&self, id: &TextureId) -> Option<&Texture2d> {
+        self.texture_2ds.get(id)
+    }
+
+    pub fn texture_cube(&self, id: &TextureId) -> Option<&TextureCube> {
+        self.texture_cubes.get(id)
+    }
+
+    pub fn sampler(&self, id: &TextureId) -> Option<&Sampler> {
+        self.samplers.get(id)
+    }
+
+    pub fn defaults(&self) -> &DefaultTextures {
+        &self.defaults
+    }
+}
+
+pub struct DefaultTextures {
+    pub texture_2d: wgpu::Texture,
+    pub texture_2d_view: wgpu::TextureView,
+    pub sampler: wgpu::Sampler,
+    pub texture_cube: wgpu::Texture,
+    pub texture_cube_view: wgpu::TextureView,
+}
+
+impl DefaultTextures {
+    pub fn new(device: &RenderDevice) -> DefaultTextures {
+        let queue = device.queue();
+        let device = device.inner();
+
+        let white_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("White Texture"),
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::STORAGE_BINDING
+                | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+
+        queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &white_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &[255u8, 255u8, 255u8, 255u8],
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: None,
+                rows_per_image: Some(1),
+            },
+            wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+        );
+
+        let white_texture_view = white_texture.create_view(&wgpu::TextureViewDescriptor {
+            label: None,
+            array_layer_count: Some(white_texture.depth_or_array_layers()),
+            aspect: wgpu::TextureAspect::All,
+            base_array_layer: 0,
+            base_mip_level: 0,
+            dimension: Some(match white_texture.dimension() {
+                wgpu::TextureDimension::D1 => wgpu::TextureViewDimension::D1,
+                wgpu::TextureDimension::D2 => wgpu::TextureViewDimension::D2,
+                wgpu::TextureDimension::D3 => wgpu::TextureViewDimension::D3,
+            }),
+            format: Some(white_texture.format()),
+            mip_level_count: Some(white_texture.mip_level_count()),
+        });
+
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("White Texture Sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            lod_min_clamp: -100.0,
+            lod_max_clamp: 100.0,
+            compare: None,
+            anisotropy_clamp: 1,
+            border_color: None,
+        });
+
+        let texture_cube = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Default Cube Texture"),
+            size: wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 6,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::STORAGE_BINDING
+                | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+
+        queue.write_texture(
+            wgpu::ImageCopyTexture {
+                texture: &texture_cube,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &[255u8, 255u8, 255u8, 255u8],
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: None,
+                rows_per_image: Some(1),
+            },
+            wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 6,
+            },
+        );
+
+        let texture_cube_view = texture_cube.create_view(&wgpu::TextureViewDescriptor {
+            label: None,
+            array_layer_count: Some(texture_cube.depth_or_array_layers()),
+            aspect: wgpu::TextureAspect::All,
+            base_array_layer: 0,
+            base_mip_level: 0,
+            dimension: Some(match texture_cube.dimension() {
+                wgpu::TextureDimension::D1 => wgpu::TextureViewDimension::D1,
+                wgpu::TextureDimension::D2 => wgpu::TextureViewDimension::D2,
+                wgpu::TextureDimension::D3 => wgpu::TextureViewDimension::D3,
+            }),
+            format: Some(texture_cube.format()),
+            mip_level_count: Some(texture_cube.mip_level_count()),
+        });
+
+        DefaultTextures {
+            texture_2d: white_texture,
+            texture_2d_view: white_texture_view,
+            sampler,
+            texture_cube,
+            texture_cube_view,
+        }
+    }
+}
+
+impl Resource for DefaultTextures {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }

@@ -9,7 +9,7 @@ use crate::{
         plugin::window::{events::WindowResized, WindowPlugin},
         resources::{
             buffer::Buffer,
-            texture::{Texture, Texture2d, TextureInfo},
+            texture::{Sampler, Texture, Texture2d, TextureInfo},
         },
     },
 };
@@ -164,6 +164,8 @@ impl SimpleRenderer {
 
         let texture =
             Texture2d::from_info(device.inner(), device.queue(), &TextureInfo::red(256, 256));
+        let sampler = Sampler::new(device.inner(), texture.wrap_mode(), texture.filter_mode());
+
         let bind_group = device
             .inner()
             .create_bind_group(&wgpu::BindGroupDescriptor {
@@ -176,7 +178,7 @@ impl SimpleRenderer {
                     },
                     wgpu::BindGroupEntry {
                         binding: 1,
-                        resource: wgpu::BindingResource::Sampler(texture.sampler()),
+                        resource: wgpu::BindingResource::Sampler(sampler.inner()),
                     },
                 ],
             });
@@ -300,10 +302,10 @@ impl crate::game::plugin::Plugin for SimpleRendererPlugin {
             if event.size.width == 0 || event.size.height == 0 {
                 return;
             }
-            let surface = world.resource::<RenderSurface>();
+            let mut surface = world.resource_mut::<RenderSurface>();
             let device = world.resource::<RenderDevice>();
 
-            surface.configure(device.inner(), event.size);
+            surface.resize(device.inner(), event.size);
         });
     }
 

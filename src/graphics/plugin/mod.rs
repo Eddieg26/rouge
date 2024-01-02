@@ -6,6 +6,7 @@ use super::{
 use crate::game::plugin::Plugin;
 use winit::window::Window;
 
+pub mod material;
 pub mod renderer;
 pub mod window;
 
@@ -37,16 +38,22 @@ impl Plugin for GraphicsPlugin {
             if event.size.width == 0 || event.size.height == 0 {
                 return;
             }
-            let surface = world.resource::<RenderSurface>();
+            let mut surface = world.resource_mut::<RenderSurface>();
             let device = world.resource::<RenderDevice>();
 
-            surface.configure(device.inner(), event.size);
+            surface.resize(device.inner(), event.size);
         });
     }
 
     fn finish(&self, game: &mut crate::game::Game) {
         let device = game.world().resource::<RenderDevice>();
-        game.world().resource_mut::<RenderGraph>().build(&device);
+        let surface = game.world().resource::<RenderSurface>();
+
+        game.world().resource_mut::<RenderGraph>().build(
+            &device,
+            surface.width(),
+            surface.height(),
+        );
     }
 
     fn dependencies(&self) -> Vec<Box<dyn Plugin>> {

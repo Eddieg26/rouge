@@ -1,32 +1,21 @@
+use super::shader::layout::ShaderVariable;
+use crate::ecs::{resource::ResourceId, Resource};
+use std::collections::HashMap;
 use wgpu::util::DeviceExt;
 
-pub struct BufferInfo {
-    pub size: u64,
+pub struct BufferDesc {
     pub usage: wgpu::BufferUsages,
+    pub size: u64,
     pub mapped_at_creation: bool,
 }
 
-impl BufferInfo {
-    pub fn new(size: u64, usage: wgpu::BufferUsages) -> BufferInfo {
-        BufferInfo {
-            size,
-            usage,
+impl Default for BufferDesc {
+    fn default() -> Self {
+        BufferDesc {
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::UNIFORM,
+            size: 0,
             mapped_at_creation: false,
         }
-    }
-
-    pub fn new_type<T: bytemuck::Pod + bytemuck::Zeroable>(
-        usage: wgpu::BufferUsages,
-    ) -> BufferInfo {
-        let size = std::mem::size_of::<T>() as u64;
-
-        BufferInfo::new(size, usage)
-    }
-
-    pub fn mapped_at_creation(mut self, mapped_at_creation: bool) -> BufferInfo {
-        self.mapped_at_creation = mapped_at_creation;
-
-        self
     }
 }
 
@@ -55,12 +44,12 @@ impl Buffer {
         Buffer::from_bytes(device, usage, contents)
     }
 
-    pub fn from_info(device: &wgpu::Device, info: &BufferInfo) -> Buffer {
+    pub fn from_size(device: &wgpu::Device, usage: wgpu::BufferUsages, size: u64) -> Buffer {
         let inner = device.create_buffer(&wgpu::BufferDescriptor {
             label: None,
-            size: info.size,
-            usage: info.usage,
-            mapped_at_creation: info.mapped_at_creation,
+            size,
+            usage,
+            mapped_at_creation: false,
         });
 
         Buffer { inner }
@@ -93,5 +82,80 @@ impl Buffer {
             0,
             std::mem::size_of::<T>() as u64,
         );
+    }
+}
+
+pub struct Buffers {
+    buffers: HashMap<ResourceId, Buffer>,
+}
+
+impl Buffers {
+    pub fn new() -> Buffers {
+        Buffers {
+            buffers: HashMap::new(),
+        }
+    }
+
+    pub fn get(&self, id: &ResourceId) -> Option<&Buffer> {
+        self.buffers.get(id)
+    }
+
+    pub fn get_mut(&mut self, id: &ResourceId) -> Option<&mut Buffer> {
+        self.buffers.get_mut(id)
+    }
+
+    pub fn register_buffer(
+        &mut self,
+        device: &wgpu::Device,
+        inputs: &[ShaderVariable],
+    ) -> ResourceId {
+        let id = inputs.into();
+
+        let size = inputs.iter().map(|i| i.size()).sum::<usize>() as u64;
+        let buffer = Buffer::from_size(
+            device,
+            wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::UNIFORM,
+            size,
+        );
+
+        self.buffers.insert(id, buffer);
+
+        id
+    }
+
+    pub fn create_buffer(
+        &mut self,
+        device: &wgpu::Device,
+        id: ResourceId,
+        usages: wgpu::BufferUsages,
+        bytes: &[u8],
+    ) -> ResourceId {
+        let buffer = Buffer::from_bytes(device, usages, bytes);
+
+        self.buffers.insert(id, buffer);
+
+        id
+    }
+
+    pub fn update<T: bytemuck::Pod + bytemuck::Zeroable>(
+        &mut self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        id: &ResourceId,
+        data: &T,
+    ) {
+        if let Some(buffer) = self.get(id) {
+            buffer.udpate(device, encoder, data);
+        }
+    }
+}
+
+impl Resource for Buffers {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
     }
 }

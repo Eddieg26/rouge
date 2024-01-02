@@ -1,20 +1,14 @@
+use super::{
+    context::{GraphResources, RenderContext, RenderUpdateContext},
+    NodeId,
+};
 use crate::{
     ecs::{Resource, World},
     graphics::{
         core::{device::RenderDevice, surface::RenderSurface},
-        resources::{
-            buffer::{Buffer, BufferInfo},
-            texture::{Texture, Texture2d, TextureDesc},
-            BufferId, GpuResources, TextureId,
-        },
+        resources::{buffer::Buffer, texture::Texture, BufferId, TextureId},
         state::RenderState,
     },
-};
-use std::collections::HashMap;
-
-use super::{
-    context::{RenderContext, RenderUpdateContext},
-    NodeId,
 };
 
 pub trait RenderGraphNode: 'static {
@@ -31,10 +25,7 @@ pub trait RenderGraphNode: 'static {
 
 pub struct RenderGraph {
     nodes: Vec<Box<dyn RenderGraphNode>>,
-    texture_infos: HashMap<TextureId, TextureDesc>,
-    buffer_infos: HashMap<TextureId, BufferInfo>,
-    textures: HashMap<TextureId, Box<dyn Texture>>,
-    buffers: HashMap<BufferId, Buffer>,
+    resources: GraphResources,
     is_dirty: bool,
 }
 
@@ -42,46 +33,34 @@ impl RenderGraph {
     pub fn new() -> RenderGraph {
         RenderGraph {
             nodes: Vec::new(),
-            texture_infos: HashMap::new(),
-            buffer_infos: HashMap::new(),
-            textures: HashMap::new(),
-            buffers: HashMap::new(),
+            resources: GraphResources::new(),
             is_dirty: false,
         }
     }
 
-    pub fn build(&mut self, device: &RenderDevice) {
+    pub fn build(&mut self, device: &RenderDevice, width: u32, height: u32) {
         self.sort();
 
-        for (id, info) in &self.texture_infos {
-            let texture: Box<dyn Texture> = match info.dimension {
-                wgpu::TextureDimension::D1 => todo!(),
-                wgpu::TextureDimension::D2 => Box::new(Texture2d::from_desc(device.inner(), info)),
-                wgpu::TextureDimension::D3 => todo!(),
-            };
-
-            self.textures.insert(*id, texture);
-        }
-
-        for (id, info) in &self.buffer_infos {
-            let buffer = Buffer::from_info(device.inner(), info);
-
-            self.buffers.insert(*id, buffer);
-        }
+        self.resources.update(device, width, height)
     }
 
-    pub fn create_texture(&mut self, id: impl Into<TextureId>, info: TextureDesc) -> TextureId {
-        let id = id.into();
-        self.texture_infos.insert(id, info);
-
-        id
+    pub fn create_texture(
+        &mut self,
+        id: impl Into<TextureId>,
+        usages: wgpu::TextureUsages,
+        format: wgpu::TextureFormat,
+        dimension: wgpu::TextureDimension,
+    ) -> TextureId {
+        self.resources.create_texture(id, usages, format, dimension)
     }
 
-    pub fn create_buffer(&mut self, id: impl Into<TextureId>, info: BufferInfo) -> BufferId {
-        let id = id.into();
-        self.buffer_infos.insert(id, info);
-
-        id
+    pub fn create_buffer(
+        &mut self,
+        id: impl Into<TextureId>,
+        usages: wgpu::BufferUsages,
+        size: wgpu::BufferAddress,
+    ) -> BufferId {
+        self.resources.create_buffer(id, usages, size)
     }
 
     pub fn import_texture<T: Texture>(
@@ -89,17 +68,11 @@ impl RenderGraph {
         id: impl Into<TextureId>,
         texture: T,
     ) -> TextureId {
-        let id = id.into();
-        self.textures.insert(id, Box::new(texture));
-
-        id
+        self.resources.import_texture(id, texture)
     }
 
     pub fn import_buffer(&mut self, id: impl Into<BufferId>, buffer: Buffer) -> BufferId {
-        let id = id.into();
-        self.buffers.insert(id, buffer);
-
-        id
+        self.resources.import_buffer(id, buffer)
     }
 
     pub fn add_node<T: RenderGraphNode>(&mut self, node: T) {
@@ -122,17 +95,15 @@ impl RenderGraph {
     }
 
     pub fn texture<T: Texture>(&self, id: &TextureId) -> Option<&T> {
-        self.textures
-            .get(id)
-            .map(|t| t.as_any().downcast_ref::<T>().unwrap())
+        self.resources.texture::<T>(id)
     }
 
     pub fn dyn_texture(&self, id: &TextureId) -> Option<&dyn Texture> {
-        self.textures.get(id).map(|t| t.as_ref())
+        self.resources.dyn_texture(id)
     }
 
     pub fn buffer(&self, id: &BufferId) -> Option<&Buffer> {
-        self.buffers.get(id)
+        self.buffer(id)
     }
 
     fn sort(&mut self) -> &Vec<Box<dyn RenderGraphNode>> {
@@ -181,10 +152,8 @@ impl RenderGraph {
             self.sort();
             self.is_dirty = false;
         }
-        let resources = world.resource::<GpuResources>();
         let device = world.resource::<RenderDevice>();
-
-        let ctx = RenderUpdateContext::new(&device, &resources, &self.textures, &self.buffers);
+        let ctx = RenderUpdateContext::new(&device, &self.resources);
 
         for node in &mut self.nodes {
             node.update(&ctx);
@@ -192,7 +161,6 @@ impl RenderGraph {
     }
 
     pub fn execute(&self, world: &World) -> Result<(), String> {
-        let graphics = world.resource::<GpuResources>();
         let state = world.state::<RenderState>();
         let device = world.resource::<RenderDevice>();
         let surface = world.resource::<RenderSurface>();
@@ -203,14 +171,7 @@ impl RenderGraph {
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
 
-        let ctx = RenderContext::new(
-            &device,
-            &state,
-            &graphics,
-            &self.textures,
-            &self.buffers,
-            &view,
-        );
+        let ctx = RenderContext::new(world, &device, &state, &self.resources, &view);
         let mut encoder = self.create_encoder(device.inner());
 
         for node in &self.nodes {

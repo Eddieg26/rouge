@@ -23,6 +23,15 @@ pub struct SubMesh {
     pub index_count: u32,
 }
 
+impl SubMesh {
+    pub fn new(start_index: u32, index_count: u32) -> SubMesh {
+        SubMesh {
+            start_index,
+            index_count,
+        }
+    }
+}
+
 pub struct Mesh {
     submeshes: Vec<SubMesh>,
     vertex_buffer: wgpu::Buffer,

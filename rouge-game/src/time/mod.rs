@@ -1,7 +1,7 @@
+use rouge_ecs::{macros::Resource, world::resource::Resource};
 use std::time::Instant;
 
-use rouge_ecs::world::resource::Resource;
-
+#[derive(Resource)]
 pub struct Time {
     current: Instant,
     current_fixed: Instant,
@@ -68,5 +68,3 @@ impl Time {
         self.frame_count
     }
 }
-
-impl Resource for Time {}

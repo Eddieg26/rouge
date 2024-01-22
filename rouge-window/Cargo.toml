@@ -1,9 +1,10 @@
 [package]
-name = "rouge-ecs"
+name = "rouge-window"
 version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-rouge-macros = { path = "macros", version = "0.1.0" }
+raw-window-handle = "0.6.0"
+rouge-ecs = { path = "../rouge-ecs", version = "0.1.0" }

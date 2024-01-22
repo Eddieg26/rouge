@@ -1,3 +1,5 @@
+use rouge_macros::Resource;
+
 use crate::{
     storage::sparse::SparseMap,
     system::IntoSystem,
@@ -107,6 +109,7 @@ impl Schedules {
     }
 }
 
+#[derive(Resource)]
 pub struct GlobalSchedules(Schedules);
 
 impl GlobalSchedules {
@@ -133,14 +136,13 @@ impl std::ops::Deref for GlobalSchedules {
     }
 }
 
-impl Resource for GlobalSchedules {}
-
 impl std::ops::DerefMut for GlobalSchedules {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
 }
 
+#[derive(Resource)]
 pub struct LocalSchedules(Schedules);
 
 impl LocalSchedules {
@@ -172,5 +174,3 @@ impl std::ops::DerefMut for LocalSchedules {
         &mut self.0
     }
 }
-
-impl Resource for LocalSchedules {}

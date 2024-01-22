@@ -40,13 +40,21 @@ impl ScheduleRunner for ParallelRunner {
             .unwrap_or(NonZeroUsize::new(1).unwrap())
             .into();
         for row in graph.hierarchy() {
+            let local_nodes = row
+                .iter()
+                .filter(|id| graph.nodes()[***id].is_local())
+                .collect::<Vec<_>>();
+            let row = row
+                .iter()
+                .filter(|id| !local_nodes.contains(id))
+                .collect::<Vec<_>>();
             let num_threads = row.len().min(available_threads);
 
             ScopedTaskPool::new(num_threads, |sender| {
                 let (barrier, lock) = JobBarrier::new(row.len());
                 let barrier = Arc::new(Mutex::new(barrier));
 
-                for node in row {
+                for node in &row {
                     let barrier = barrier.clone();
                     let node = &graph.nodes()[node.id()];
 
@@ -58,6 +66,12 @@ impl ScheduleRunner for ParallelRunner {
                 }
 
                 sender.join();
+
+                for node in &local_nodes {
+                    let node = &graph.nodes()[node.id()];
+
+                    node.run(world);
+                }
 
                 lock.wait(barrier.lock().unwrap());
             });

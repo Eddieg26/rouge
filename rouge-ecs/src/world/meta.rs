@@ -4,7 +4,7 @@ use crate::{
 };
 use std::any::TypeId;
 
-use super::resource::Resource;
+use super::resource::{LocalResource, Resource};
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Access {
     Read,
@@ -17,6 +17,7 @@ pub enum AccessType {
     World,
     Component(TypeId),
     Resource(TypeId),
+    Local(TypeId),
 }
 
 impl AccessType {
@@ -26,6 +27,10 @@ impl AccessType {
 
     pub fn resource<R: Resource>() -> Self {
         Self::Resource(TypeId::of::<R>())
+    }
+
+    pub fn local_resource<R: LocalResource>() -> Self {
+        Self::Local(TypeId::of::<R>())
     }
 
     pub fn world() -> Self {

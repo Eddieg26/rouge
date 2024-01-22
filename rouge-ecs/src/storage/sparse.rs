@@ -306,7 +306,7 @@ where
         other.clear();
     }
 
-    pub fn sort(&mut self, sorter: fn(&V, &V) -> std::cmp::Ordering) {
+    pub fn sort<F: Fn(&V, &V) -> std::cmp::Ordering>(&mut self, sorter: F) {
         self.keys.sort_by(|a, b| {
             let value_a = &self.values[*self.map.get(a).unwrap()];
             let value_b = &self.values[*self.map.get(b).unwrap()];
@@ -320,6 +320,21 @@ where
         }
 
         self.values.sort_by(sorter);
+    }
+
+    pub fn sort_keys(&mut self, sorter: impl Fn(&K, &K) -> std::cmp::Ordering) {
+        let old = self.keys.clone();
+        self.keys.sort_by(sorter);
+
+        self.map.clear();
+
+        for (index, key) in self.keys.iter().enumerate() {
+            self.map.insert(key.clone(), index);
+        }
+
+        for (index, key) in old.iter().enumerate() {
+            self.values.swap(index, *self.map.get(key).unwrap());
+        }
     }
 
     pub fn into_immutable(self) -> ImmutableSparseMap<K, V> {

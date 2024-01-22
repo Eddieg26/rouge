@@ -1,12 +1,12 @@
 use self::{
     lifecycle::Lifecycle,
     meta::ComponentActionMeta,
-    resource::{Resource, Resources},
+    resource::{LocalResource, LocalResources, Resource, Resources},
 };
 use crate::{
     archetype::Archetypes,
     core::{Component, ComponentId, Components, Entities, Entity},
-    schedule::{GlobalSchedules, SceneSchedules, Schedule, ScheduleLabel, SchedulePhase},
+    schedule::{GlobalSchedules, LocalSchedules, Schedule, SchedulePhase},
     storage::table::Tables,
     system::{
         observer::{
@@ -24,6 +24,7 @@ pub mod resource;
 
 pub struct World {
     resources: Resources,
+    local_resources: LocalResources,
     archetypes: Archetypes,
     entities: Entities,
     components: Components,
@@ -34,13 +35,14 @@ impl World {
     pub fn new() -> Self {
         let mut resources = Resources::new();
         resources.insert(GlobalSchedules::new());
-        resources.insert(SceneSchedules::new());
+        resources.insert(LocalSchedules::new());
         resources.insert(Observables::new());
         resources.insert(ActionOutputs::new());
         resources.insert(Actions::new());
 
         Self {
             resources,
+            local_resources: LocalResources::new(),
             archetypes: Archetypes::new(),
             entities: Entities::new(),
             components: Components::new(),
@@ -58,24 +60,18 @@ impl World {
         self.resources.insert(resource);
     }
 
-    pub fn add_system<M>(
-        &mut self,
-        phase: impl SchedulePhase,
-        label: impl ScheduleLabel,
-        system: impl IntoSystem<M>,
-    ) {
-        let schedules = self.resources.get_mut::<GlobalSchedules>();
-        schedules.add_system(phase, label, system);
+    pub fn add_local_resource<R: LocalResource>(&mut self, resource: R) {
+        self.local_resources.insert(resource);
     }
 
-    pub fn add_schedule(
-        &mut self,
-        phase: impl SchedulePhase,
-        label: impl ScheduleLabel,
-        schedule: Schedule,
-    ) {
+    pub fn add_system<M>(&mut self, phase: impl SchedulePhase, system: impl IntoSystem<M>) {
         let schedules = self.resources.get_mut::<GlobalSchedules>();
-        schedules.add_schedule(phase, label, schedule);
+        schedules.add_system(phase, system);
+    }
+
+    pub fn add_schedule(&mut self, phase: impl SchedulePhase, schedule: Schedule) {
+        let schedules = self.resources.get_mut::<GlobalSchedules>();
+        schedules.add_schedule(phase, schedule);
     }
 
     pub fn add_observers<A: Action>(&mut self, observers: Observers<A>) {
@@ -110,6 +106,14 @@ impl World {
 
     pub fn resource_mut<R: Resource>(&self) -> &mut R {
         self.resources.get_mut::<R>()
+    }
+
+    pub fn local_resource<R: LocalResource>(&self) -> &R {
+        self.local_resources.get::<R>()
+    }
+
+    pub fn local_resource_mut<R: LocalResource>(&self) -> &mut R {
+        self.local_resources.get_mut::<R>()
     }
 
     pub fn create(&mut self) -> Entity {
@@ -189,7 +193,7 @@ impl World {
         let schedules = self.resources.get::<GlobalSchedules>();
         schedules.run::<P>(self);
 
-        let schedules = self.resources.get::<SceneSchedules>();
+        let schedules = self.resources.get::<LocalSchedules>();
         schedules.run::<P>(self);
 
         self.flush();
@@ -221,7 +225,7 @@ impl World {
         let schedules = self.resources.get_mut::<GlobalSchedules>();
         schedules.build();
 
-        let schedules = self.resources.get_mut::<SceneSchedules>();
+        let schedules = self.resources.get_mut::<LocalSchedules>();
         schedules.build();
     }
 }

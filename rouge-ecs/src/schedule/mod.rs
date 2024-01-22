@@ -13,10 +13,6 @@ use self::{
 pub mod graph;
 pub mod runner;
 
-pub trait ScheduleLabel: 'static {
-    const LABEL: &'static str;
-}
-
 pub trait SchedulePhase: 'static {
     const PHASE: &'static str;
 }
@@ -60,7 +56,7 @@ impl Schedule {
 }
 
 pub struct Schedules {
-    schedules: SparseMap<TypeId, SparseMap<TypeId, Schedule>>,
+    schedules: SparseMap<TypeId, Schedule>,
 }
 
 impl Schedules {
@@ -70,69 +66,39 @@ impl Schedules {
         }
     }
 
-    pub fn add_system<M>(
-        &mut self,
-        phase: impl SchedulePhase,
-        label: impl ScheduleLabel,
-        system: impl IntoSystem<M>,
-    ) {
+    pub fn add_system<M>(&mut self, phase: impl SchedulePhase, system: impl IntoSystem<M>) {
         let phase_id = phase.type_id();
-        let label_id = label.type_id();
 
-        if let Some(phase) = self.schedules.get_mut(&phase_id) {
-            if let Some(schedule) = phase.get_mut(&label_id) {
-                schedule.add_system(system);
-            } else {
-                let mut schedule = Schedule::new();
-                schedule.add_system(system);
-                phase.insert(label_id, schedule);
-            }
+        if let Some(schedule) = self.schedules.get_mut(&phase_id) {
+            schedule.add_system(system);
         } else {
-            let mut phase = SparseMap::new();
             let mut schedule = Schedule::new();
             schedule.add_system(system);
-            phase.insert(label_id, schedule);
-            self.schedules.insert(phase_id, phase);
+            self.schedules.insert(phase_id, schedule);
         }
     }
 
-    pub fn add_schedule(
-        &mut self,
-        phase: impl SchedulePhase,
-        label: impl ScheduleLabel,
-        schedule: Schedule,
-    ) {
+    pub fn add_schedule(&mut self, phase: impl SchedulePhase, schedule: Schedule) {
         let phase_id = phase.type_id();
-        let label_id = label.type_id();
 
-        if let Some(phase) = self.schedules.get_mut(&phase_id) {
-            if let Some(found) = phase.get_mut(&label_id) {
-                found.append(schedule);
-            } else {
-                phase.insert(label_id, schedule);
-            }
+        if let Some(found) = self.schedules.get_mut(&phase_id) {
+            found.append(schedule);
         } else {
-            let mut phase = SparseMap::new();
-            phase.insert(label_id, schedule);
-            self.schedules.insert(phase_id, phase);
+            self.schedules.insert(phase_id, schedule);
         }
     }
 
     pub fn run<P: SchedulePhase>(&self, world: &World) {
         let phase_id = TypeId::of::<P>();
 
-        if let Some(phase) = self.schedules.get(&phase_id) {
-            for schedule in phase.values() {
-                schedule.run(world);
-            }
+        if let Some(schedule) = self.schedules.get(&phase_id) {
+            schedule.run(world);
         }
     }
 
     pub(crate) fn build(&mut self) {
-        for phase in self.schedules.values_mut() {
-            for schedule in phase.values_mut() {
-                schedule.build();
-            }
+        for schedule in self.schedules.values_mut() {
+            schedule.build();
         }
     }
 
@@ -175,9 +141,9 @@ impl std::ops::DerefMut for GlobalSchedules {
     }
 }
 
-pub struct SceneSchedules(Schedules);
+pub struct LocalSchedules(Schedules);
 
-impl SceneSchedules {
+impl LocalSchedules {
     pub fn new() -> Self {
         Self(Schedules::new())
     }
@@ -187,13 +153,13 @@ impl SceneSchedules {
     }
 }
 
-impl From<Schedules> for SceneSchedules {
+impl From<Schedules> for LocalSchedules {
     fn from(schedules: Schedules) -> Self {
         Self(schedules)
     }
 }
 
-impl std::ops::Deref for SceneSchedules {
+impl std::ops::Deref for LocalSchedules {
     type Target = Schedules;
 
     fn deref(&self) -> &Self::Target {
@@ -201,10 +167,10 @@ impl std::ops::Deref for SceneSchedules {
     }
 }
 
-impl std::ops::DerefMut for SceneSchedules {
+impl std::ops::DerefMut for LocalSchedules {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
 }
 
-impl Resource for SceneSchedules {}
+impl Resource for LocalSchedules {}

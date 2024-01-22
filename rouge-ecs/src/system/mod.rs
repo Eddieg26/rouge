@@ -2,7 +2,7 @@ use crate::{
     core::Entities,
     world::{
         meta::{Access, AccessMeta, AccessType},
-        resource::Resource,
+        resource::{LocalResource, Resource},
         World,
     },
 };
@@ -180,6 +180,18 @@ pub trait SystemArg {
     fn metas() -> Vec<AccessMeta>;
 }
 
+pub type ArgItem<'a, A> = <A as SystemArg>::Item<'a>;
+
+pub trait IntoSystem<M> {
+    fn into_system(self) -> System;
+    fn before<Marker>(self, system: impl IntoSystem<Marker>) -> System;
+    fn after<Marker>(self, system: impl IntoSystem<Marker>) -> System;
+}
+
+pub trait IntoSystems<M> {
+    fn into_systems(self) -> Vec<System>;
+}
+
 impl SystemArg for &World {
     type Item<'a> = &'a World;
 
@@ -191,18 +203,6 @@ impl SystemArg for &World {
         let ty = AccessType::world();
         vec![AccessMeta::new(ty, Access::Read)]
     }
-}
-
-pub type ArgItem<'a, A> = <A as SystemArg>::Item<'a>;
-
-pub trait IntoSystem<M> {
-    fn into_system(self) -> System;
-    fn before<Marker>(self, system: impl IntoSystem<Marker>) -> System;
-    fn after<Marker>(self, system: impl IntoSystem<Marker>) -> System;
-}
-
-pub trait IntoSystems<M> {
-    fn into_systems(self) -> Vec<System>;
 }
 
 impl<R: Resource> SystemArg for &R {
@@ -227,6 +227,84 @@ impl<R: Resource> SystemArg for &mut R {
 
     fn metas() -> Vec<AccessMeta> {
         let ty = AccessType::resource::<R>();
+        vec![AccessMeta::new(ty, Access::Write)]
+    }
+}
+
+pub struct Local<'a, R: LocalResource> {
+    resource: &'a R,
+    _marker: std::marker::PhantomData<R>,
+}
+
+impl<'a, R: LocalResource> Local<'a, R> {
+    pub fn new(resource: &'a R) -> Self {
+        Self {
+            resource,
+            _marker: std::marker::PhantomData,
+        }
+    }
+}
+
+impl<'a, R: LocalResource> std::ops::Deref for Local<'a, R> {
+    type Target = R;
+
+    fn deref(&self) -> &Self::Target {
+        self.resource
+    }
+}
+
+pub struct LocalMut<'a, R: LocalResource> {
+    resource: &'a mut R,
+    _marker: std::marker::PhantomData<R>,
+}
+
+impl<'a, R: LocalResource> LocalMut<'a, R> {
+    pub fn new(resource: &'a mut R) -> Self {
+        Self {
+            resource,
+            _marker: std::marker::PhantomData,
+        }
+    }
+}
+
+impl<'a, R: LocalResource> std::ops::Deref for LocalMut<'a, R> {
+    type Target = R;
+
+    fn deref(&self) -> &Self::Target {
+        self.resource
+    }
+}
+
+impl<'a, R: LocalResource> std::ops::DerefMut for LocalMut<'a, R> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.resource
+    }
+}
+
+impl<R: LocalResource> SystemArg for Local<'_, R> {
+    type Item<'a> = Local<'a, R>;
+
+    fn get<'a>(world: &'a World) -> Self::Item<'a> {
+        let resource = world.local_resource::<R>();
+        Local::new(resource)
+    }
+
+    fn metas() -> Vec<AccessMeta> {
+        let ty = AccessType::local_resource::<R>();
+        vec![AccessMeta::new(ty, Access::Read)]
+    }
+}
+
+impl<R: LocalResource> SystemArg for LocalMut<'_, R> {
+    type Item<'a> = LocalMut<'a, R>;
+
+    fn get<'a>(world: &'a World) -> Self::Item<'a> {
+        let resource = world.local_resource_mut::<R>();
+        LocalMut::new(resource)
+    }
+
+    fn metas() -> Vec<AccessMeta> {
+        let ty = AccessType::local_resource::<R>();
         vec![AccessMeta::new(ty, Access::Write)]
     }
 }

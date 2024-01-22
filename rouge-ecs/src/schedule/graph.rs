@@ -66,6 +66,16 @@ impl Node {
     pub fn add_dependency(&mut self, dependency: NodeId) {
         self.dependencies.push(dependency);
     }
+
+    pub fn is_local(&self) -> bool {
+        self.system.reads().iter().any(|access| match access {
+            AccessType::Local(_) | AccessType::World => true,
+            _ => false,
+        }) || self.system.writes().iter().any(|access| match access {
+            AccessType::Local(_) | AccessType::World => true,
+            _ => false,
+        })
+    }
 }
 
 pub struct SystemGraph {

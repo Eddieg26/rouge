@@ -16,6 +16,10 @@ impl ResourceType {
         Self(hash_id(&TypeId::of::<T>()))
     }
 
+    pub fn new_local<T: LocalResource>() -> Self {
+        Self(hash_id(&TypeId::of::<T>()))
+    }
+
     pub fn dynamic(value: u64) -> Self {
         Self(value)
     }
@@ -101,5 +105,64 @@ impl ResourceData {
 
     pub fn get_mut<R: Resource>(&self) -> &mut R {
         self.data.get_mut::<R>(0).unwrap()
+    }
+}
+
+pub trait LocalResource: 'static {}
+
+pub struct LocalResourceData {
+    data: Blob,
+}
+
+impl LocalResourceData {
+    pub fn new<R: LocalResource>(resource: R) -> Self {
+        let mut data = Blob::new::<R>();
+        data.push(resource);
+
+        LocalResourceData { data }
+    }
+
+    pub fn ptr<'a>(&'a self) -> Ptr<'a> {
+        self.data.ptr()
+    }
+
+    pub fn get<R: LocalResource>(&self) -> &R {
+        self.data.get::<R>(0).unwrap()
+    }
+
+    pub fn get_mut<R: LocalResource>(&self) -> &mut R {
+        self.data.get_mut::<R>(0).unwrap()
+    }
+}
+
+pub struct LocalResources {
+    resources: HashMap<ResourceType, LocalResourceData>,
+}
+
+impl LocalResources {
+    pub fn new() -> Self {
+        Self {
+            resources: HashMap::new(),
+        }
+    }
+
+    pub fn insert<R: LocalResource>(&mut self, resource: R) {
+        self.resources.insert(
+            ResourceType::new_local::<R>(),
+            LocalResourceData::new(resource),
+        );
+    }
+
+    pub fn get<R: LocalResource>(&self) -> &R {
+        let ty = ResourceType::new_local::<R>();
+        let res = self.resources.get(&ty).expect("Resource doesn't exist.");
+        res.get::<R>()
+    }
+
+    pub fn get_mut<R: LocalResource>(&self) -> &mut R {
+        let ty = ResourceType::new_local::<R>();
+        let res = self.resources.get(&ty).expect("Resource doesn't exist.");
+
+        res.get_mut::<R>()
     }
 }

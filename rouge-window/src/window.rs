@@ -1,6 +1,9 @@
+use rouge_ecs::{
+    macros::LocalResource, storage::sparse::SparseMap, world::resource::LocalResource,
+};
 use std::hash::{Hash, Hasher};
 
-use rouge_ecs::storage::sparse::SparseMap;
+use crate::raw::RawWindowHandle;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct WindowId(u64);
@@ -115,6 +118,7 @@ impl Default for Cursor {
 
 pub struct Window {
     title: String,
+    handle: RawWindowHandle,
     present_mode: PresentMode,
     composite_alpha_mode: CompositeAlphaMode,
     mode: WindowMode,
@@ -127,6 +131,7 @@ pub struct Window {
     resizable: bool,
     visible: bool,
     focused: bool,
+    hovered: bool,
     decorated: bool,
     transparent: bool,
     maximized: bool,
@@ -135,35 +140,10 @@ pub struct Window {
     cursor: Cursor,
 }
 
-impl Default for Window {
-    fn default() -> Self {
-        Self {
-            title: String::from("Rouge"),
-            present_mode: PresentMode::Immediate,
-            composite_alpha_mode: CompositeAlphaMode::Auto,
-            mode: WindowMode::Windowed,
-            width: 800,
-            height: 600,
-            scale_factor: 1.0,
-            x: 0,
-            y: 0,
-            fullscreen: false,
-            resizable: true,
-            visible: true,
-            focused: true,
-            decorated: true,
-            transparent: false,
-            maximized: false,
-            minimized: false,
-            always_on_top: false,
-            cursor: Cursor::default(),
-        }
-    }
-}
-
 impl Window {
     pub fn new(
         title: &str,
+        handle: RawWindowHandle,
         present_mode: PresentMode,
         composite_alpha_mode: CompositeAlphaMode,
         mode: WindowMode,
@@ -172,16 +152,34 @@ impl Window {
     ) -> Self {
         Self {
             title: title.into(),
+            handle,
             present_mode,
             composite_alpha_mode,
             mode,
             width,
             height,
-            ..Default::default()
+            scale_factor: 1.0,
+            x: 0,
+            y: 0,
+            fullscreen: false,
+            resizable: true,
+            visible: true,
+            focused: true,
+            hovered: false,
+            decorated: true,
+            transparent: false,
+            maximized: false,
+            minimized: false,
+            always_on_top: false,
+            cursor: Cursor::default(),
         }
     }
     pub fn title(&self) -> &str {
         &self.title
+    }
+
+    pub fn handle(&self) -> &RawWindowHandle {
+        &self.handle
     }
 
     pub fn present_mode(&self) -> PresentMode {
@@ -230,6 +228,10 @@ impl Window {
 
     pub fn focused(&self) -> bool {
         self.focused
+    }
+
+    pub fn hovered(&self) -> bool {
+        self.hovered
     }
 
     pub fn decorated(&self) -> bool {
@@ -298,6 +300,10 @@ impl Window {
         self.visible = visible;
     }
 
+    pub fn set_hovered(&mut self, hovered: bool) {
+        self.hovered = hovered;
+    }
+
     pub fn set_focused(&mut self, focused: bool) {
         self.focused = focused;
     }
@@ -346,31 +352,50 @@ impl Window {
     }
 }
 
+#[derive(LocalResource)]
 pub struct Windows {
     windows: SparseMap<WindowId, Window>,
+    primary: Option<WindowId>,
 }
 
 impl Windows {
     pub fn new() -> Self {
         Self {
             windows: SparseMap::new(),
+            primary: None,
         }
+    }
+
+    pub fn primary(&self) -> Option<&Window> {
+        self.primary.and_then(|id| self.windows.get(&id))
+    }
+
+    pub fn set_primary(&mut self, id: WindowId) {
+        self.primary = Some(id);
     }
 
     pub fn add(&mut self, id: impl Hash, window: Window) {
         self.windows.insert(WindowId::new(id), window);
     }
 
-    pub fn get(&self, id: impl Hash) -> Option<&Window> {
-        self.windows.get(&WindowId::new(id))
+    pub fn get(&self, id: &WindowId) -> Option<&Window> {
+        self.windows.get(id)
     }
 
-    pub fn get_mut(&mut self, id: impl Hash) -> Option<&mut Window> {
-        self.windows.get_mut(&WindowId::new(id))
+    pub fn get_mut(&mut self, id: &WindowId) -> Option<&mut Window> {
+        self.windows.get_mut(id)
     }
 
-    pub fn remove(&mut self, id: impl Hash) -> Option<Window> {
-        self.windows.remove(&WindowId::new(id))
+    pub fn contains(&self, id: &WindowId) -> bool {
+        self.windows.contains(id)
+    }
+
+    pub fn remove(&mut self, id: &WindowId) -> Option<Window> {
+        if self.primary == Some(*id) {
+            self.primary = None;
+        }
+
+        self.windows.remove(id)
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &Window> {

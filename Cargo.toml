@@ -1,3 +1,3 @@
 
 [workspace]
-members = ["rouge-ecs", "rouge-game", "rouge-window"]
+members = ["rouge-ecs", "rouge-game", "rouge-window", "rouge-winit"]

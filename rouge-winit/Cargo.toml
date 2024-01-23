@@ -9,5 +9,5 @@ edition = "2021"
 rouge-ecs = { path = "../rouge-ecs", version = "0.1.0" }
 rouge-window = { path = "../rouge-window", version = "0.1.0" }
 rouge-game = { path = "../rouge-game", version = "0.1.0" }
-winit = "0.29.10"
-raw-window-handle = "0.6.0"
+raw-window-handle = "0.5.0"
+winit = "0.28.7"

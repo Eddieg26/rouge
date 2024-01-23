@@ -1,4 +1,4 @@
-use crate::window::{Window, WindowId, Windows};
+use crate::window::{KeyCode, KeyState, MouseScrollDelta, Window, WindowId, Windows};
 use rouge_ecs::system::observer::Action;
 use std::path::PathBuf;
 
@@ -44,15 +44,14 @@ impl Action for WindowResized {
     type Output = Self;
 
     fn skip(&self, world: &rouge_ecs::world::World) -> bool {
-        self.width == 0 || self.height == 0 || !world.local_resource::<Windows>().contains(&self.id)
+        false
+        // self.width == 0 || self.height == 0 || !world.local_resource::<Windows>().contains(&self.id)
     }
 
     fn execute(&mut self, world: &mut rouge_ecs::world::World) -> Self::Output {
-        let window = world
-            .local_resource_mut::<Windows>()
-            .get_mut(&self.id)
-            .unwrap();
-        window.set_size(self.width, self.height);
+        if let Some(window) = world.local_resource_mut::<Windows>().get_mut(&self.id) {
+            window.set_size(self.width, self.height);
+        }
 
         *self
     }
@@ -94,19 +93,43 @@ pub struct WindowClosed {
     pub id: WindowId,
 }
 
+impl WindowClosed {
+    pub fn new(id: WindowId) -> Self {
+        Self { id }
+    }
+}
+
 impl Action for WindowClosed {
-    type Output = Self;
+    type Output = WindowId;
 
     fn skip(&self, world: &rouge_ecs::world::World) -> bool {
         !world.local_resource::<Windows>().contains(&self.id)
     }
+
+    fn execute(&mut self, _: &mut rouge_ecs::world::World) -> Self::Output {
+        self.id
+    }
+}
+
+pub struct WindowDestroyed {
+    id: WindowId,
+}
+
+impl WindowDestroyed {
+    pub fn new(id: WindowId) -> Self {
+        Self { id }
+    }
+}
+
+impl Action for WindowDestroyed {
+    type Output = WindowId;
 
     fn execute(&mut self, world: &mut rouge_ecs::world::World) -> Self::Output {
         world
             .local_resource_mut::<Windows>()
             .remove(&self.id)
             .unwrap();
-        *self
+        self.id
     }
 }
 
@@ -115,8 +138,14 @@ pub struct WindowFocused {
     pub id: WindowId,
 }
 
+impl WindowFocused {
+    pub fn new(id: WindowId) -> Self {
+        Self { id }
+    }
+}
+
 impl Action for WindowFocused {
-    type Output = Self;
+    type Output = WindowId;
 
     fn skip(&self, world: &rouge_ecs::world::World) -> bool {
         !world.local_resource::<Windows>().contains(&self.id)
@@ -129,7 +158,7 @@ impl Action for WindowFocused {
             .unwrap();
         window.set_focused(true);
 
-        *self
+        self.id
     }
 }
 
@@ -138,8 +167,14 @@ pub struct WindowUnfocused {
     pub id: WindowId,
 }
 
+impl WindowUnfocused {
+    pub fn new(id: WindowId) -> Self {
+        Self { id }
+    }
+}
+
 impl Action for WindowUnfocused {
-    type Output = Self;
+    type Output = WindowId;
 
     fn skip(&self, world: &rouge_ecs::world::World) -> bool {
         !world.local_resource::<Windows>().contains(&self.id)
@@ -152,7 +187,7 @@ impl Action for WindowUnfocused {
             .unwrap();
         window.set_focused(false);
 
-        *self
+        self.id
     }
 }
 
@@ -161,15 +196,21 @@ pub struct WindowRefreshed {
     pub id: WindowId,
 }
 
+impl WindowRefreshed {
+    pub fn new(id: WindowId) -> Self {
+        Self { id }
+    }
+}
+
 impl Action for WindowRefreshed {
-    type Output = Self;
+    type Output = WindowId;
 
     fn skip(&self, world: &rouge_ecs::world::World) -> bool {
         !world.local_resource::<Windows>().contains(&self.id)
     }
 
     fn execute(&mut self, _: &mut rouge_ecs::world::World) -> Self::Output {
-        *self
+        self.id
     }
 }
 
@@ -178,8 +219,14 @@ pub struct WindowMinimized {
     pub id: WindowId,
 }
 
+impl WindowMinimized {
+    pub fn new(id: WindowId) -> Self {
+        Self { id }
+    }
+}
+
 impl Action for WindowMinimized {
-    type Output = Self;
+    type Output = WindowId;
 
     fn skip(&self, world: &rouge_ecs::world::World) -> bool {
         !world.local_resource::<Windows>().contains(&self.id)
@@ -192,7 +239,7 @@ impl Action for WindowMinimized {
             .unwrap();
         window.set_minimized(true);
 
-        *self
+        self.id
     }
 }
 
@@ -201,8 +248,14 @@ pub struct WindowMaximized {
     pub id: WindowId,
 }
 
+impl WindowMaximized {
+    pub fn new(id: WindowId) -> Self {
+        Self { id }
+    }
+}
+
 impl Action for WindowMaximized {
-    type Output = Self;
+    type Output = WindowId;
 
     fn skip(&self, world: &rouge_ecs::world::World) -> bool {
         !world.local_resource::<Windows>().contains(&self.id)
@@ -215,7 +268,7 @@ impl Action for WindowMaximized {
             .unwrap();
         window.set_maximized(true);
 
-        *self
+        self.id
     }
 }
 
@@ -225,8 +278,14 @@ pub struct WindowRestored {
     pub id: WindowId,
 }
 
+impl WindowRestored {
+    pub fn new(id: WindowId) -> Self {
+        Self { id }
+    }
+}
+
 impl Action for WindowRestored {
-    type Output = Self;
+    type Output = WindowId;
 
     fn skip(&self, world: &rouge_ecs::world::World) -> bool {
         !world.local_resource::<Windows>().contains(&self.id)
@@ -240,7 +299,7 @@ impl Action for WindowRestored {
         window.set_maximized(false);
         window.set_minimized(false);
 
-        *self
+        self.id
     }
 }
 
@@ -250,8 +309,14 @@ pub struct WindowHovered {
     pub id: WindowId,
 }
 
+impl WindowHovered {
+    pub fn new(id: WindowId) -> Self {
+        Self { id }
+    }
+}
+
 impl Action for WindowHovered {
-    type Output = Self;
+    type Output = WindowId;
 
     fn skip(&self, world: &rouge_ecs::world::World) -> bool {
         !world.local_resource::<Windows>().contains(&self.id)
@@ -265,7 +330,7 @@ impl Action for WindowHovered {
 
         window.set_hovered(true);
 
-        *self
+        self.id
     }
 }
 
@@ -275,8 +340,14 @@ pub struct WindowUnhovered {
     pub id: WindowId,
 }
 
+impl WindowUnhovered {
+    pub fn new(id: WindowId) -> Self {
+        Self { id }
+    }
+}
+
 impl Action for WindowUnhovered {
-    type Output = Self;
+    type Output = WindowId;
 
     fn skip(&self, world: &rouge_ecs::world::World) -> bool {
         !world.local_resource::<Windows>().contains(&self.id)
@@ -290,7 +361,7 @@ impl Action for WindowUnhovered {
 
         window.set_hovered(false);
 
-        *self
+        self.id
     }
 }
 
@@ -299,6 +370,12 @@ impl Action for WindowUnhovered {
 pub struct WindowScaleFactorChanged {
     pub id: WindowId,
     pub scale_factor: f64,
+}
+
+impl WindowScaleFactorChanged {
+    pub fn new(id: WindowId, scale_factor: f64) -> Self {
+        Self { id, scale_factor }
+    }
 }
 
 impl Action for WindowScaleFactorChanged {
@@ -326,8 +403,14 @@ pub struct CursorEntered {
     pub id: WindowId,
 }
 
+impl CursorEntered {
+    pub fn new(id: WindowId) -> Self {
+        Self { id }
+    }
+}
+
 impl Action for CursorEntered {
-    type Output = Self;
+    type Output = WindowId;
 
     fn skip(&self, world: &rouge_ecs::world::World) -> bool {
         !world.local_resource::<Windows>().contains(&self.id)
@@ -341,7 +424,7 @@ impl Action for CursorEntered {
 
         window.set_cursor_visible(true);
 
-        *self
+        self.id
     }
 }
 
@@ -350,8 +433,14 @@ pub struct CursorLeft {
     pub id: WindowId,
 }
 
+impl CursorLeft {
+    pub fn new(id: WindowId) -> Self {
+        Self { id }
+    }
+}
+
 impl Action for CursorLeft {
-    type Output = Self;
+    type Output = WindowId;
 
     fn skip(&self, world: &rouge_ecs::world::World) -> bool {
         !world.local_resource::<Windows>().contains(&self.id)
@@ -365,7 +454,7 @@ impl Action for CursorLeft {
 
         window.set_cursor_visible(false);
 
-        *self
+        self.id
     }
 }
 
@@ -374,6 +463,12 @@ pub struct CursorMoved {
     pub id: WindowId,
     pub x: f64,
     pub y: f64,
+}
+
+impl CursorMoved {
+    pub fn new(id: WindowId, x: f64, y: f64) -> Self {
+        Self { id, x, y }
+    }
 }
 
 impl Action for CursorMoved {
@@ -395,10 +490,65 @@ impl Action for CursorMoved {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct KeyboardInput {
+    pub id: WindowId,
+    pub state: KeyState,
+    pub code: Option<KeyCode>,
+}
+
+impl KeyboardInput {
+    pub fn new(id: WindowId, state: KeyState, code: Option<KeyCode>) -> Self {
+        Self { id, state, code }
+    }
+}
+
+impl Action for KeyboardInput {
+    type Output = Self;
+
+    fn skip(&self, world: &rouge_ecs::world::World) -> bool {
+        !world.local_resource::<Windows>().contains(&self.id)
+    }
+
+    fn execute(&mut self, _: &mut rouge_ecs::world::World) -> Self::Output {
+        self.clone()
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct MouseWheel {
+    pub id: WindowId,
+    pub delta: MouseScrollDelta,
+}
+
+impl MouseWheel {
+    pub fn new(id: WindowId, delta: MouseScrollDelta) -> Self {
+        Self { id, delta }
+    }
+}
+
+impl Action for MouseWheel {
+    type Output = Self;
+
+    fn skip(&self, world: &rouge_ecs::world::World) -> bool {
+        !world.local_resource::<Windows>().contains(&self.id)
+    }
+
+    fn execute(&mut self, _: &mut rouge_ecs::world::World) -> Self::Output {
+        self.clone()
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct FileHovered {
     pub id: WindowId,
     pub path: PathBuf,
+}
+
+impl FileHovered {
+    pub fn new(id: WindowId, path: PathBuf) -> Self {
+        Self { id, path }
+    }
 }
 
 impl Action for FileHovered {
@@ -416,10 +566,39 @@ impl Action for FileHovered {
 #[derive(Clone, Debug)]
 pub struct FileUnhovered {
     pub id: WindowId,
-    pub path: PathBuf,
+}
+
+impl FileUnhovered {
+    pub fn new(id: WindowId) -> Self {
+        Self { id }
+    }
 }
 
 impl Action for FileUnhovered {
+    type Output = WindowId;
+
+    fn skip(&self, world: &rouge_ecs::world::World) -> bool {
+        !world.local_resource::<Windows>().contains(&self.id)
+    }
+
+    fn execute(&mut self, _: &mut rouge_ecs::world::World) -> Self::Output {
+        self.id
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct FileDropped {
+    pub id: WindowId,
+    pub path: PathBuf,
+}
+
+impl FileDropped {
+    pub fn new(id: WindowId, path: PathBuf) -> Self {
+        Self { id, path }
+    }
+}
+
+impl Action for FileDropped {
     type Output = Self;
 
     fn skip(&self, world: &rouge_ecs::world::World) -> bool {
@@ -432,16 +611,22 @@ impl Action for FileUnhovered {
 }
 
 #[derive(Clone, Debug)]
-pub struct FileDropped {
+pub struct ReceivedCharacter {
     pub id: WindowId,
-    pub path: PathBuf,
+    pub character: char,
 }
 
-impl Action for FileDropped {
+impl ReceivedCharacter {
+    pub fn new(id: WindowId, character: char) -> Self {
+        Self { id, character }
+    }
+}
+
+impl Action for ReceivedCharacter {
     type Output = Self;
 
     fn skip(&self, world: &rouge_ecs::world::World) -> bool {
-        self.path.as_os_str().is_empty() || !world.local_resource::<Windows>().contains(&self.id)
+        self.character.is_ascii_control() || !world.local_resource::<Windows>().contains(&self.id)
     }
 
     fn execute(&mut self, _: &mut rouge_ecs::world::World) -> Self::Output {

@@ -1,9 +1,8 @@
+use crate::raw::RawWindowHandle;
 use rouge_ecs::{
     macros::LocalResource, storage::sparse::SparseMap, world::resource::LocalResource,
 };
 use std::hash::{Hash, Hasher};
-
-use crate::raw::RawWindowHandle;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct WindowId(u64);
@@ -42,21 +41,190 @@ pub enum WindowMode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum PresentMode {
-    Immediate,
-    VSync,
-    Mailbox,
-    Fifo,
-    FifoRelaxed,
+pub enum KeyState {
+    Pressed,
+    Released,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum CompositeAlphaMode {
-    Auto,
-    Opaque,
-    PreMultiplied,
-    PostMultiplied,
-    Inherit,
+pub enum MouseButton {
+    Left,
+    Right,
+    Middle,
+    Other(u16),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum MouseScrollDelta {
+    LineDelta(f32, f32),
+    PixelDelta(f64, f64),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum KeyCode {
+    Key1,
+    Key2,
+    Key3,
+    Key4,
+    Key5,
+    Key6,
+    Key7,
+    Key8,
+    Key9,
+    Key0,
+    A,
+    B,
+    C,
+    D,
+    E,
+    F,
+    G,
+    H,
+    I,
+    J,
+    K,
+    L,
+    M,
+    N,
+    O,
+    P,
+    Q,
+    R,
+    S,
+    T,
+    U,
+    V,
+    W,
+    X,
+    Y,
+    Z,
+    Escape,
+    F1,
+    F2,
+    F3,
+    F4,
+    F5,
+    F6,
+    F7,
+    F8,
+    F9,
+    F10,
+    F11,
+    F12,
+    F13,
+    F14,
+    F15,
+    F16,
+    F17,
+    F18,
+    F19,
+    F20,
+    F21,
+    F22,
+    F23,
+    F24,
+    Snapshot,
+    Scroll,
+    Pause,
+    Insert,
+    Home,
+    Delete,
+    End,
+    PageDown,
+    PageUp,
+    Left,
+    Up,
+    Right,
+    Down,
+    Backspace,
+    Return,
+    Space,
+    Compose,
+    Caret,
+    Numlock,
+    Numpad0,
+    Numpad1,
+    Numpad2,
+    Numpad3,
+    Numpad4,
+    Numpad5,
+    Numpad6,
+    Numpad7,
+    Numpad8,
+    Numpad9,
+    NumpadAdd,
+    NumpadDivide,
+    NumpadDecimal,
+    NumpadComma,
+    NumpadEnter,
+    NumpadEquals,
+    NumpadMultiply,
+    NumpadSubtract,
+    AbntC1,
+    AbntC2,
+    Apostrophe,
+    Apps,
+    Asterisk,
+    At,
+    Ax,
+    Backslash,
+    Calculator,
+    Capital,
+    Colon,
+    Comma,
+    Convert,
+    Equals,
+    Grave,
+    Kana,
+    Kanji,
+    LAlt,
+    LBracket,
+    LControl,
+    LShift,
+    LWin,
+    Mail,
+    MediaSelect,
+    MediaStop,
+    Minus,
+    Mute,
+    MyComputer,
+    NavigateForward,
+    NavigateBackward,
+    NextTrack,
+    NoConvert,
+    OEM102,
+    Period,
+    PlayPause,
+    Plus,
+    Power,
+    PrevTrack,
+    RAlt,
+    RBracket,
+    RControl,
+    RShift,
+    RWin,
+    Semicolon,
+    Slash,
+    Sleep,
+    Stop,
+    Sysrq,
+    Tab,
+    Underline,
+    Unlabeled,
+    VolumeDown,
+    VolumeUp,
+    Wake,
+    WebBack,
+    WebFavorites,
+    WebForward,
+    WebHome,
+    WebRefresh,
+    WebSearch,
+    WebStop,
+    Yen,
+    Copy,
+    Paste,
+    Cut,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -71,14 +239,15 @@ pub enum CursorIcon {
     Help,
     Progress,
     NotAllowed,
-    ResizeHorizontal,
-    ResizeVertical,
-    ResizeTopLeftBottomRight,
-    ResizeTopRightBottomLeft,
-    ResizeAll,
+    ContextMenu,
+    Cell,
+    VerticalText,
+    Alias,
+    Copy,
     NoDrop,
     Grab,
     Grabbing,
+    AllScroll,
     EResize,
     NResize,
     NeResize,
@@ -119,8 +288,6 @@ impl Default for Cursor {
 pub struct Window {
     title: String,
     handle: RawWindowHandle,
-    present_mode: PresentMode,
-    composite_alpha_mode: CompositeAlphaMode,
     mode: WindowMode,
     width: u32,
     height: u32,
@@ -136,7 +303,6 @@ pub struct Window {
     transparent: bool,
     maximized: bool,
     minimized: bool,
-    always_on_top: bool,
     cursor: Cursor,
 }
 
@@ -144,8 +310,6 @@ impl Window {
     pub fn new(
         title: &str,
         handle: RawWindowHandle,
-        present_mode: PresentMode,
-        composite_alpha_mode: CompositeAlphaMode,
         mode: WindowMode,
         width: u32,
         height: u32,
@@ -153,8 +317,6 @@ impl Window {
         Self {
             title: title.into(),
             handle,
-            present_mode,
-            composite_alpha_mode,
             mode,
             width,
             height,
@@ -170,7 +332,6 @@ impl Window {
             transparent: false,
             maximized: false,
             minimized: false,
-            always_on_top: false,
             cursor: Cursor::default(),
         }
     }
@@ -180,14 +341,6 @@ impl Window {
 
     pub fn handle(&self) -> &RawWindowHandle {
         &self.handle
-    }
-
-    pub fn present_mode(&self) -> PresentMode {
-        self.present_mode
-    }
-
-    pub fn composite_alpha_mode(&self) -> CompositeAlphaMode {
-        self.composite_alpha_mode
     }
 
     pub fn mode(&self) -> WindowMode {
@@ -250,24 +403,12 @@ impl Window {
         self.minimized
     }
 
-    pub fn always_on_top(&self) -> bool {
-        self.always_on_top
-    }
-
     pub fn cursor(&self) -> Cursor {
         self.cursor
     }
 
     pub fn set_title(&mut self, title: impl Into<String>) {
         self.title = title.into();
-    }
-
-    pub fn set_present_mode(&mut self, present_mode: PresentMode) {
-        self.present_mode = present_mode;
-    }
-
-    pub fn set_composite_alpha_mode(&mut self, composite_alpha_mode: CompositeAlphaMode) {
-        self.composite_alpha_mode = composite_alpha_mode;
     }
 
     pub fn set_mode(&mut self, mode: WindowMode) {
@@ -330,10 +471,6 @@ impl Window {
         }
     }
 
-    pub fn set_always_on_top(&mut self, always_on_top: bool) {
-        self.always_on_top = always_on_top;
-    }
-
     pub fn set_cursor(&mut self, cursor: Cursor) {
         self.cursor = cursor;
     }
@@ -370,12 +507,16 @@ impl Windows {
         self.primary.and_then(|id| self.windows.get(&id))
     }
 
+    pub fn primary_id(&self) -> Option<WindowId> {
+        self.primary
+    }
+
     pub fn set_primary(&mut self, id: WindowId) {
         self.primary = Some(id);
     }
 
-    pub fn add(&mut self, id: impl Hash, window: Window) {
-        self.windows.insert(WindowId::new(id), window);
+    pub fn add(&mut self, id: WindowId, window: Window) {
+        self.windows.insert(id, window);
     }
 
     pub fn get(&self, id: &WindowId) -> Option<&Window> {
@@ -404,5 +545,41 @@ impl Windows {
 
     pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut Window> {
         self.windows.iter_mut().map(|(_, window)| window)
+    }
+}
+
+pub struct WindowConfig {
+    pub title: String,
+    pub mode: WindowMode,
+    pub width: u32,
+    pub height: u32,
+    pub scale_factor: f64,
+    pub x: i32,
+    pub y: i32,
+    pub resizable: bool,
+    pub visible: bool,
+    pub decorated: bool,
+    pub transparent: bool,
+    pub maximized: bool,
+    pub cursor: Cursor,
+}
+
+impl Default for WindowConfig {
+    fn default() -> Self {
+        Self {
+            title: "Rouge".into(),
+            mode: WindowMode::Windowed,
+            width: 800,
+            height: 600,
+            scale_factor: 1.0,
+            x: 0,
+            y: 0,
+            resizable: true,
+            visible: true,
+            decorated: true,
+            transparent: false,
+            maximized: false,
+            cursor: Cursor::default(),
+        }
     }
 }

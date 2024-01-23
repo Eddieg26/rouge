@@ -346,6 +346,7 @@ fn drop<T>(data: *mut u8) {
 impl Drop for Blob {
     fn drop(&mut self) {
         if self.capacity > 0 {
+            println!("DROPPING: {}", self.debug_name);
             self.drop_all();
             self.dealloc();
         }

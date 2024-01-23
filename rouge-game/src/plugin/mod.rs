@@ -22,7 +22,8 @@ impl From<TypeId> for PluginId {
 }
 
 pub trait Plugin: 'static {
-    fn start(&mut self, _: &mut Plugins) {}
+    fn plugins(&self, _: &mut Plugins) {}
+    fn start(&mut self, _: &mut Game) {}
     fn run(&mut self, _: &mut Game) {}
     fn finish(&mut self, _: &mut Game) {}
     fn dependencies(&self) -> Vec<PluginId> {
@@ -55,9 +56,15 @@ impl Plugins {
         self.plugins.append(&mut plugins.plugins);
     }
 
-    pub(crate) fn start(&mut self, plugins: &mut Plugins) {
+    pub(crate) fn plugins(&mut self, plugins: &mut Plugins) {
         for plugin in self.plugins.values_mut() {
-            plugin.start(plugins);
+            plugin.plugins(plugins);
+        }
+    }
+
+    pub(crate) fn start(&mut self, game: &mut Game) {
+        for plugin in self.plugins.values_mut() {
+            plugin.start(game);
         }
     }
 

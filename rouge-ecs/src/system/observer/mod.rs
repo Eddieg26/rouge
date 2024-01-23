@@ -180,6 +180,14 @@ impl Observables {
             }
         }
     }
+
+    pub fn execute_actions<A: Action>(&mut self, mut outputs: ActionOutputs, world: &World) {
+        if let Some(observers) = self.observers.get_mut(&TypeId::of::<A>()) {
+            if let Some(outputs) = outputs.remove(&TypeId::of::<A>()) {
+                observers.execute(outputs, world);
+            }
+        }
+    }
 }
 
 impl Resource for Observables {}

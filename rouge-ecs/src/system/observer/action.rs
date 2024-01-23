@@ -108,6 +108,24 @@ impl Actions {
         outputs
     }
 
+    pub fn execute_actions<A: Action>(&mut self, world: &mut World) -> ActionOutputs {
+        self.sort();
+        let mut outputs = ActionOutputs::new();
+
+        if let Some(data) = self.actions.get_mut(&TypeId::of::<A>()) {
+            let mut actions = data.clear();
+            data.execute(world, &mut actions, &mut outputs);
+        }
+
+        outputs
+    }
+
+    pub fn take(&mut self) -> Self {
+        let mut actions = Self::new();
+        std::mem::swap(&mut self.actions, &mut actions.actions);
+        actions
+    }
+
     pub fn is_empty(&self) -> bool {
         self.actions.values().iter().all(|data| data.is_empty())
     }

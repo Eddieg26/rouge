@@ -10,7 +10,10 @@ use rouge_ecs::{
         observer::{Action, Observers},
         IntoSystem,
     },
-    world::{resource::Resource, World},
+    world::{
+        resource::{LocalResource, Resource},
+        World,
+    },
 };
 
 pub struct Game {
@@ -48,6 +51,12 @@ impl Game {
 
     pub fn add_resource<R: Resource>(&mut self, resource: R) -> &mut Self {
         self.world.add_resource(resource);
+
+        self
+    }
+
+    pub fn add_local_resource<R: LocalResource>(&mut self, resource: R) -> &mut Self {
+        self.world.add_local_resource(resource);
 
         self
     }
@@ -91,6 +100,22 @@ impl Game {
         self.runner = Some(Box::new(runner));
 
         self
+    }
+
+    pub fn resource<R: Resource>(&self) -> &R {
+        self.world.resource::<R>()
+    }
+
+    pub fn resource_mut<R: Resource>(&self) -> &mut R {
+        self.world.resource_mut::<R>()
+    }
+
+    pub fn local_resource<R: LocalResource>(&self) -> &R {
+        self.world.local_resource::<R>()
+    }
+
+    pub fn local_resource_mut<R: LocalResource>(&self) -> &mut R {
+        self.world.local_resource_mut::<R>()
     }
 
     pub fn engine<E: Engine>(&self) -> &GameEngine {
@@ -147,14 +172,17 @@ impl Game {
         self.world.resource_mut::<Time>().update();
     }
 
+    pub fn flush_actions<A: Action>(&mut self) {
+        self.world.flush_actions::<A>();
+    }
+
     pub fn run(&mut self) {
-        let mut runner = self.runner.take().unwrap_or(Box::new(default_runner));
         let mut game = std::mem::take(self);
 
         let mut plugins = std::mem::take(&mut game.plugins);
         while !plugins.is_empty() {
             let mut other = Plugins::new();
-            plugins.start(&mut other);
+            plugins.plugins(&mut other);
             game.plugins.extend(&mut plugins);
             plugins = other;
         }
@@ -162,9 +190,11 @@ impl Game {
         let mut plugins = std::mem::take(&mut game.plugins);
 
         plugins.sort();
+        plugins.start(&mut game);
         plugins.run(&mut game);
         plugins.finish(&mut game);
 
+        let mut runner = game.runner.take().unwrap_or(Box::new(default_runner));
         runner.run(game);
     }
 }

@@ -1,3 +1,5 @@
+use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
+
 pub struct RawWindowHandle {
     window: raw_window_handle::RawWindowHandle,
     display: raw_window_handle::RawDisplayHandle,
@@ -20,26 +22,14 @@ impl RawWindowHandle {
     }
 }
 
-impl raw_window_handle::HasWindowHandle for RawWindowHandle {
-    fn window_handle(
-        &self,
-    ) -> Result<raw_window_handle::WindowHandle<'_>, raw_window_handle::HandleError> {
-        unsafe {
-            Ok(raw_window_handle::WindowHandle::borrow_raw(
-                self.window.clone(),
-            ))
-        }
+unsafe impl HasRawWindowHandle for RawWindowHandle {
+    fn raw_window_handle(&self) -> raw_window_handle::RawWindowHandle {
+        self.window.clone()
     }
 }
 
-impl raw_window_handle::HasDisplayHandle for RawWindowHandle {
-    fn display_handle(
-        &self,
-    ) -> Result<raw_window_handle::DisplayHandle<'_>, raw_window_handle::HandleError> {
-        unsafe {
-            Ok(raw_window_handle::DisplayHandle::borrow_raw(
-                self.display.clone(),
-            ))
-        }
+unsafe impl HasRawDisplayHandle for RawWindowHandle {
+    fn raw_display_handle(&self) -> raw_window_handle::RawDisplayHandle {
+        self.display.clone()
     }
 }

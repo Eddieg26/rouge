@@ -6,5 +6,6 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-raw-window-handle = "0.6.0"
+raw-window-handle = "0.5.0"
 rouge-ecs = { path = "../rouge-ecs", version = "0.1.0" }
+rouge-game = { path = "../rouge-game", version = "0.1.0" }

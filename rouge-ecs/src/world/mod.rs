@@ -221,6 +221,19 @@ impl World {
         self.flush();
     }
 
+    pub fn flush_actions<A: Action>(&mut self) {
+        let mut actions = self.resources.get_mut::<Actions>().take();
+        let mut outputs = actions.execute_actions::<A>(self);
+        let action_outputs = self.resources.get_mut::<ActionOutputs>().take();
+        self.resources.get_mut::<Actions>().append(actions);
+
+        // outputs.merge(action_outputs);
+
+        // let mut observers = std::mem::take(self.resources.get_mut::<Observables>());
+        // observers.execute_actions::<A>(outputs, self);
+        // self.resources.get_mut::<Observables>().swap(observers);
+    }
+
     pub fn init(&mut self) {
         let schedules = self.resources.get_mut::<GlobalSchedules>();
         schedules.build();

@@ -250,10 +250,14 @@ where
     }
 
     pub fn drain(&mut self) -> impl Iterator<Item = (K, V)> + '_ {
-        self.keys
+        let values = self.keys
             .drain(..)
             .zip(self.values.drain(..))
-            .map(|(key, value)| (key, value))
+            .map(|(key, value)| (key, value));
+
+        self.map.clear();
+
+        values
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (&K, &V)> {

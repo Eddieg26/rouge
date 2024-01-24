@@ -44,8 +44,7 @@ impl Action for WindowResized {
     type Output = Self;
 
     fn skip(&self, world: &rouge_ecs::world::World) -> bool {
-        false
-        // self.width == 0 || self.height == 0 || !world.local_resource::<Windows>().contains(&self.id)
+        self.width == 0 || self.height == 0 || !world.local_resource::<Windows>().contains(&self.id)
     }
 
     fn execute(&mut self, world: &mut rouge_ecs::world::World) -> Self::Output {

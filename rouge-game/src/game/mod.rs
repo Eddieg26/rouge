@@ -194,6 +194,8 @@ impl Game {
         plugins.run(&mut game);
         plugins.finish(&mut game);
 
+        game.world.init();
+
         let mut runner = game.runner.take().unwrap_or(Box::new(default_runner));
         runner.run(game);
     }

@@ -199,7 +199,7 @@ impl World {
         self.flush();
     }
 
-    fn flush(&mut self) {
+    pub fn flush(&mut self) {
         if self.resources.get::<Actions>().is_empty() {
             return;
         }
@@ -227,11 +227,11 @@ impl World {
         let action_outputs = self.resources.get_mut::<ActionOutputs>().take();
         self.resources.get_mut::<Actions>().append(actions);
 
-        // outputs.merge(action_outputs);
+        outputs.merge(action_outputs);
 
-        // let mut observers = std::mem::take(self.resources.get_mut::<Observables>());
-        // observers.execute_actions::<A>(outputs, self);
-        // self.resources.get_mut::<Observables>().swap(observers);
+        let mut observers = std::mem::take(self.resources.get_mut::<Observables>());
+        observers.execute_actions::<A>(outputs, self);
+        self.resources.get_mut::<Observables>().swap(observers);
     }
 
     pub fn init(&mut self) {

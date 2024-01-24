@@ -27,46 +27,46 @@ pub fn winit_runner(mut game: Game) {
             let primary_id = game.local_resource::<Windows>().primary_id();
             match event {
                 WindowEvent::CursorEntered { .. } => {
-                    // let actions = game.resource_mut::<Actions>();
-                    // actions.add(CursorEntered::new(id));
-                    // game.flush_actions::<CursorEntered>();
+                    let actions = game.resource_mut::<Actions>();
+                    actions.add(CursorEntered::new(id));
+                    game.flush_actions::<CursorEntered>();
                 }
                 WindowEvent::CursorLeft { .. } => {
-                    // let actions = game.resource_mut::<Actions>();
-                    // actions.add(CursorLeft::new(id));
-                    // game.flush_actions::<CursorLeft>();
+                    let actions = game.resource_mut::<Actions>();
+                    actions.add(CursorLeft::new(id));
+                    game.flush_actions::<CursorLeft>();
                 }
                 WindowEvent::CursorMoved { position, .. } => {
-                    // let actions = game.resource_mut::<Actions>();
-                    // actions.add(CursorMoved::new(id, position.x, position.y));
-                    // game.flush_actions::<CursorMoved>();
+                    let actions = game.resource_mut::<Actions>();
+                    actions.add(CursorMoved::new(id, position.x, position.y));
+                    game.flush_actions::<CursorMoved>();
                 }
                 WindowEvent::Focused(focused) => {
-                    // let actions = game.resource_mut::<Actions>();
-                    // match focused {
-                    //     true => actions.add(WindowFocused::new(id)),
-                    //     false => actions.add(WindowUnfocused::new(id)),
-                    // }
+                    let actions = game.resource_mut::<Actions>();
+                    match focused {
+                        true => actions.add(WindowFocused::new(id)),
+                        false => actions.add(WindowUnfocused::new(id)),
+                    }
                 }
                 WindowEvent::HoveredFile(path) => {
-                    // let actions = game.resource_mut::<Actions>();
-                    // actions.add(rouge_window::actions::FileHovered::new(id, path));
-                    // game.flush_actions::<rouge_window::actions::FileHovered>();
+                    let actions = game.resource_mut::<Actions>();
+                    actions.add(rouge_window::actions::FileHovered::new(id, path));
+                    game.flush_actions::<rouge_window::actions::FileHovered>();
                 }
                 WindowEvent::HoveredFileCancelled => {
-                    // let actions = game.resource_mut::<Actions>();
-                    // actions.add(rouge_window::actions::FileUnhovered::new(id));
-                    // game.flush_actions::<rouge_window::actions::FileUnhovered>();
+                    let actions = game.resource_mut::<Actions>();
+                    actions.add(rouge_window::actions::FileUnhovered::new(id));
+                    game.flush_actions::<rouge_window::actions::FileUnhovered>();
                 }
                 WindowEvent::DroppedFile(path) => {
-                    // let actions = game.resource_mut::<Actions>();
-                    // actions.add(FileDropped::new(id, path));
-                    // game.flush_actions::<FileDropped>();
+                    let actions = game.resource_mut::<Actions>();
+                    actions.add(FileDropped::new(id, path));
+                    game.flush_actions::<FileDropped>();
                 }
                 WindowEvent::Moved(position) => {
-                    // let actions = game.resource_mut::<Actions>();
-                    // actions.add(WindowMoved::new(id, position.x, position.y));
-                    // game.flush_actions::<WindowMoved>();
+                    let actions = game.resource_mut::<Actions>();
+                    actions.add(WindowMoved::new(id, position.x, position.y));
+                    game.flush_actions::<WindowMoved>();
                 }
                 WindowEvent::Resized(size) => {
                     let actions = game.resource_mut::<Actions>();
@@ -74,32 +74,36 @@ pub fn winit_runner(mut game: Game) {
                     game.flush_actions::<WindowResized>();
                 }
                 WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
-                    // let actions = game.resource_mut::<Actions>();
-                    // actions.add(WindowScaleFactorChanged::new(id, scale_factor));
-                    // game.flush_actions::<WindowScaleFactorChanged>();
+                    let actions = game.resource_mut::<Actions>();
+                    actions.add(WindowScaleFactorChanged::new(id, scale_factor));
+                    game.flush_actions::<WindowScaleFactorChanged>();
                 }
                 WindowEvent::ReceivedCharacter(character) => {
-                    // let actions = game.resource_mut::<Actions>();
-                    // actions.add(ReceivedCharacter::new(id, character));
-                    // game.flush_actions::<ReceivedCharacter>();
+                    let actions = game.resource_mut::<Actions>();
+                    actions.add(ReceivedCharacter::new(id, character));
+                    game.flush_actions::<ReceivedCharacter>();
                 }
                 WindowEvent::MouseWheel { delta, .. } => {
-                    // let actions = game.resource_mut::<Actions>();
-                    // let delta = map::map_mouse_scroll_delta(delta);
-                    // actions.add(MouseWheel::new(id, delta));
-                    // game.flush_actions::<MouseWheel>();
+                    let actions = game.resource_mut::<Actions>();
+                    let delta = map::map_mouse_scroll_delta(delta);
+                    actions.add(MouseWheel::new(id, delta));
+                    game.flush_actions::<MouseWheel>();
                 }
                 WindowEvent::KeyboardInput { input, .. } => {
-                    // let state = map::map_key_state(input.state);
-                    // let code = input.virtual_keycode.map(map::map_keycode);
-                    // let actions = game.resource_mut::<Actions>();
-                    // actions.add(KeyboardInput::new(id, state, code));
-                    // game.flush_actions::<KeyboardInput>();
+                    let state = map::map_key_state(input.state);
+                    let code = input.virtual_keycode.map(map::map_keycode);
+                    let actions = game.resource_mut::<Actions>();
+                    actions.add(KeyboardInput::new(id, state, code));
+                    game.flush_actions::<KeyboardInput>();
                 }
                 WindowEvent::CloseRequested => {
                     let actions = game.resource_mut::<Actions>();
                     actions.add(WindowClosed::new(id));
                     game.flush_actions::<WindowClosed>();
+                    match primary_id {
+                        Some(primary_id) if primary_id == id => flow.set_exit(),
+                        _ => flow.set_exit(),
+                    }
                 }
                 WindowEvent::Destroyed => {
                     let actions = game.resource_mut::<Actions>();

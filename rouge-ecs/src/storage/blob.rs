@@ -161,7 +161,6 @@ impl Blob {
 
         unsafe {
             let dst = self.offset(self.len) as *mut T;
-
             std::ptr::write(dst, value);
         }
 
@@ -274,7 +273,11 @@ impl Blob {
     }
 
     fn grow(&mut self) {
-        let new_capacity = self.capacity * 2;
+        let new_capacity = if self.capacity == 0 {
+            1
+        } else {
+            self.capacity * 2
+        };
         self.grow_exact(new_capacity);
     }
 
@@ -283,26 +286,8 @@ impl Blob {
             return;
         }
 
-        let new_layout = Layout::from_size_align(
-            self.aligned_layout.size() * new_capacity,
-            self.aligned_layout.align(),
-        )
-        .unwrap();
-        let new_data = unsafe { std::alloc::alloc(new_layout) };
-
-        unsafe {
-            std::ptr::copy_nonoverlapping(
-                self.data.as_ptr(),
-                new_data,
-                self.aligned_layout.size() * self.len,
-            );
-            self.data.clear();
-            self.data = Vec::from_raw_parts(
-                new_data,
-                self.aligned_layout.size() * self.len,
-                new_layout.size(),
-            );
-        }
+        self.data
+            .reserve_exact(self.aligned_layout.size() * (new_capacity - self.capacity));
 
         self.capacity = new_capacity;
     }
@@ -346,7 +331,6 @@ fn drop<T>(data: *mut u8) {
 impl Drop for Blob {
     fn drop(&mut self) {
         if self.capacity > 0 {
-            println!("DROPPING: {}", self.debug_name);
             self.drop_all();
             self.dealloc();
         }

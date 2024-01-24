@@ -1,0 +1,18 @@
+[package]
+name = "rouge-graphics"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+pollster = "0.3.0"
+rouge-core = { path = "../rouge-core", version = "0.1.0" }
+rouge-ecs = { path = "../rouge-ecs", version = "0.1.0" }
+rouge-window = { path = "../rouge-window", version = "0.1.0" }
+wgpu = "0.18.0"
+raw-window-handle = "0.5.0"
+
+[dependencies.bytemuck]
+version = "1.14.0"
+features = ["derive"]

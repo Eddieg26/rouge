@@ -1,9 +1,11 @@
 
 [workspace]
 members = [
+    "rouge-core",
     "rouge-ecs",
     "rouge-game",
     "rouge-window",
     "rouge-winit",
+    "rouge-graphics",
     "examples/*",
 ]

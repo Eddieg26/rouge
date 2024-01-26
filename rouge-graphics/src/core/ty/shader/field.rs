@@ -1,3 +1,5 @@
+use std::hash::{Hash, Hasher};
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ShaderField {
     Float32,
@@ -793,5 +795,13 @@ impl std::fmt::Display for ShaderInput {
                 write!(f, "}}")
             }
         }
+    }
+}
+
+impl Hash for ShaderInput {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        let field: ShaderField = self.clone().into();
+
+        field.hash(state);
     }
 }

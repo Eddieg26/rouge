@@ -1,6 +1,5 @@
-use rouge_ecs::{macros::Resource, storage::sparse::SparseMap, world::resource::Resource};
-
 use crate::core::ResourceId;
+use rouge_ecs::{macros::Resource, storage::sparse::SparseMap, world::resource::Resource};
 
 pub type Dimension = wgpu::TextureDimension;
 pub type Format = wgpu::TextureFormat;

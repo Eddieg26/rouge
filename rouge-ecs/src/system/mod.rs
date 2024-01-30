@@ -180,6 +180,16 @@ pub trait SystemArg {
     fn metas() -> Vec<AccessMeta>;
 }
 
+impl SystemArg for () {
+    type Item<'a> = ();
+
+    fn get<'a>(_: &'a World) -> Self::Item<'a> {}
+
+    fn metas() -> Vec<AccessMeta> {
+        vec![]
+    }
+}
+
 pub type ArgItem<'a, A> = <A as SystemArg>::Item<'a>;
 
 pub trait IntoSystem<M> {

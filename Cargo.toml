@@ -4,6 +4,7 @@ members = [
     "rouge-core",
     "rouge-ecs",
     "rouge-game",
+    "rouge-asset",
     "rouge-window",
     "rouge-winit",
     "rouge-graphics",

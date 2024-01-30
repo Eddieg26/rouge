@@ -108,6 +108,14 @@ impl World {
         self.resources.get_mut::<R>()
     }
 
+    pub fn try_resource<R: Resource>(&self) -> Option<&R> {
+        self.resources.try_get::<R>()
+    }
+
+    pub fn try_resource_mut<R: Resource>(&self) -> Option<&mut R> {
+        self.resources.try_get_mut::<R>()
+    }
+
     pub fn local_resource<R: LocalResource>(&self) -> &R {
         self.local_resources.get::<R>()
     }

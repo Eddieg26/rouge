@@ -81,6 +81,18 @@ impl Resources {
 
         res.get_mut::<R>()
     }
+
+    pub fn try_get<R: Resource>(&self) -> Option<&R> {
+        let ty = ResourceType::new::<R>();
+        let res = self.resources.get(&ty)?;
+        Some(res.get::<R>())
+    }
+
+    pub fn try_get_mut<R: Resource>(&self) -> Option<&mut R> {
+        let ty = ResourceType::new::<R>();
+        let res = self.resources.get(&ty)?;
+        Some(res.get_mut::<R>())
+    }
 }
 
 pub struct ResourceData {
@@ -164,5 +176,17 @@ impl LocalResources {
         let res = self.resources.get(&ty).expect("Resource doesn't exist.");
 
         res.get_mut::<R>()
+    }
+
+    pub fn try_get<R: LocalResource>(&self) -> Option<&R> {
+        let ty = ResourceType::new_local::<R>();
+        let res = self.resources.get(&ty)?;
+        Some(res.get::<R>())
+    }
+
+    pub fn try_get_mut<R: LocalResource>(&self) -> Option<&mut R> {
+        let ty = ResourceType::new_local::<R>();
+        let res = self.resources.get(&ty)?;
+        Some(res.get_mut::<R>())
     }
 }

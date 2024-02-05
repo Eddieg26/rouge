@@ -1,4 +1,4 @@
-use pack::AsBytes;
+use metadata::LoadSettings;
 use rouge_ecs::{
     macros::Resource,
     system::{ArgItem, SystemArg},
@@ -12,6 +12,7 @@ use std::{
 
 pub mod database;
 pub mod filesystem;
+pub mod metadata;
 pub mod pack;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
@@ -70,101 +71,9 @@ impl From<std::any::TypeId> for AssetType {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct AssetMetadata<S: LoadSettings> {
-    id: AssetId,
-    settings: S,
-}
+pub trait Asset: Send + Sync + 'static {}
 
-impl<S: LoadSettings> AssetMetadata<S> {
-    pub fn new(id: AssetId, settings: S) -> Self {
-        Self { id, settings }
-    }
-
-    pub fn id(&self) -> AssetId {
-        self.id
-    }
-
-    pub fn settings(&self) -> &S {
-        &self.settings
-    }
-}
-
-impl<'a, S: LoadSettings> serde::Deserialize<'a> for AssetMetadata<S> {
-    fn deserialize<D: serde::Deserializer<'a>>(deserializer: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        #[serde(field_identifier, rename_all = "lowercase")]
-        enum Field {
-            Id,
-            Settings,
-        }
-
-        struct AssetMetadataVisitor<S: LoadSettings>(std::marker::PhantomData<S>);
-
-        impl<'a, S: LoadSettings> serde::de::Visitor<'a> for AssetMetadataVisitor<S> {
-            type Value = AssetMetadata<S>;
-
-            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-                formatter.write_str("struct AssetMetadata")
-            }
-
-            fn visit_seq<V: serde::de::SeqAccess<'a>>(
-                self,
-                mut seq: V,
-            ) -> Result<Self::Value, V::Error> {
-                let id = seq
-                    .next_element()?
-                    .ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
-                let settings = seq
-                    .next_element()?
-                    .ok_or_else(|| serde::de::Error::invalid_length(1, &self))?;
-
-                Ok(AssetMetadata { id, settings })
-            }
-
-            fn visit_map<V: serde::de::MapAccess<'a>>(
-                self,
-                mut map: V,
-            ) -> Result<Self::Value, V::Error> {
-                let mut id = None;
-                let mut settings = None;
-
-                while let Some(key) = map.next_key()? {
-                    match key {
-                        Field::Id => {
-                            if id.is_some() {
-                                return Err(serde::de::Error::duplicate_field("id"));
-                            }
-
-                            id = Some(map.next_value()?);
-                        }
-                        Field::Settings => {
-                            if settings.is_some() {
-                                return Err(serde::de::Error::duplicate_field("settings"));
-                            }
-
-                            settings = Some(map.next_value()?);
-                        }
-                    }
-                }
-
-                let id = id.ok_or_else(|| serde::de::Error::missing_field("id"))?;
-                let settings =
-                    settings.ok_or_else(|| serde::de::Error::missing_field("settings"))?;
-
-                Ok(AssetMetadata { id, settings })
-            }
-        }
-
-        const FIELDS: &[&str] = &["id", "settings"];
-        deserializer.deserialize_struct(
-            "AssetMetadata
-        ",
-            FIELDS,
-            AssetMetadataVisitor(std::marker::PhantomData),
-        )
-    }
-}
+impl Asset for () {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DevMode {
@@ -172,22 +81,13 @@ pub enum DevMode {
     Release,
 }
 
-pub trait Asset: Send + Sync + 'static {}
-
-impl Asset for () {}
-
-pub trait LoadSettings:
-    Send + Sync + Sized + serde::Serialize + serde::de::DeserializeOwned + Default + 'static
-{
-}
-
-pub trait AssetLoader: Send + Sync + 'static {
+pub trait AssetPipeline: Send + Sync + 'static {
     type Asset: Asset;
     type Settings: LoadSettings;
     type Arg: SystemArg;
-    type Processor: AssetProcessor<Asset = Self::Asset, Arg = Self::Arg>;
+    type Processor: AssetProcessor<Asset = Self::Asset, Arg = Self::Arg, Settings = Self::Settings>;
 
-    fn load(ctx: LoadContext<Self::Settings>, data: &[u8]) -> Self::Asset;
+    fn load(ctx: &mut LoadContext<Self::Settings>, data: &[u8]) -> Option<Self::Asset>;
     fn unload<'a>(
         id: AssetId,
         asset: Self::Asset,
@@ -200,15 +100,28 @@ pub trait AssetLoader: Send + Sync + 'static {
 pub trait AssetProcessor: Send + Sync + 'static {
     type Asset: Asset;
     type Arg: SystemArg;
+    type Settings: LoadSettings;
 
-    fn process<'a>(id: AssetId, asset: &mut Self::Asset, arg: ArgItem<'a, Self::Arg>);
+    fn process<'a>(
+        id: AssetId,
+        asset: &mut Self::Asset,
+        settings: &'a Self::Settings,
+        arg: ArgItem<'a, Self::Arg>,
+    );
 }
 
 impl AssetProcessor for () {
     type Asset = ();
     type Arg = ();
+    type Settings = ();
 
-    fn process<'a>(_: AssetId, _: &mut Self::Asset, _: ArgItem<'a, Self::Arg>) {}
+    fn process<'a>(
+        id: AssetId,
+        asset: &mut Self::Asset,
+        settings: &'a Self::Settings,
+        arg: ArgItem<'a, Self::Arg>,
+    ) {
+    }
 }
 
 #[derive(Resource)]
@@ -252,52 +165,12 @@ impl<A: Asset> Assets<A> {
     }
 }
 
-#[derive(Resource)]
-pub struct AssetMetadatas<S: LoadSettings> {
-    metadata: HashMap<AssetId, AssetMetadata<S>>,
-}
-
-impl<S: LoadSettings> AssetMetadatas<S> {
-    pub fn new() -> Self {
-        Self {
-            metadata: HashMap::new(),
-        }
-    }
-
-    pub fn insert(&mut self, id: AssetId, metadata: AssetMetadata<S>) {
-        self.metadata.insert(id, metadata);
-    }
-
-    pub fn get(&self, id: AssetId) -> Option<&AssetMetadata<S>> {
-        self.metadata.get(&id)
-    }
-
-    pub fn get_mut(&mut self, id: AssetId) -> Option<&mut AssetMetadata<S>> {
-        self.metadata.get_mut(&id)
-    }
-
-    pub fn remove(&mut self, id: AssetId) -> Option<AssetMetadata<S>> {
-        self.metadata.remove(&id)
-    }
-
-    pub fn contains(&self, id: AssetId) -> bool {
-        self.metadata.contains_key(&id)
-    }
-
-    pub fn iter(&self) -> impl Iterator<Item = (&AssetId, &AssetMetadata<S>)> {
-        self.metadata.iter()
-    }
-
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = (&AssetId, &mut AssetMetadata<S>)> {
-        self.metadata.iter_mut()
-    }
-}
-
 pub struct LoadContext<'a, S: LoadSettings> {
     dev_mode: DevMode,
     path: PathBuf,
     id: AssetId,
     settings: &'a S,
+    dependencies: Vec<AssetId>,
 }
 
 impl<'a, S: LoadSettings> LoadContext<'a, S> {
@@ -307,6 +180,7 @@ impl<'a, S: LoadSettings> LoadContext<'a, S> {
             path,
             id,
             settings,
+            dependencies: Vec::new(),
         }
     }
 
@@ -325,27 +199,12 @@ impl<'a, S: LoadSettings> LoadContext<'a, S> {
     pub fn settings(&self) -> &S {
         self.settings
     }
-}
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Resource)]
-pub struct AssetSerializer<A: Asset> {
-    serialize: fn(&A) -> Vec<u8>,
-    deserialize: fn(&[u8]) -> A,
-}
-
-impl<A: Asset> AssetSerializer<A> {
-    pub fn new(serialize: fn(&A) -> Vec<u8>, deserialize: fn(&[u8]) -> A) -> Self {
-        Self {
-            serialize,
-            deserialize,
-        }
+    pub fn dependencies(&self) -> &[AssetId] {
+        &self.dependencies
     }
 
-    pub fn serialize(&self, asset: &A) -> Vec<u8> {
-        (self.serialize)(asset)
-    }
-
-    pub fn deserialize(&self, bytes: &[u8]) -> A {
-        (self.deserialize)(bytes)
+    pub fn add_dependency(&mut self, id: AssetId) {
+        self.dependencies.push(id);
     }
 }

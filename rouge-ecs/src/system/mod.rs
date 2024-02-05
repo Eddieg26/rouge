@@ -18,7 +18,7 @@ pub struct System {
 }
 
 impl System {
-    fn new<F>(function: F, reads: Vec<AccessType>, writes: Vec<AccessType>) -> Self
+    pub fn new<F>(function: F, reads: Vec<AccessType>, writes: Vec<AccessType>) -> Self
     where
         F: for<'a> Fn(&'a World) + Send + Sync + 'static,
     {

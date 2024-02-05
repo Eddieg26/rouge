@@ -1,391 +1,281 @@
-use crate::{
-    filesystem::FileSystem,
-    pack::{AsBytes, AssetPack},
-    Asset, AssetId, AssetLoader, AssetMetadata, AssetMetadatas, AssetProcessor, AssetSerializer,
-    AssetType, Assets, DevMode, LoadContext,
-};
-use rouge_ecs::{
-    macros::Resource,
-    system::SystemArg,
-    world::{resource::Resource, World},
-};
 use std::{
     collections::HashMap,
     hash::{Hash, Hasher},
-    path::{Path, PathBuf},
+    path::Path,
 };
 
-pub struct ErasedAssetLoader {
-    load: Box<dyn Fn(DevMode, Box<dyn AssetReader>, PathBuf, &World) -> AssetId + Send + Sync>,
-    unload: Box<dyn Fn(AssetId, &World) + Send + Sync>,
-    process: Box<dyn Fn(&World) + Send + Sync>,
-    extensions: Vec<String>,
-    ty: AssetType,
+use crate::{
+    filesystem::FileSystem,
+    metadata::{AssetMetadata, AssetMetadatas},
+    Asset, AssetId, AssetPipeline, AssetProcessor, AssetType, Assets, DevMode, LoadContext,
+};
+use rouge_ecs::{
+    macros::Resource,
+    system::{IntoSystem, System, SystemArg},
+    world::{resource::Resource, World},
+};
+
+fn get_metaname(path: &Path) -> String {
+    let mut state = std::collections::hash_map::DefaultHasher::new();
+    path.hash(&mut state);
+    let mut name = state.finish().to_string();
+    name.push_str(".meta");
+    name
 }
 
-impl ErasedAssetLoader {
-    pub fn new<L: AssetLoader>() -> Self {
+fn create_load_asset_system<A: AssetPipeline>(dev_mode: DevMode, path: &Path) -> System {
+    let path = path.to_path_buf();
+    let system = move |assets: &mut Assets<A::Asset>,
+                       metadatas: &mut AssetMetadatas<A::Settings>,
+                       filesystem: &FileSystem| {
+        let metaname = get_metaname(path.as_path());
+        let path = Path::new(".meta").join(metaname);
+
+        if filesystem.exists(&path) {
+            let metadata = filesystem.read_str(&path).unwrap();
+            let metadata = toml::from_str::<AssetMetadata<A::Settings>>(&metadata).ok()?;
+            let id = metadata.id();
+
+            let data = filesystem.read(&path).ok()?;
+            let mut ctx = LoadContext::new(dev_mode, path.clone(), id, metadata.settings());
+            let asset = A::load(&mut ctx, &data)?;
+            assets.insert(id, asset);
+
+            metadatas.insert(id, metadata);
+
+            return Some(id);
+        }
+
+        None
+    };
+
+    let system = System::new(
+        move |world| {
+            let mut assets = world.resource_mut::<Assets<A::Asset>>();
+            let mut metadatas = world.resource_mut::<AssetMetadatas<A::Settings>>();
+            let filesystem = world.resource::<FileSystem>();
+
+            system(&mut assets, &mut metadatas, &filesystem);
+        },
+        vec![],
+        vec![],
+    );
+
+    system
+}
+
+pub struct ErasedAssetPipeline {
+    create_metadata: Box<dyn Fn(&Path, &FileSystem) -> Option<AssetId> + Send + Sync>,
+    load: Box<dyn Fn(DevMode, &Path, &World) -> Option<AssetId> + Send + Sync>,
+    process: Box<dyn Fn(&[AssetId], &World) + Send + Sync>,
+    unload: Box<dyn Fn(AssetId, &World) + Send + Sync>,
+}
+
+impl ErasedAssetPipeline {
+    pub fn new<A: AssetPipeline>() -> Self {
         Self {
-            load: Box::new(|dev_mode, reader, path, world| match dev_mode {
-                DevMode::Development => {
-                    let metadata = if let Some(data) = reader.read_metadata() {
-                        let string = std::str::from_utf8(data).unwrap();
-                        toml::from_str::<AssetMetadata<L::Settings>>(string).unwrap()
+            create_metadata: Box::new(|path, filesystem| {
+                let metaname = get_metaname(path);
+                let path = Path::new(".meta").join(metaname);
+
+                if filesystem.exists(&path) {
+                    let metadata = filesystem.read_str(&path).unwrap();
+                    if let Some(metadata) =
+                        toml::from_str::<AssetMetadata<A::Settings>>(&metadata).ok()
+                    {
+                        return Some(metadata.id());
                     } else {
                         let id = AssetId::new();
-                        let settings = L::Settings::default();
-                        let metadata = AssetMetadata::new(id, settings);
-
-                        reader.write_metadata(toml::to_string(&metadata).unwrap().as_bytes());
-
-                        metadata
-                    };
-
-                    let id = metadata.id();
-                    let settings = metadata.settings();
-
-                    let ctx = LoadContext::new(dev_mode, path.clone(), id, settings);
-                    let data = reader.read().unwrap();
-                    let asset = L::load(ctx, data);
-
-                    if let Some(serializer) = world.try_resource_mut::<AssetSerializer<L::Asset>>()
-                    {
-                        let data = (serializer.serialize)(&asset);
-                        // TODO Write Pack to data path
+                        let settings = A::Settings::default();
+                        let metadata = AssetMetadata::<A::Settings>::new(id, settings);
+                        let metadata = toml::to_string(&metadata).ok()?;
+                        filesystem.write_str(&path, &metadata).ok()?;
+                        return Some(id);
                     }
-
-                    world.resource_mut::<Assets<L::Asset>>().insert(id, asset);
-                    world
-                        .resource_mut::<AssetMetadatas<L::Settings>>()
-                        .insert(id, metadata);
-
-                    world.resource_mut::<AssetLibrary>().insert(
-                        id,
-                        path,
-                        AssetType::new::<L::Asset>(),
-                    );
-
-                    id
+                } else {
+                    let id = AssetId::new();
+                    let settings = A::Settings::default();
+                    let metadata = AssetMetadata::<A::Settings>::new(id, settings);
+                    let metadata = toml::to_string(&metadata).ok()?;
+                    filesystem.write_str(&path, &metadata).ok()?;
+                    return Some(id);
                 }
-                DevMode::Release => {
-                    let metadata = reader.read_metadata().unwrap();
-                    let metadata = toml::from_str::<AssetMetadata<L::Settings>>(
-                        std::str::from_utf8(metadata).unwrap(),
-                    )
-                    .unwrap();
+            }),
+            load: Box::new(|dev_mode, path, world| {
+                let metaname = get_metaname(path);
+                let path = Path::new(".meta").join(metaname);
+                let filesystem = world.resource::<FileSystem>();
 
+                if filesystem.exists(&path) {
+                    let metadata = filesystem.read_str(&path).unwrap();
+                    let metadata = toml::from_str::<AssetMetadata<A::Settings>>(&metadata).ok()?;
                     let id = metadata.id();
-                    let data = reader.read().unwrap();
 
-                    if let Some(serializer) = world.try_resource_mut::<AssetSerializer<L::Asset>>()
-                    {
-                        let asset = (serializer.deserialize)(data);
-                        world.resource_mut::<Assets<L::Asset>>().insert(id, asset);
-                        world
-                            .resource_mut::<AssetMetadatas<L::Settings>>()
-                            .insert(id, metadata);
-                    } else {
-                        let ctx = LoadContext::new(dev_mode, path.clone(), id, metadata.settings());
-                        let asset = L::load(ctx, data);
-                        world.resource_mut::<Assets<L::Asset>>().insert(id, asset);
-                        world
-                            .resource_mut::<AssetMetadatas<L::Settings>>()
-                            .insert(id, metadata);
+                    let data = filesystem.read(&path).ok()?;
+                    let mut ctx = LoadContext::new(dev_mode, path.clone(), id, metadata.settings());
+                    let asset = A::load(&mut ctx, &data)?;
+                    let assets = world.resource_mut::<Assets<A::Asset>>();
+                    assets.insert(id, asset);
+
+                    let metadatas = world.resource_mut::<AssetMetadatas<A::Settings>>();
+                    metadatas.insert(id, metadata);
+
+                    return Some(id);
+                }
+
+                None
+            }),
+            process: Box::new(|ids, world| {
+                let assets = world.resource_mut::<Assets<A::Asset>>();
+                let metadatas = world.resource::<AssetMetadatas<A::Settings>>();
+                for id in ids {
+                    match (assets.get_mut(*id), metadatas.get(*id)) {
+                        (Some(asset), Some(metadata)) => {
+                            A::Processor::process(
+                                *id,
+                                asset,
+                                metadata.settings(),
+                                A::Arg::get(world),
+                            );
+                        }
+                        _ => {}
                     }
-
-                    id
                 }
             }),
             unload: Box::new(|id, world| {
-                let assets = world.resource_mut::<Assets<L::Asset>>();
-                let metadatas = world.resource_mut::<AssetMetadatas<L::Settings>>();
-                match (assets.remove(id), metadatas.remove(id)) {
+                let assets = world.resource_mut::<Assets<A::Asset>>();
+                let metadata = world.resource_mut::<AssetMetadatas<A::Settings>>();
+                match (assets.remove(id), metadata.remove(id)) {
                     (Some(asset), Some(metadata)) => {
-                        L::unload(id, asset, metadata.settings(), L::Arg::get(world))
+                        A::unload(id, asset, &metadata.settings(), A::Arg::get(world));
                     }
                     _ => {}
                 }
             }),
-            process: Box::new(|world| {
-                let assets = world.resource_mut::<Assets<L::Asset>>();
-                for (id, asset) in assets.iter_mut() {
-                    L::Processor::process(*id, asset, L::Arg::get(world));
-                }
-            }),
-            extensions: L::extensions().iter().map(|s| s.to_string()).collect(),
-            ty: AssetType::new::<L::Asset>(),
         }
     }
 
-    pub fn extensions(&self) -> &[String] {
-        &self.extensions
+    pub fn create_metadata(&self, path: &Path, filesystem: &FileSystem) -> Option<AssetId> {
+        (self.create_metadata)(path, filesystem)
+    }
+
+    pub fn load(&self, dev_mode: DevMode, path: &Path, world: &World) -> Option<AssetId> {
+        (self.load)(dev_mode, path, world)
+    }
+
+    pub fn process(&self, ids: &[AssetId], world: &World) {
+        (self.process)(ids, world)
+    }
+
+    pub fn unload(&self, id: AssetId, world: &World) {
+        (self.unload)(id, world)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct AssetInfo {
+    ty: AssetType,
+    path: String,
+}
+
+impl AssetInfo {
+    pub fn new<A: Asset>(path: impl Into<String>) -> Self {
+        Self {
+            ty: AssetType::new::<A>(),
+            path: path.into(),
+        }
     }
 
     pub fn ty(&self) -> AssetType {
         self.ty
     }
-}
 
-pub struct AssetLoaders {
-    loaders: Vec<ErasedAssetLoader>,
-    ext_to_loader: HashMap<String, usize>,
-    ty_to_loader: HashMap<AssetType, usize>,
-}
-
-impl AssetLoaders {
-    pub fn new() -> Self {
-        Self {
-            loaders: Vec::new(),
-            ext_to_loader: HashMap::new(),
-            ty_to_loader: HashMap::new(),
-        }
-    }
-
-    pub fn register<L: AssetLoader>(&mut self) {
-        let loader = ErasedAssetLoader::new::<L>();
-        let index = self.loaders.len();
-        for ext in loader.extensions() {
-            self.ext_to_loader.insert(ext.clone(), index);
-        }
-
-        self.ty_to_loader.insert(loader.ty(), index);
-
-        self.loaders.push(loader);
-    }
-
-    pub fn get<A: Asset>(&self) -> Option<&ErasedAssetLoader> {
-        self.get_by_type(AssetType::new::<A>())
-    }
-
-    pub fn get_by_type(&self, ty: AssetType) -> Option<&ErasedAssetLoader> {
-        self.ty_to_loader
-            .get(&ty)
-            .map(|index| &self.loaders[*index])
-    }
-
-    pub fn get_by_ext(&self, ext: &str) -> Option<&ErasedAssetLoader> {
-        self.ext_to_loader
-            .get(ext)
-            .map(|index| &self.loaders[*index])
+    pub fn path(&self) -> &str {
+        &self.path
     }
 }
 
-#[derive(Resource, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Resource)]
 pub struct AssetLibrary {
-    path_to_id: HashMap<u64, AssetId>,
-    id_to_type: HashMap<AssetId, AssetType>,
+    infos: HashMap<AssetId, AssetInfo>,
 }
 
 impl AssetLibrary {
     pub fn new() -> Self {
         Self {
-            path_to_id: HashMap::new(),
-            id_to_type: HashMap::new(),
+            infos: HashMap::new(),
         }
     }
 
-    pub fn load(&mut self, fs: Box<dyn FileSystem>, path: impl AsRef<Path>) {
-        let contents = fs.read(path.as_ref()).unwrap();
-        let loaded = AssetLibrary::from_bytes(&contents);
-        let _ = std::mem::replace(self, loaded);
+    pub fn insert(&mut self, id: AssetId, info: AssetInfo) {
+        self.infos.insert(id, info);
     }
 
-    pub fn insert(&mut self, id: AssetId, path: impl AsRef<Path>, ty: AssetType) {
-        let mut state = std::collections::hash_map::DefaultHasher::new();
-        path.as_ref().hash(&mut state);
-        let path_hash = state.finish();
-        self.path_to_id.insert(path_hash, id);
-        self.id_to_type.insert(id, ty);
+    pub fn get(&self, id: AssetId) -> Option<&AssetInfo> {
+        self.infos.get(&id)
     }
 
-    pub fn get(&self, path: impl AsRef<Path>) -> Option<AssetId> {
-        let mut state = std::collections::hash_map::DefaultHasher::new();
-        path.as_ref().hash(&mut state);
-        let path_hash = state.finish();
-
-        self.path_to_id.get(&path_hash).copied()
-    }
-
-    pub fn get_type(&self, id: AssetId) -> Option<AssetType> {
-        self.id_to_type.get(&id).copied()
-    }
-
-    pub fn remove(&mut self, id: AssetId) -> Option<u64> {
-        let path =
-            self.path_to_id.iter().find_map(
-                |(path, id_)| {
-                    if *id_ == id {
-                        Some(path.clone())
-                    } else {
-                        None
-                    }
-                },
-            )?;
-
-        self.path_to_id.remove(&path);
-        self.id_to_type.remove(&id);
-
-        Some(path)
+    pub fn remove(&mut self, id: AssetId) -> Option<AssetInfo> {
+        self.infos.remove(&id)
     }
 
     pub fn contains(&self, id: AssetId) -> bool {
-        self.id_to_type.contains_key(&id)
+        self.infos.contains_key(&id)
     }
+}
 
-    pub fn iter(&self) -> impl Iterator<Item = (&AssetId, &AssetType, &u64)> {
-        self.path_to_id
+impl serde::Serialize for AssetLibrary {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let infos = self
+            .infos
             .iter()
-            .map(|(path, id)| (id, self.id_to_type.get(id).unwrap(), path))
+            .map(|(id, info)| (id.0.to_string(), info))
+            .collect::<HashMap<_, _>>();
+        infos.serialize(serializer)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for AssetLibrary {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let infos = HashMap::<String, AssetInfo>::deserialize(deserializer)?;
+        let infos = infos
+            .into_iter()
+            .map(|(id, info)| (AssetId(id.parse().unwrap()), info))
+            .collect();
+        Ok(Self { infos })
     }
 }
 
 #[derive(Resource)]
-pub struct AssetDatabase {
-    loaders: AssetLoaders,
-    root: PathBuf,
-    mode: DevMode,
+pub struct AssetPipelines {
+    pipelines: Vec<ErasedAssetPipeline>,
+    ext_map: HashMap<String, usize>,
+    ty_map: HashMap<AssetType, usize>,
 }
 
-impl AssetDatabase {
-    pub fn new(root: PathBuf, mode: DevMode) -> Self {
+impl AssetPipelines {
+    pub fn new() -> Self {
         Self {
-            loaders: AssetLoaders::new(),
-            root,
-            mode,
+            pipelines: Vec::new(),
+            ext_map: HashMap::new(),
+            ty_map: HashMap::new(),
         }
     }
 
-    pub fn register<L: AssetLoader>(&mut self) {
-        self.loaders.register::<L>();
-    }
-
-    pub fn load(&self, path: impl AsRef<Path>, world: &World) -> Option<AssetId> {
-        todo!()
-    }
-}
-
-pub trait AssetReader {
-    fn load(&mut self, path: &Path);
-    fn read(&self) -> Option<&[u8]>;
-    fn read_metadata(&self) -> Option<&[u8]>;
-    fn write(&self, data: &[u8]);
-    fn write_metadata(&self, data: &[u8]);
-}
-
-pub struct PackAssetReader {
-    fs: Box<dyn FileSystem>,
-    path: PathBuf,
-    pack: Option<AssetPack>,
-}
-
-impl PackAssetReader {
-    pub fn new(fs: Box<dyn FileSystem>, path: PathBuf) -> Self {
-        Self {
-            fs,
-            path,
-            pack: None,
+    pub fn register<A: AssetPipeline>(&mut self) {
+        let index = self.pipelines.len();
+        self.pipelines.push(ErasedAssetPipeline::new::<A>());
+        for ext in A::extensions() {
+            self.ext_map.insert(ext.to_string(), index);
         }
+        self.ty_map.insert(AssetType::new::<A::Asset>(), index);
     }
 
-    pub fn path(&self) -> &Path {
-        &self.path
-    }
-}
-
-impl<'a> AssetReader for PackAssetReader {
-    fn load(&mut self, path: &Path) {
-        let pack = self.fs.read(path).unwrap();
-        self.pack = Some(AssetPack::from_bytes(&pack));
+    pub fn get_by_ext(&self, ext: &str) -> Option<&ErasedAssetPipeline> {
+        self.ext_map.get(ext).map(|&index| &self.pipelines[index])
     }
 
-    fn read(&self) -> Option<&[u8]> {
-        match self.pack.as_ref() {
-            Some(pack) => Some(pack.data()),
-            None => None,
-        }
-    }
-
-    fn read_metadata(&self) -> Option<&[u8]> {
-        match self.pack.as_ref() {
-            Some(pack) => Some(pack.metadata()),
-            None => None,
-        }
-    }
-
-    fn write(&self, _: &[u8]) {}
-
-    fn write_metadata(&self, _: &[u8]) {}
-}
-
-pub struct RawAssetReader {
-    fs: Box<dyn FileSystem>,
-    path: PathBuf,
-    data: Option<Vec<u8>>,
-    metadata: Option<Vec<u8>>,
-}
-
-impl RawAssetReader {
-    pub fn new(fs: Box<dyn FileSystem>, path: PathBuf) -> Self {
-        Self {
-            fs,
-            path,
-            data: None,
-            metadata: None,
-        }
-    }
-
-    pub fn path(&self) -> &Path {
-        &self.path
+    pub fn get_by_ty(&self, ty: AssetType) -> Option<&ErasedAssetPipeline> {
+        self.ty_map.get(&ty).map(|&index| &self.pipelines[index])
     }
 }
-
-impl AssetReader for RawAssetReader {
-    fn load(&mut self, path: &Path) {
-        self.data = self.fs.read(path).ok();
-
-        let metapath = self.path.as_os_str().to_str().unwrap().to_owned() + ".meta";
-        self.metadata = self.fs.read(Path::new(&metapath)).ok()
-    }
-
-    fn read(&self) -> Option<&[u8]> {
-        match self.data.as_ref() {
-            Some(data) => Some(data),
-            None => None,
-        }
-    }
-
-    fn read_metadata(&self) -> Option<&[u8]> {
-        match self.metadata.as_ref() {
-            Some(metadata) => Some(metadata),
-            None => None,
-        }
-    }
-
-    fn write(&self, data: &[u8]) {
-        let _ = self.fs.write(&self.path, data);
-    }
-
-    fn write_metadata(&self, data: &[u8]) {
-        let metapath = self.path.as_os_str().to_str().unwrap().to_owned() + ".meta";
-        let _ = self.fs.write(Path::new(&metapath), data);
-    }
-}
-
-// Asset Plugin Features
-// Store Assets
-// Create Asset Metadata
-// Load Asset Metadata
-// Load Assets from raw files
-// Create Asset Packs
-// Load Assets from packs
-// Load Assets from network
-// Load Assets from memory
-// Load Assets Asynchronously
-// Load Asset dependencies
-// Process Assets
-// Serialize/Deserialize Assets
-// Unload Assets
-// Unload Asset dependencies
-// Unload Asset Metadata
-// Reload Assets
-// Reload Asset dependencies

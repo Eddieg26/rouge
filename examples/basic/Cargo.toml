@@ -10,3 +10,5 @@ rouge-ecs = { path = "../../rouge-ecs", version = "0.1.0" }
 rouge-winit = { path = "../../rouge-winit", version = "0.1.0" }
 rouge-game = { path = "../../rouge-game", version = "0.1.0" }
 rouge-window = { path = "../../rouge-window", version = "0.1.0" }
+rouge-asset = { path = "../../rouge-asset", version = "0.1.0" }
+toml = "0.8.9"

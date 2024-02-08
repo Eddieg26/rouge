@@ -1,52 +1,13 @@
 use crate::{
     storage::{blob::Blob, sparse::SparseMap},
+    system::SystemArg,
     world::{resource::Resource, World},
 };
-use std::any::TypeId;
-
-pub struct ActionData {
-    actions: Blob,
-    priority: u32,
-    execute: Box<dyn Fn(&mut World, &mut Blob, &mut ActionOutputs) + Send + Sync>,
-}
-
-impl ActionData {
-    pub fn new<A: Action>() -> Self {
-        Self {
-            actions: Blob::new::<A>(),
-            priority: A::PRIORITY,
-            execute: Box::new(|world, blob, outputs| {
-                for action in blob.iter_mut::<A>() {
-                    outputs.add::<A>(action.execute(world));
-                }
-            }),
-        }
-    }
-
-    pub fn priority(&self) -> u32 {
-        self.priority
-    }
-
-    pub fn execute(&self, world: &mut World, blob: &mut Blob, outputs: &mut ActionOutputs) {
-        (self.execute)(world, blob, outputs);
-    }
-
-    pub fn actions(&self) -> &Blob {
-        &self.actions
-    }
-
-    pub fn actions_mut(&mut self) -> &mut Blob {
-        &mut self.actions
-    }
-
-    pub fn clear(&mut self) -> Blob {
-        self.actions.take()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.actions.is_empty()
-    }
-}
+use std::{
+    any::TypeId,
+    sync::{Arc, RwLock},
+    vec,
+};
 
 pub trait Action: 'static {
     type Output;
@@ -59,75 +20,164 @@ pub trait Action: 'static {
     }
 }
 
+pub struct ActionReflector {
+    priority: u32,
+    execute: Box<dyn Fn(&mut World, &Blob, &mut ActionOutputs) + Send + Sync>,
+}
+
+impl ActionReflector {
+    pub fn new<A: Action>() -> Self {
+        Self {
+            priority: A::PRIORITY,
+            execute: Box::new(|world, blob, outputs| {
+                let action = blob.get_mut::<A>(0).expect("Action not found");
+                outputs.add::<A>(action.execute(world));
+            }),
+        }
+    }
+
+    pub fn priority(&self) -> u32 {
+        self.priority
+    }
+
+    pub fn execute(&self, world: &mut World, blob: &Blob, outputs: &mut ActionOutputs) {
+        (self.execute)(world, blob, outputs);
+    }
+}
+
 #[derive(Default)]
+pub struct ActionReflectors {
+    reflectors: SparseMap<TypeId, ActionReflector>,
+}
+
+impl ActionReflectors {
+    pub fn new() -> Self {
+        Self {
+            reflectors: SparseMap::new(),
+        }
+    }
+
+    pub fn register<A: Action>(&mut self) {
+        let type_id = TypeId::of::<A>();
+        if !self.reflectors.contains(&type_id) {
+            self.reflectors.insert(type_id, ActionReflector::new::<A>());
+        }
+
+        self.sort();
+    }
+
+    pub fn sort(&mut self) {
+        self.reflectors.sort(|a, b| a.priority().cmp(&b.priority()));
+    }
+
+    pub fn execute(&self, world: &mut World) -> ActionOutputs {
+        let mut outputs = ActionOutputs::new();
+
+        for (type_id, blob) in world.actions_mut().drain().drain(..) {
+            let reflector = self
+                .reflectors
+                .get(&type_id)
+                .expect("Action not registered");
+            reflector.execute(world, &blob, &mut outputs);
+        }
+
+        outputs
+    }
+
+    pub fn execute_actions<A: Action>(&self, world: &mut World) -> ActionOutputs {
+        let mut outputs = ActionOutputs::new();
+
+        let type_id = TypeId::of::<A>();
+        let reflector = self
+            .reflectors
+            .get(&type_id)
+            .expect("Action not registered");
+        let actions = world.actions_mut().filter(&type_id);
+        for blob in actions {
+            reflector.execute(world, &blob, &mut outputs);
+        }
+
+        outputs
+    }
+}
+
+#[derive(Default, Clone)]
 pub struct Actions {
-    actions: SparseMap<TypeId, ActionData>,
+    actions: Arc<RwLock<Vec<(TypeId, Blob)>>>,
 }
 
 impl Actions {
     pub fn new() -> Self {
         Self {
-            actions: SparseMap::new(),
+            actions: Arc::new(RwLock::new(Vec::new())),
         }
+    }
+
+    pub fn drain(&mut self) -> Vec<(TypeId, Blob)> {
+        let mut actions = self.actions.write().unwrap();
+        std::mem::take(&mut *actions)
     }
 
     pub fn add<A: Action>(&mut self, action: A) {
         let type_id = TypeId::of::<A>();
-        if let Some(data) = self.actions.get_mut(&type_id) {
-            data.actions.push(action);
-        } else {
-            let mut data = ActionData::new::<A>();
-            data.actions.push(action);
-            self.actions.insert(type_id, data);
-        }
+        let mut actions = self.actions.write().unwrap();
+        let mut data = Blob::new::<A>();
+        data.push(action);
+        actions.push((type_id, data));
     }
 
-    pub fn append(&mut self, mut actions: Actions) {
-        for (type_id, mut data) in actions.actions.drain() {
-            if let Some(other) = self.actions.get_mut(&type_id) {
-                other.actions.append(&mut data.actions);
+    pub fn pop(&mut self) -> Option<(TypeId, Blob)> {
+        let mut actions = self.actions.write().unwrap();
+        actions.pop()
+    }
+
+    pub fn filter(&mut self, type_id: &TypeId) -> Vec<Blob> {
+        let mut actions = self.actions.write().unwrap();
+        let mut filtered = Vec::new();
+        let mut index = 0;
+        while index < actions.len() {
+            if actions[index].0 == *type_id {
+                filtered.push(actions.remove(index).1);
             } else {
-                self.actions.insert(type_id, data);
+                index += 1;
             }
         }
-    }
 
-    fn sort(&mut self) {
-        self.actions.sort(|a, b| a.priority().cmp(&b.priority()));
-    }
-
-    pub fn execute(&mut self, world: &mut World) -> ActionOutputs {
-        self.sort();
-        let mut outputs = ActionOutputs::new();
-
-        for data in self.actions.values_mut() {
-            let mut actions = data.clear();
-            data.execute(world, &mut actions, &mut outputs);
-        }
-
-        outputs
-    }
-
-    pub fn execute_actions<A: Action>(&mut self, world: &mut World) -> ActionOutputs {
-        self.sort();
-        let mut outputs = ActionOutputs::new();
-
-        if let Some(data) = self.actions.get_mut(&TypeId::of::<A>()) {
-            let mut actions = data.clear();
-            data.execute(world, &mut actions, &mut outputs);
-        }
-
-        outputs
-    }
-
-    pub fn take(&mut self) -> Self {
-        let mut actions = Self::new();
-        std::mem::swap(&mut self.actions, &mut actions.actions);
-        actions
+        filtered
     }
 
     pub fn is_empty(&self) -> bool {
-        self.actions.values().iter().all(|data| data.is_empty())
+        let actions = self.actions.read().unwrap();
+        actions.is_empty()
+    }
+
+    pub fn clear(&mut self) {
+        let mut actions = self.actions.write().unwrap();
+        actions.clear();
+    }
+}
+
+impl SystemArg for &Actions {
+    type Item<'a> = Actions;
+
+    fn get<'a>(world: &'a World) -> Self::Item<'a> {
+        world.actions().clone()
+    }
+
+    fn metas() -> Vec<crate::world::meta::AccessMeta> {
+        vec![]
+    }
+}
+
+impl SystemArg for &mut Actions {
+    type Item<'a> = Actions;
+
+    fn get<'a>(world: &'a World) -> Self::Item<'a> {
+        world.actions().clone()
+    }
+
+    fn metas() -> Vec<crate::world::meta::AccessMeta> {
+        vec![]
     }
 }
 
@@ -185,5 +235,5 @@ impl ActionOutputs {
     }
 }
 
-impl Resource for Actions {}
+impl Resource for ActionReflectors {}
 impl Resource for ActionOutputs {}

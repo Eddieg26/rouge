@@ -161,36 +161,27 @@ impl SystemGraph {
     pub fn build(&mut self) {
         let mut dependency_graph = HashMap::<NodeId, HashSet<NodeId>>::new();
         for (i, node) in self.nodes.iter().enumerate() {
-            dependency_graph.insert(NodeId::new(i), HashSet::new());
             for (j, other_node) in self.nodes.iter().enumerate() {
-                if i == j
-                    || dependency_graph
-                        .get(&NodeId::new(j))
-                        .and_then(|set| set.get(&NodeId::new(i)))
-                        .is_some()
-                {
+                let dependencies = dependency_graph.entry(NodeId::new(j)).or_default();
+                if i == j || dependencies.contains(&NodeId::new(i)) {
                     continue;
                 }
 
                 let writes = node.writes();
                 let reads = other_node.reads();
 
+                let dependencies = dependency_graph.entry(NodeId::new(i)).or_default();
                 if writes
                     .iter()
                     .any(|write| (*write) != AccessType::None && reads.contains(write))
                 {
-                    dependency_graph
-                        .entry(NodeId::new(i))
-                        .or_insert_with(HashSet::new)
-                        .insert(NodeId::new(j));
+                    dependencies.insert(NodeId::new(j));
                 }
             }
 
+            let dependencies = dependency_graph.entry(NodeId::new(i)).or_default();
             for dependency in node.dependencies() {
-                dependency_graph
-                    .entry(NodeId::new(i))
-                    .or_insert_with(HashSet::new)
-                    .insert(*dependency);
+                dependencies.insert(*dependency);
             }
         }
 

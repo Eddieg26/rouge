@@ -65,8 +65,8 @@ impl Plugin for WinitPlugin {
         let event_loop = EventLoop::new();
         let event_loop = EventLoopResource::new(event_loop);
 
-        game.add_local_resource(event_loop);
-        game.add_local_resource(WinitWindows::new());
+        game.add_local_resource(event_loop)
+            .add_local_resource(WinitWindows::new());
     }
 
     fn run(&mut self, game: &mut Game) {

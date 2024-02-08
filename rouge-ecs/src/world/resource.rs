@@ -69,6 +69,12 @@ impl Resources {
             .insert(ResourceType::new::<R>(), ResourceData::new(resource));
     }
 
+    pub fn remove<R: Resource>(&mut self) -> R {
+        let ty = ResourceType::new::<R>();
+        let mut data = self.resources.remove(&ty).expect("Resource doesn't exist.");
+        data.data.remove(0).expect("Resource doesn't exist.")
+    }
+
     pub fn get<R: Resource>(&self) -> &R {
         let ty = ResourceType::new::<R>();
         let res = self.resources.get(&ty).expect("Resource doesn't exist.");
@@ -92,6 +98,12 @@ impl Resources {
         let ty = ResourceType::new::<R>();
         let res = self.resources.get(&ty)?;
         Some(res.get_mut::<R>())
+    }
+
+    pub fn try_remove<R: Resource>(&mut self) -> Option<R> {
+        let ty = ResourceType::new::<R>();
+        let mut data = self.resources.remove(&ty)?;
+        data.data.remove(0)
     }
 }
 
@@ -165,6 +177,12 @@ impl LocalResources {
         );
     }
 
+    pub fn remove<R: LocalResource>(&mut self) -> R {
+        let ty = ResourceType::new_local::<R>();
+        let mut data = self.resources.remove(&ty).expect("Resource doesn't exist.");
+        data.data.remove(0).expect("Resource doesn't exist.")
+    }
+
     pub fn get<R: LocalResource>(&self) -> &R {
         let ty = ResourceType::new_local::<R>();
         let res = self.resources.get(&ty).expect("Resource doesn't exist.");
@@ -188,5 +206,11 @@ impl LocalResources {
         let ty = ResourceType::new_local::<R>();
         let res = self.resources.get(&ty)?;
         Some(res.get_mut::<R>())
+    }
+
+    pub fn try_remove<R: LocalResource>(&mut self) -> Option<R> {
+        let ty = ResourceType::new_local::<R>();
+        let mut data = self.resources.remove(&ty)?;
+        data.data.remove(0)
     }
 }

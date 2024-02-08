@@ -241,6 +241,32 @@ impl<R: Resource> SystemArg for &mut R {
     }
 }
 
+impl<R: Resource> SystemArg for Option<&R> {
+    type Item<'a> = Option<&'a R>;
+
+    fn get<'a>(world: &'a World) -> Self::Item<'a> {
+        world.try_resource::<R>()
+    }
+
+    fn metas() -> Vec<AccessMeta> {
+        let ty = AccessType::resource::<R>();
+        vec![AccessMeta::new(ty, Access::Read)]
+    }
+}
+
+impl<R: Resource> SystemArg for Option<&mut R> {
+    type Item<'a> = Option<&'a mut R>;
+
+    fn get<'a>(world: &'a World) -> Self::Item<'a> {
+        world.try_resource_mut::<R>()
+    }
+
+    fn metas() -> Vec<AccessMeta> {
+        let ty = AccessType::resource::<R>();
+        vec![AccessMeta::new(ty, Access::Write)]
+    }
+}
+
 pub struct Local<'a, R: LocalResource> {
     resource: &'a R,
     _marker: std::marker::PhantomData<R>,
@@ -316,6 +342,69 @@ impl<R: LocalResource> SystemArg for LocalMut<'_, R> {
     fn metas() -> Vec<AccessMeta> {
         let ty = AccessType::local_resource::<R>();
         vec![AccessMeta::new(ty, Access::Write)]
+    }
+}
+
+impl<R: LocalResource> SystemArg for Option<Local<'_, R>> {
+    type Item<'a> = Option<Local<'a, R>>;
+
+    fn get<'a>(world: &'a World) -> Self::Item<'a> {
+        let resource = world.try_local_resource::<R>();
+        resource.map(Local::new)
+    }
+
+    fn metas() -> Vec<AccessMeta> {
+        let ty = AccessType::local_resource::<R>();
+        vec![AccessMeta::new(ty, Access::Read)]
+    }
+}
+
+impl<R: LocalResource> SystemArg for Option<LocalMut<'_, R>> {
+    type Item<'a> = Option<LocalMut<'a, R>>;
+
+    fn get<'a>(world: &'a World) -> Self::Item<'a> {
+        let resource = world.try_local_resource_mut::<R>();
+        resource.map(LocalMut::new)
+    }
+
+    fn metas() -> Vec<AccessMeta> {
+        let ty = AccessType::local_resource::<R>();
+        vec![AccessMeta::new(ty, Access::Write)]
+    }
+}
+
+pub struct Cloned<R: Resource + Clone> {
+    resource: R,
+    _marker: std::marker::PhantomData<R>,
+}
+
+impl<R: Resource + Clone> SystemArg for Cloned<R> {
+    type Item<'a> = Cloned<R>;
+
+    fn get<'a>(world: &'a World) -> Self::Item<'a> {
+        let resource = world.resource::<R>().clone();
+        Cloned {
+            resource,
+            _marker: std::marker::PhantomData,
+        }
+    }
+
+    fn metas() -> Vec<AccessMeta> {
+        vec![]
+    }
+}
+
+impl<R: Resource + Clone> std::ops::Deref for Cloned<R> {
+    type Target = R;
+
+    fn deref(&self) -> &Self::Target {
+        &self.resource
+    }
+}
+
+impl<R: Resource + Clone> std::ops::DerefMut for Cloned<R> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.resource
     }
 }
 

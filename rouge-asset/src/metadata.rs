@@ -1,10 +1,8 @@
-use rouge_ecs::{macros::Resource, world::resource::Resource};
-use std::collections::HashMap;
-
 use crate::AssetId;
+use rouge_ecs::bits::AsBytes;
 
 pub trait LoadSettings:
-    Send + Sync + Sized + serde::Serialize + serde::de::DeserializeOwned + Default + 'static
+    Send + Sync + Sized + AsBytes + serde::Serialize + serde::de::DeserializeOwned + Default + 'static
 {
 }
 
@@ -106,43 +104,18 @@ impl<'a, S: LoadSettings> serde::Deserialize<'a> for AssetMetadata<S> {
     }
 }
 
-#[derive(Resource)]
-pub struct AssetMetadatas<S: LoadSettings> {
-    metadata: HashMap<AssetId, AssetMetadata<S>>,
-}
-
-impl<S: LoadSettings> AssetMetadatas<S> {
-    pub fn new() -> Self {
-        Self {
-            metadata: HashMap::new(),
-        }
+impl<S: LoadSettings> AsBytes for AssetMetadata<S> {
+    fn to_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&self.id.0.to_le_bytes());
+        bytes.extend_from_slice(&self.settings.to_bytes());
+        bytes
     }
 
-    pub fn insert(&mut self, id: AssetId, metadata: AssetMetadata<S>) {
-        self.metadata.insert(id, metadata);
-    }
-
-    pub fn get(&self, id: AssetId) -> Option<&AssetMetadata<S>> {
-        self.metadata.get(&id)
-    }
-
-    pub fn get_mut(&mut self, id: AssetId) -> Option<&mut AssetMetadata<S>> {
-        self.metadata.get_mut(&id)
-    }
-
-    pub fn remove(&mut self, id: AssetId) -> Option<AssetMetadata<S>> {
-        self.metadata.remove(&id)
-    }
-
-    pub fn contains(&self, id: AssetId) -> bool {
-        self.metadata.contains_key(&id)
-    }
-
-    pub fn iter(&self) -> impl Iterator<Item = (&AssetId, &AssetMetadata<S>)> {
-        self.metadata.iter()
-    }
-
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = (&AssetId, &mut AssetMetadata<S>)> {
-        self.metadata.iter_mut()
+    fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        let id_bytes: [u8; 8] = bytes[0..8].try_into().ok()?;
+        let id = AssetId(u64::from_le_bytes(id_bytes));
+        let settings = S::from_bytes(&bytes[8..])?;
+        Some(AssetMetadata { id, settings })
     }
 }

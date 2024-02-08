@@ -202,6 +202,26 @@ impl Blob {
         other.dealloc();
     }
 
+    pub fn remove<T>(&mut self, index: usize) -> Option<T> {
+        if index >= self.len {
+            return None
+        }
+
+        unsafe {
+            let src = self.offset(index) as *mut T;
+            let data = std::ptr::read(src);
+
+            let dst = self.offset(index);
+            let src = self.offset(index + 1);
+            let len = self.len - index - 1;
+            std::ptr::copy_nonoverlapping(src, dst, len * self.aligned_layout.size());
+
+            self.len -= 1;
+
+            Some(data)
+        }
+    }
+
     pub fn swap_remove(&mut self, index: usize) -> Blob {
         if index >= self.len {
             panic!("Index out of bounds");

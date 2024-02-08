@@ -7,7 +7,7 @@ use rouge_ecs::{
     core::Component,
     schedule::{Schedule, SchedulePhase},
     system::{
-        observer::{Action, Observers},
+        observer::{Action, Actions, Observers},
         IntoSystem,
     },
     world::{
@@ -45,6 +45,12 @@ impl Game {
 
     pub fn register<C: Component>(&mut self) -> &mut Self {
         self.world.register::<C>();
+
+        self
+    }
+
+    pub fn register_action<A: Action>(&mut self) -> &mut Self {
+        self.world.register_action::<A>();
 
         self
     }
@@ -108,6 +114,14 @@ impl Game {
 
     pub fn resource_mut<R: Resource>(&self) -> &mut R {
         self.world.resource_mut::<R>()
+    }
+
+    pub fn actions(&self) -> &Actions {
+        self.world.actions()
+    }
+
+    pub fn actions_mut(&mut self) -> &mut Actions {
+        self.world.actions_mut()
     }
 
     pub fn local_resource<R: LocalResource>(&self) -> &R {

@@ -114,7 +114,7 @@ pub struct ScopedTaskPool<'a> {
 }
 
 impl<'a> ScopedTaskPool<'a> {
-    pub fn new(size: usize, executor: impl Fn(ScopedSender<'a>)) -> Self {
+    pub fn new(size: usize, mut executor: impl FnMut(ScopedSender<'a>)) -> Self {
         let (sender, receiver) = std::sync::mpsc::channel();
         let receiver = std::sync::Arc::new(std::sync::Mutex::new(receiver));
 

@@ -1,19 +1,22 @@
-use metadata::LoadSettings;
+use filesystem::FileSystem;
+use metadata::{AssetMetadata, LoadSettings};
 use rouge_ecs::{
     macros::Resource,
-    system::{ArgItem, SystemArg},
-    world::resource::Resource,
+    world::{resource::Resource, World},
 };
 use std::{
-    collections::HashMap,
     hash::{Hash, Hasher},
-    path::PathBuf,
+    path::{Path, PathBuf},
 };
+use storage::AssetReflectors;
 
+pub mod actions;
 pub mod database;
 pub mod filesystem;
 pub mod metadata;
-pub mod pack;
+pub mod pipeline;
+pub mod reflector;
+pub mod storage;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct AssetId(u64);
@@ -38,6 +41,24 @@ impl From<u64> for AssetId {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct HashId(u64);
+
+impl HashId {
+    pub fn new<H: Hash>(hashable: &H) -> Self {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        hashable.hash(&mut hasher);
+
+        Self(hasher.finish())
+    }
+}
+
+impl ToString for HashId {
+    fn to_string(&self) -> String {
+        self.0.to_string()
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct AssetType(u64);
 
@@ -45,6 +66,13 @@ impl AssetType {
     pub fn new<A: Asset>() -> Self {
         let mut state = std::collections::hash_map::DefaultHasher::new();
         std::any::TypeId::of::<A>().hash(&mut state);
+
+        Self(state.finish())
+    }
+
+    pub fn new_settings<S: LoadSettings>() -> Self {
+        let mut state = std::collections::hash_map::DefaultHasher::new();
+        std::any::TypeId::of::<S>().hash(&mut state);
 
         Self(state.finish())
     }
@@ -75,129 +103,38 @@ pub trait Asset: Send + Sync + 'static {}
 
 impl Asset for () {}
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Resource)]
 pub enum DevMode {
     Development,
     Release,
 }
 
-pub trait AssetPipeline: Send + Sync + 'static {
-    type Asset: Asset;
-    type Settings: LoadSettings;
-    type Arg: SystemArg;
-    type Processor: AssetProcessor<Asset = Self::Asset, Arg = Self::Arg, Settings = Self::Settings>;
-
-    fn load(ctx: &mut LoadContext<Self::Settings>, data: &[u8]) -> Option<Self::Asset>;
-    fn unload<'a>(
-        id: AssetId,
-        asset: Self::Asset,
-        settings: &'a Self::Settings,
-        arg: ArgItem<'a, Self::Arg>,
-    );
-    fn extensions() -> &'static [&'static str];
-}
-
-pub trait AssetProcessor: Send + Sync + 'static {
-    type Asset: Asset;
-    type Arg: SystemArg;
-    type Settings: LoadSettings;
-
-    fn process<'a>(
-        id: AssetId,
-        asset: &mut Self::Asset,
-        settings: &'a Self::Settings,
-        arg: ArgItem<'a, Self::Arg>,
-    );
-}
-
-impl AssetProcessor for () {
-    type Asset = ();
-    type Arg = ();
-    type Settings = ();
-
-    fn process<'a>(
-        id: AssetId,
-        asset: &mut Self::Asset,
-        settings: &'a Self::Settings,
-        arg: ArgItem<'a, Self::Arg>,
-    ) {
-    }
-}
-
-#[derive(Resource)]
-pub struct Assets<A: Asset> {
-    assets: HashMap<AssetId, A>,
-}
-
-impl<A: Asset> Assets<A> {
-    pub fn new() -> Self {
-        Self {
-            assets: HashMap::new(),
-        }
-    }
-
-    pub fn insert(&mut self, id: AssetId, asset: A) {
-        self.assets.insert(id, asset);
-    }
-
-    pub fn get(&self, id: AssetId) -> Option<&A> {
-        self.assets.get(&id)
-    }
-
-    pub fn get_mut(&mut self, id: AssetId) -> Option<&mut A> {
-        self.assets.get_mut(&id)
-    }
-
-    pub fn remove(&mut self, id: AssetId) -> Option<A> {
-        self.assets.remove(&id)
-    }
-
-    pub fn contains(&self, id: AssetId) -> bool {
-        self.assets.contains_key(&id)
-    }
-
-    pub fn iter(&self) -> impl Iterator<Item = (&AssetId, &A)> {
-        self.assets.iter()
-    }
-
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = (&AssetId, &mut A)> {
-        self.assets.iter_mut()
-    }
+pub enum Either<A, B> {
+    Left(A),
+    Right(B),
 }
 
 pub struct LoadContext<'a, S: LoadSettings> {
-    dev_mode: DevMode,
-    path: PathBuf,
-    id: AssetId,
-    settings: &'a S,
+    path: &'a Path,
+    metadata: &'a AssetMetadata<S>,
     dependencies: Vec<AssetId>,
 }
 
 impl<'a, S: LoadSettings> LoadContext<'a, S> {
-    pub fn new(dev_mode: DevMode, path: PathBuf, id: AssetId, settings: &'a S) -> Self {
+    pub fn new(path: &'a PathBuf, metadata: &'a AssetMetadata<S>) -> Self {
         Self {
-            dev_mode,
             path,
-            id,
-            settings,
+            metadata,
             dependencies: Vec::new(),
         }
     }
 
-    pub fn dev_mode(&self) -> DevMode {
-        self.dev_mode
+    pub fn path(&self) -> &Path {
+        self.path
     }
 
-    pub fn path(&self) -> &PathBuf {
-        &self.path
-    }
-
-    pub fn id(&self) -> AssetId {
-        self.id
-    }
-
-    pub fn settings(&self) -> &S {
-        self.settings
+    pub fn metadata(&self) -> &AssetMetadata<S> {
+        self.metadata
     }
 
     pub fn dependencies(&self) -> &[AssetId] {
@@ -206,5 +143,26 @@ impl<'a, S: LoadSettings> LoadContext<'a, S> {
 
     pub fn add_dependency(&mut self, id: AssetId) {
         self.dependencies.push(id);
+    }
+}
+
+pub fn import_assets(world: &World) {
+    import_assets_inner(world, Path::new(""));
+}
+
+fn import_assets_inner(world: &World, path: &Path) {
+    let filesystem = world.resource::<FileSystem>();
+    let reflectors = world.resource::<AssetReflectors>();
+
+    let items = filesystem.list(&path).unwrap();
+    for item in &items {
+        let meta = filesystem.metadata(&path).unwrap();
+        if meta.is_dir {
+            import_assets_inner(world, &path);
+        } else {
+            let ext = item.extension().unwrap().to_str().unwrap();
+            let reflector = reflectors.get_asset_extension(ext);
+            reflector.import_asset(world, item);
+        }
     }
 }

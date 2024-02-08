@@ -1,4 +1,4 @@
-use super::{action::Actions, Action, ActionOutputs};
+use super::{Action, ActionOutputs};
 use crate::{
     core::{Component, Entity},
     world::World,
@@ -21,7 +21,7 @@ impl CreateEntity {
         let add_component = move |entity: Entity, world: &mut World| {
             if let Some(component) = component.take() {
                 world
-                    .resource_mut::<Actions>()
+                    .actions_mut()
                     .add(AddComponent::new(entity, component));
             }
         };

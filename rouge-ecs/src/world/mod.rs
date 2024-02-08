@@ -11,7 +11,11 @@ use crate::{
     system::{
         observer::{
             action::{Action, ActionOutputs, Actions},
-            Observables, Observers,
+            builtin::{
+                AddChildren, AddComponent, CreateEntity, DeleteEntity, HierarchyChange,
+                RemoveChildren, RemoveComponent, SetParent,
+            },
+            ActionReflectors, Observables, Observers,
         },
         IntoSystem,
     },
@@ -29,6 +33,7 @@ pub struct World {
     entities: Entities,
     components: Components,
     tables: Tables<Entity>,
+    actions: Actions,
 }
 
 impl World {
@@ -38,7 +43,7 @@ impl World {
         resources.insert(LocalSchedules::new());
         resources.insert(Observables::new());
         resources.insert(ActionOutputs::new());
-        resources.insert(Actions::new());
+        resources.insert(ActionReflectors::new());
 
         Self {
             resources,
@@ -47,6 +52,7 @@ impl World {
             entities: Entities::new(),
             components: Components::new(),
             tables: Tables::new(),
+            actions: Actions::new(),
         }
     }
 
@@ -54,6 +60,13 @@ impl World {
         let id = self.components.register::<C>();
         self.components
             .extend_meta(id, ComponentActionMeta::new::<C>());
+        self.register_action::<AddComponent<C>>();
+        self.register_action::<RemoveComponent<C>>();
+    }
+
+    pub fn register_action<A: Action>(&mut self) {
+        let reflectors = self.resource_mut::<ActionReflectors>();
+        reflectors.register::<A>();
     }
 
     pub fn add_resource<T: Resource>(&mut self, resource: T) {
@@ -100,12 +113,24 @@ impl World {
         &self.tables
     }
 
+    pub fn actions(&self) -> &Actions {
+        &self.actions
+    }
+
+    pub fn actions_mut(&mut self) -> &mut Actions {
+        &mut self.actions
+    }
+
     pub fn resource<R: Resource>(&self) -> &R {
         self.resources.get::<R>()
     }
 
     pub fn resource_mut<R: Resource>(&self) -> &mut R {
         self.resources.get_mut::<R>()
+    }
+
+    pub fn remove_resource<R: Resource>(&mut self) -> R {
+        self.resources.remove::<R>()
     }
 
     pub fn try_resource<R: Resource>(&self) -> Option<&R> {
@@ -116,12 +141,32 @@ impl World {
         self.resources.try_get_mut::<R>()
     }
 
+    pub fn try_remove_resource<R: Resource>(&mut self) -> Option<R> {
+        self.resources.try_remove::<R>()
+    }
+
     pub fn local_resource<R: LocalResource>(&self) -> &R {
         self.local_resources.get::<R>()
     }
 
     pub fn local_resource_mut<R: LocalResource>(&self) -> &mut R {
         self.local_resources.get_mut::<R>()
+    }
+
+    pub fn remove_local_resource<R: LocalResource>(&mut self) -> R {
+        self.local_resources.remove::<R>()
+    }
+
+    pub fn try_local_resource<R: LocalResource>(&self) -> Option<&R> {
+        self.local_resources.try_get::<R>()
+    }
+
+    pub fn try_local_resource_mut<R: LocalResource>(&self) -> Option<&mut R> {
+        self.local_resources.try_get_mut::<R>()
+    }
+
+    pub fn try_remove_local_resource<R: LocalResource>(&mut self) -> Option<R> {
+        self.local_resources.try_remove::<R>()
     }
 
     pub fn create(&mut self) -> Entity {
@@ -197,6 +242,17 @@ impl World {
         self.entities.remove_child(entity, child)
     }
 
+    pub fn scoped_resource<R: Resource, T>(
+        &mut self,
+        callback: impl FnOnce(&mut World, &R) -> T,
+    ) -> T {
+        let resource = self.resources.remove::<R>();
+        let ret = callback(self, &resource);
+        self.resources.insert(resource);
+
+        ret
+    }
+
     pub fn run<P: SchedulePhase>(&mut self) {
         let schedules = self.resources.get::<GlobalSchedules>();
         schedules.run::<P>(self);
@@ -208,18 +264,17 @@ impl World {
     }
 
     pub fn flush(&mut self) {
-        if self.resources.get::<Actions>().is_empty() {
+        if self.actions.is_empty() {
             return;
         }
 
         let outputs = {
-            let mut actions = std::mem::take(self.resources.get_mut::<Actions>());
-            let mut outputs = actions.execute(self);
-            let action_outputs = self.resources.get_mut::<ActionOutputs>().take();
-            self.resources.get_mut::<Actions>().append(actions);
-
-            outputs.merge(action_outputs);
-            outputs
+            self.scoped_resource::<ActionReflectors, ActionOutputs>(|world, reflectors| {
+                let mut outputs = reflectors.execute(world);
+                let action_outputs = world.resource_mut::<ActionOutputs>().take();
+                outputs.merge(action_outputs);
+                outputs
+            })
         };
 
         let mut observers = std::mem::take(self.resources.get_mut::<Observables>());
@@ -230,12 +285,14 @@ impl World {
     }
 
     pub fn flush_actions<A: Action>(&mut self) {
-        let mut actions = self.resources.get_mut::<Actions>().take();
-        let mut outputs = actions.execute_actions::<A>(self);
-        let action_outputs = self.resources.get_mut::<ActionOutputs>().take();
-        self.resources.get_mut::<Actions>().append(actions);
-
-        outputs.merge(action_outputs);
+        let outputs = {
+            self.scoped_resource::<ActionReflectors, ActionOutputs>(|world, reflectors| {
+                let mut outputs = reflectors.execute_actions::<A>(world);
+                let action_outputs = world.resource_mut::<ActionOutputs>().take();
+                outputs.merge(action_outputs);
+                outputs
+            })
+        };
 
         let mut observers = std::mem::take(self.resources.get_mut::<Observables>());
         observers.execute_actions::<A>(outputs, self);
@@ -248,5 +305,16 @@ impl World {
 
         let schedules = self.resources.get_mut::<LocalSchedules>();
         schedules.build();
+
+        self.init_actions();
+    }
+
+    fn init_actions(&mut self) {
+        self.register_action::<CreateEntity>();
+        self.register_action::<DeleteEntity>();
+        self.register_action::<SetParent>();
+        self.register_action::<AddChildren>();
+        self.register_action::<RemoveChildren>();
+        self.register_action::<HierarchyChange>();
     }
 }

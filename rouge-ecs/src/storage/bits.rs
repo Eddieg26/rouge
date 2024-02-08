@@ -115,3 +115,192 @@ impl<'a> Iterator for BitSetIter<'a> {
         Some(result)
     }
 }
+
+pub trait AsBytes: Sized {
+    fn to_bytes(&self) -> Vec<u8>;
+    fn from_bytes(bytes: &[u8]) -> Option<Self>;
+}
+
+impl AsBytes for u8 {
+    fn to_bytes(&self) -> Vec<u8> {
+        self.to_le_bytes().iter().copied().collect()
+    }
+
+    fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        let byte: [u8; 1] = bytes.try_into().ok()?;
+        Some(u8::from_le_bytes(byte))
+    }
+}
+
+impl AsBytes for u16 {
+    fn to_bytes(&self) -> Vec<u8> {
+        self.to_le_bytes().iter().copied().collect()
+    }
+
+    fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        let bytes: [u8; 2] = bytes.try_into().ok()?;
+        Some(u16::from_le_bytes(bytes))
+    }
+}
+
+impl AsBytes for u32 {
+    fn to_bytes(&self) -> Vec<u8> {
+        self.to_le_bytes().iter().copied().collect()
+    }
+
+    fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        let bytes: [u8; 4] = bytes.try_into().ok()?;
+        Some(u32::from_le_bytes(bytes))
+    }
+}
+
+impl AsBytes for u64 {
+    fn to_bytes(&self) -> Vec<u8> {
+        self.to_le_bytes().iter().copied().collect()
+    }
+
+    fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        let bytes: [u8; 8] = bytes.try_into().ok()?;
+        Some(u64::from_le_bytes(bytes))
+    }
+}
+
+impl AsBytes for i8 {
+    fn to_bytes(&self) -> Vec<u8> {
+        self.to_le_bytes().iter().copied().collect()
+    }
+
+    fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        let byte: [u8; 1] = bytes.try_into().ok()?;
+        Some(i8::from_le_bytes(byte))
+    }
+}
+
+impl AsBytes for i16 {
+    fn to_bytes(&self) -> Vec<u8> {
+        self.to_le_bytes().iter().copied().collect()
+    }
+
+    fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        let bytes: [u8; 2] = bytes.try_into().ok()?;
+        Some(i16::from_le_bytes(bytes))
+    }
+}
+
+impl AsBytes for i32 {
+    fn to_bytes(&self) -> Vec<u8> {
+        self.to_le_bytes().iter().copied().collect()
+    }
+
+    fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        let bytes: [u8; 4] = bytes.try_into().ok()?;
+        Some(i32::from_le_bytes(bytes))
+    }
+}
+
+impl AsBytes for i64 {
+    fn to_bytes(&self) -> Vec<u8> {
+        self.to_le_bytes().iter().copied().collect()
+    }
+
+    fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        let bytes: [u8; 8] = bytes.try_into().ok()?;
+        Some(i64::from_le_bytes(bytes))
+    }
+}
+
+impl AsBytes for f32 {
+    fn to_bytes(&self) -> Vec<u8> {
+        self.to_bits().to_le_bytes().iter().copied().collect()
+    }
+
+    fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        let bytes: [u8; 4] = bytes.try_into().ok()?;
+        Some(f32::from_bits(u32::from_le_bytes(bytes)))
+    }
+}
+
+impl AsBytes for f64 {
+    fn to_bytes(&self) -> Vec<u8> {
+        self.to_bits().to_le_bytes().iter().copied().collect()
+    }
+
+    fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        let bytes: [u8; 8] = bytes.try_into().ok()?;
+        Some(f64::from_bits(u64::from_le_bytes(bytes)))
+    }
+}
+
+impl AsBytes for bool {
+    fn to_bytes(&self) -> Vec<u8> {
+        vec![*self as u8]
+    }
+
+    fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        Some(bytes[0] != 0)
+    }
+}
+
+impl AsBytes for char {
+    fn to_bytes(&self) -> Vec<u8> {
+        let mut bytes = [0; 4];
+        self.encode_utf8(&mut bytes)
+            .as_bytes()
+            .iter()
+            .copied()
+            .collect()
+    }
+
+    fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        let code = u32::from_bytes(bytes)?;
+        Some(std::char::from_u32(code)?)
+    }
+}
+
+impl AsBytes for String {
+    fn to_bytes(&self) -> Vec<u8> {
+        self.as_bytes().to_vec()
+    }
+
+    fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        Some(String::from_utf8(bytes.to_vec()).ok()?)
+    }
+}
+
+impl AsBytes for () {
+    fn to_bytes(&self) -> Vec<u8> {
+        Vec::new()
+    }
+
+    fn from_bytes(_: &[u8]) -> Option<Self> {
+        Some(())
+    }
+}
+
+impl<T: AsBytes> AsBytes for Vec<T> {
+    fn to_bytes(&self) -> Vec<u8> {
+        let size = std::mem::size_of::<T>();
+        let mut bytes = Vec::with_capacity(size * self.len());
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                self.as_ptr() as *const u8,
+                bytes.as_mut_ptr(),
+                size * self.len(),
+            );
+        }
+
+        bytes
+    }
+
+    fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        let size = std::mem::size_of::<T>();
+        let len = bytes.len() / size;
+        let mut vec = Vec::with_capacity(len);
+        unsafe {
+            vec.set_len(len);
+            std::ptr::copy_nonoverlapping(bytes.as_ptr(), vec.as_mut_ptr() as *mut u8, bytes.len());
+        }
+
+        Some(vec)
+    }
+}

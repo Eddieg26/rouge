@@ -1,12 +1,10 @@
 use super::graph;
 use crate::{
+    available_threads,
     tasks::{barrier::JobBarrier, ScopedTaskPool},
     world::World,
 };
-use std::{
-    num::NonZeroUsize,
-    sync::{Arc, Mutex},
-};
+use std::sync::{Arc, Mutex};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RunMode {
@@ -36,45 +34,51 @@ pub struct ParallelRunner;
 
 impl ScheduleRunner for ParallelRunner {
     fn run(&self, graph: &graph::SystemGraph, world: &World) {
-        let available_threads = std::thread::available_parallelism()
-            .unwrap_or(NonZeroUsize::new(1).unwrap())
-            .into();
         for row in graph.hierarchy() {
-            let local_nodes = row
-                .iter()
-                .filter(|id| graph.nodes()[***id].is_local())
-                .collect::<Vec<_>>();
-            let row = row
-                .iter()
-                .filter(|id| !local_nodes.contains(id))
-                .collect::<Vec<_>>();
-            let num_threads = row.len().min(available_threads);
+            let available_threads = available_threads();
+            if available_threads > 1 {
+                let local_nodes = row
+                    .iter()
+                    .filter(|id| graph.nodes()[***id].is_local())
+                    .collect::<Vec<_>>();
+                let row = row
+                    .iter()
+                    .filter(|id| !local_nodes.contains(id))
+                    .collect::<Vec<_>>();
 
-            ScopedTaskPool::new(num_threads, |sender| {
-                let (barrier, lock) = JobBarrier::new(row.len());
-                let barrier = Arc::new(Mutex::new(barrier));
+                let num_threads = row.len().min(available_threads);
+                ScopedTaskPool::new(num_threads, |sender| {
+                    let (barrier, lock) = JobBarrier::new(row.len());
+                    let barrier = Arc::new(Mutex::new(barrier));
 
-                for node in &row {
-                    let barrier = barrier.clone();
-                    let node = &graph.nodes()[node.id()];
+                    for node in &row {
+                        let barrier = barrier.clone();
+                        let node = &graph.nodes()[node.id()];
 
-                    sender.send(move || {
+                        sender.send(move || {
+                            node.run(world);
+
+                            barrier.lock().unwrap().notify();
+                        });
+                    }
+
+                    sender.join();
+
+                    for node in &local_nodes {
+                        let node = &graph.nodes()[node.id()];
+
                         node.run(world);
+                    }
 
-                        barrier.lock().unwrap().notify();
-                    });
-                }
-
-                sender.join();
-
-                for node in &local_nodes {
+                    lock.wait(barrier.lock().unwrap());
+                });
+            } else {
+                for node in row {
                     let node = &graph.nodes()[node.id()];
 
                     node.run(world);
                 }
-
-                lock.wait(barrier.lock().unwrap());
-            });
+            }
         }
     }
 }

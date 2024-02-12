@@ -1,4 +1,4 @@
-use std::{alloc::Layout, any::TypeId, collections::HashMap, fmt::Debug};
+use std::{alloc::Layout, any::TypeId, collections::HashMap, fmt::Debug, sync::Arc};
 
 use crate::storage::blob::Blob;
 
@@ -55,11 +55,12 @@ impl std::fmt::Display for ComponentId {
     }
 }
 
+#[derive(Clone)]
 pub struct ComponentMeta {
     name: &'static str,
     layout: Layout,
     type_id: TypeId,
-    extensions: HashMap<TypeId, Blob>,
+    extensions: HashMap<TypeId, Arc<Blob>>,
 }
 
 impl ComponentMeta {
@@ -87,10 +88,11 @@ impl ComponentMeta {
     pub fn extension<T: 'static>(&self) -> Option<&T> {
         self.extensions
             .get(&TypeId::of::<T>())
-            .map(|extension: &Blob| extension.get::<T>(0).unwrap())
+            .map(|blob| blob.get::<T>(0).unwrap())
     }
 }
 
+#[derive(Clone)]
 pub struct Components {
     components: Vec<ComponentMeta>,
     id_map: HashMap<TypeId, usize>,
@@ -143,6 +145,6 @@ impl Components {
         let meta = self.components.get_mut(*id).unwrap();
         let mut blob = Blob::new::<T>();
         blob.push(extension);
-        meta.extensions.insert(TypeId::of::<T>(), blob);
+        meta.extensions.insert(TypeId::of::<T>(), Arc::new(blob));
     }
 }

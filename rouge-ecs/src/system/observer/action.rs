@@ -20,19 +20,20 @@ pub trait Action: 'static {
     }
 }
 
+#[derive(Clone)]
 pub struct ActionReflector {
     priority: u32,
-    execute: Box<dyn Fn(&mut World, &Blob, &mut ActionOutputs) + Send + Sync>,
+    execute: fn(&mut World, &Blob, &mut ActionOutputs),
 }
 
 impl ActionReflector {
     pub fn new<A: Action>() -> Self {
         Self {
             priority: A::PRIORITY,
-            execute: Box::new(|world, blob, outputs| {
+            execute: |world, blob, outputs| {
                 let action = blob.get_mut::<A>(0).expect("Action not found");
                 outputs.add::<A>(action.execute(world));
-            }),
+            },
         }
     }
 
@@ -45,7 +46,7 @@ impl ActionReflector {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct ActionReflectors {
     reflectors: SparseMap<TypeId, ActionReflector>,
 }
@@ -157,19 +158,7 @@ impl Actions {
     }
 }
 
-impl SystemArg for &Actions {
-    type Item<'a> = Actions;
-
-    fn get<'a>(world: &'a World) -> Self::Item<'a> {
-        world.actions().clone()
-    }
-
-    fn metas() -> Vec<crate::world::meta::AccessMeta> {
-        vec![]
-    }
-}
-
-impl SystemArg for &mut Actions {
+impl SystemArg for Actions {
     type Item<'a> = Actions;
 
     fn get<'a>(world: &'a World) -> Self::Item<'a> {
@@ -216,6 +205,10 @@ impl ActionOutputs {
                 self.outputs.insert(type_id, blob);
             }
         }
+    }
+
+    pub fn contains(&self, type_id: &TypeId) -> bool {
+        self.outputs.contains(type_id)
     }
 
     pub fn keys(&self) -> impl Iterator<Item = &TypeId> {

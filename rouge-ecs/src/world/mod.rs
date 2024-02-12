@@ -1,3 +1,5 @@
+use std::sync::{Arc, Mutex};
+
 use self::{
     lifecycle::Lifecycle,
     meta::ComponentActionMeta,
@@ -6,6 +8,9 @@ use self::{
 use crate::{
     archetype::Archetypes,
     core::{Component, ComponentId, Components, Entities, Entity},
+    observer::graph::Observables,
+    process::StartProcess,
+    runner::RunMode,
     schedule::{GlobalSchedules, LocalSchedules, Schedule, SchedulePhase},
     storage::table::Tables,
     system::{
@@ -15,11 +20,67 @@ use crate::{
                 AddChildren, AddComponent, CreateEntity, DeleteEntity, HierarchyChange,
                 RemoveChildren, RemoveComponent, SetParent,
             },
-            ActionReflectors, Observables, Observers,
+            ActionReflectors, Observers,
         },
         IntoSystem,
     },
+    GenId, IdAllocator,
 };
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WorldId {
+    id: usize,
+    gen: u32,
+    is_main: bool,
+}
+
+impl WorldId {
+    pub fn new(id: usize, gen: u32, is_main: bool) -> Self {
+        Self { id, gen, is_main }
+    }
+
+    pub fn id(&self) -> usize {
+        self.id
+    }
+
+    pub fn gen(&self) -> u32 {
+        self.gen
+    }
+
+    pub fn is_main(&self) -> bool {
+        self.is_main
+    }
+}
+
+impl Into<GenId> for WorldId {
+    fn into(self) -> GenId {
+        GenId::new(self.id, self.gen)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct WorldIdAllocator {
+    allocator: Arc<Mutex<IdAllocator>>,
+}
+
+impl WorldIdAllocator {
+    pub fn new() -> Self {
+        Self {
+            allocator: Arc::new(Mutex::new(IdAllocator::new())),
+        }
+    }
+
+    pub fn allocate(&mut self, main: bool) -> WorldId {
+        let id = self.allocator.lock().unwrap().allocate();
+        WorldId::new(id.id(), id.generation(), main)
+    }
+
+    pub fn free(&mut self, id: WorldId) {
+        self.allocator.lock().unwrap().free(id.into());
+    }
+}
+
+impl Resource for WorldIdAllocator {}
 
 pub mod lifecycle;
 pub mod meta;
@@ -27,6 +88,7 @@ pub mod query;
 pub mod resource;
 
 pub struct World {
+    id: WorldId,
     resources: Resources,
     local_resources: LocalResources,
     archetypes: Archetypes,
@@ -41,11 +103,17 @@ impl World {
         let mut resources = Resources::new();
         resources.insert(GlobalSchedules::new());
         resources.insert(LocalSchedules::new());
-        resources.insert(Observables::new());
+        resources.insert(Observables::new(RunMode::Parallel));
         resources.insert(ActionOutputs::new());
         resources.insert(ActionReflectors::new());
 
+        let mut allocator = WorldIdAllocator::new();
+        let id = allocator.allocate(true);
+
+        resources.insert(allocator);
+
         Self {
+            id,
             resources,
             local_resources: LocalResources::new(),
             archetypes: Archetypes::new(),
@@ -54,6 +122,34 @@ impl World {
             tables: Tables::new(),
             actions: Actions::new(),
         }
+    }
+
+    pub fn new_sub(main: &World) -> Self {
+        let mut resources = Resources::new();
+        resources.insert(GlobalSchedules::new());
+        resources.insert(LocalSchedules::new());
+        resources.insert(Observables::new(RunMode::Parallel));
+        resources.insert(ActionOutputs::new());
+        resources.insert(main.resource::<ActionReflectors>().clone());
+
+        let mut allocator = main.resource::<WorldIdAllocator>().clone();
+        let id = allocator.allocate(false);
+        resources.insert(allocator);
+
+        Self {
+            id,
+            resources,
+            local_resources: LocalResources::new(),
+            archetypes: Archetypes::new(),
+            entities: Entities::new(),
+            components: main.components.clone(),
+            tables: Tables::new(),
+            actions: Actions::new(),
+        }
+    }
+
+    pub fn id(&self) -> WorldId {
+        self.id
     }
 
     pub fn register<C: Component>(&mut self) {
@@ -69,7 +165,7 @@ impl World {
         reflectors.register::<A>();
     }
 
-    pub fn add_resource<T: Resource>(&mut self, resource: T) {
+    pub fn add_resource<R: Resource>(&mut self, resource: R) {
         self.resources.insert(resource);
     }
 
@@ -133,6 +229,10 @@ impl World {
         self.resources.remove::<R>()
     }
 
+    pub fn has_resource<R: Resource>(&self) -> bool {
+        self.resources.contains::<R>()
+    }
+
     pub fn try_resource<R: Resource>(&self) -> Option<&R> {
         self.resources.try_get::<R>()
     }
@@ -155,6 +255,10 @@ impl World {
 
     pub fn remove_local_resource<R: LocalResource>(&mut self) -> R {
         self.local_resources.remove::<R>()
+    }
+
+    pub fn has_local_resource<R: LocalResource>(&self) -> bool {
+        self.local_resources.contains::<R>()
     }
 
     pub fn try_local_resource<R: LocalResource>(&self) -> Option<&R> {
@@ -223,7 +327,7 @@ impl World {
 
                     if let Some(meta) = self.components.meta(id).extension::<ComponentActionMeta>()
                     {
-                        (meta.on_remove())(&entity, self.resources.get_mut::<ActionOutputs>());
+                        meta.on_remove(&entity, self.resources.get_mut::<ActionOutputs>());
                     }
                 }
             }
@@ -264,39 +368,33 @@ impl World {
     }
 
     pub fn flush(&mut self) {
-        if self.actions.is_empty() {
-            return;
-        }
-
-        let outputs = {
-            self.scoped_resource::<ActionReflectors, ActionOutputs>(|world, reflectors| {
-                let mut outputs = reflectors.execute(world);
-                let action_outputs = world.resource_mut::<ActionOutputs>().take();
+        while !self.actions.is_empty() {
+            let outputs = {
+                let reflectors = self.resource::<ActionReflectors>().clone();
+                let mut outputs = reflectors.execute(self);
+                let action_outputs = self.resource_mut::<ActionOutputs>().take();
                 outputs.merge(action_outputs);
                 outputs
-            })
-        };
+            };
 
-        let mut observers = std::mem::take(self.resources.get_mut::<Observables>());
-        observers.execute(outputs, self);
-        self.resources.get_mut::<Observables>().swap(observers);
-
-        self.flush();
+            self.scoped_resource::<Observables, ()>(|world, observers| {
+                observers.run(world, outputs);
+            });
+        }
     }
 
     pub fn flush_actions<A: Action>(&mut self) {
         let outputs = {
-            self.scoped_resource::<ActionReflectors, ActionOutputs>(|world, reflectors| {
-                let mut outputs = reflectors.execute_actions::<A>(world);
-                let action_outputs = world.resource_mut::<ActionOutputs>().take();
-                outputs.merge(action_outputs);
-                outputs
-            })
+            let reflectors = self.resource::<ActionReflectors>().clone();
+            let mut outputs = reflectors.execute_actions::<A>(self);
+            let action_outputs = self.resource_mut::<ActionOutputs>().take();
+            outputs.merge(action_outputs);
+            outputs
         };
 
-        let mut observers = std::mem::take(self.resources.get_mut::<Observables>());
-        observers.execute_actions::<A>(outputs, self);
-        self.resources.get_mut::<Observables>().swap(observers);
+        self.scoped_resource::<Observables, ()>(|world, observers| {
+            observers.run(world, outputs);
+        });
     }
 
     pub fn init(&mut self) {
@@ -306,15 +404,26 @@ impl World {
         let schedules = self.resources.get_mut::<LocalSchedules>();
         schedules.build();
 
+        let observers = self.resources.get_mut::<Observables>();
+        observers.build();
+
         self.init_actions();
     }
 
     fn init_actions(&mut self) {
+        self.register_action::<StartProcess>();
         self.register_action::<CreateEntity>();
         self.register_action::<DeleteEntity>();
         self.register_action::<SetParent>();
         self.register_action::<AddChildren>();
         self.register_action::<RemoveChildren>();
         self.register_action::<HierarchyChange>();
+    }
+}
+
+impl Drop for World {
+    fn drop(&mut self) {
+        let mut allocator = self.resources.remove::<WorldIdAllocator>();
+        allocator.free(self.id);
     }
 }

@@ -82,20 +82,21 @@ impl AccessMeta {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct ComponentActionMeta {
-    on_remove: Box<dyn Fn(&Entity, &mut ActionOutputs)>,
+    on_remove: fn(&Entity, &mut ActionOutputs),
 }
 
 impl ComponentActionMeta {
     pub fn new<C: Component>() -> Self {
         Self {
-            on_remove: Box::new(|entity, outputs: &mut ActionOutputs| {
+            on_remove: |entity, outputs: &mut ActionOutputs| {
                 outputs.add::<RemoveComponent<C>>(*entity);
-            }),
+            },
         }
     }
 
-    pub fn on_remove(&self) -> &dyn Fn(&Entity, &mut ActionOutputs) {
-        &self.on_remove
+    pub fn on_remove(&self, entity: &Entity, outputs: &mut ActionOutputs) {
+        (self.on_remove)(entity, outputs);
     }
 }

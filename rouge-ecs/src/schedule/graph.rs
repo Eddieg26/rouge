@@ -105,9 +105,7 @@ impl SystemGraph {
         let node_id = self.add_node(node);
 
         for after_id in after_ids {
-            if self.nodes[*after_id].reads().contains(&AccessType::World) {
-                self.nodes[*after_id].add_dependency(node_id);
-            }
+            self.nodes[*after_id].add_dependency(node_id);
         }
 
         let before_ids = before_systems
@@ -116,10 +114,8 @@ impl SystemGraph {
             .map(|system| self.add_system(system))
             .collect::<Vec<_>>();
 
-        if self.nodes[*node_id].reads().contains(&AccessType::World) {
-            for before_id in before_ids {
-                self.nodes[*node_id].add_dependency(before_id);
-            }
+        for before_id in before_ids {
+            self.nodes[*node_id].add_dependency(before_id);
         }
 
         node_id

@@ -1,3 +1,5 @@
+use std::mem::size_of;
+
 pub struct BitSet {
     bits: Vec<u8>,
 }
@@ -129,6 +131,17 @@ impl AsBytes for u8 {
     fn from_bytes(bytes: &[u8]) -> Option<Self> {
         let byte: [u8; 1] = bytes.try_into().ok()?;
         Some(u8::from_le_bytes(byte))
+    }
+}
+
+impl AsBytes for usize {
+    fn to_bytes(&self) -> Vec<u8> {
+        self.to_le_bytes().iter().copied().collect()
+    }
+
+    fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        let bytes: [u8; size_of::<usize>()] = bytes.try_into().ok()?;
+        Some(usize::from_le_bytes(bytes))
     }
 }
 
@@ -280,13 +293,15 @@ impl AsBytes for () {
 impl<T: AsBytes> AsBytes for Vec<T> {
     fn to_bytes(&self) -> Vec<u8> {
         let size = std::mem::size_of::<T>();
-        let mut bytes = Vec::with_capacity(size * self.len());
-        unsafe {
-            std::ptr::copy_nonoverlapping(
-                self.as_ptr() as *const u8,
-                bytes.as_mut_ptr(),
-                size * self.len(),
-            );
+        let mut bytes = Vec::with_capacity(size * self.len() + self.len() * size_of::<usize>());
+
+        bytes.extend_from_slice(&(self.len() as u64).to_bytes());
+
+        for item in self {
+            let item = item.to_bytes();
+            let len = bytes.len();
+            bytes.extend_from_slice(&len.to_bytes());
+            bytes.extend_from_slice(&item);
         }
 
         bytes
@@ -294,13 +309,18 @@ impl<T: AsBytes> AsBytes for Vec<T> {
 
     fn from_bytes(bytes: &[u8]) -> Option<Self> {
         let size = std::mem::size_of::<T>();
-        let len = bytes.len() / size;
-        let mut vec = Vec::with_capacity(len);
-        unsafe {
-            vec.set_len(len);
-            std::ptr::copy_nonoverlapping(bytes.as_ptr(), vec.as_mut_ptr() as *mut u8, bytes.len());
+        let len = usize::from_bytes(&bytes[0..size])?;
+        let mut result = Vec::with_capacity(len);
+
+        let mut offset = size_of::<usize>();
+        for _ in 0..bytes.len() {
+            let item_len = usize::from_bytes(&bytes[offset..offset + size])?;
+            offset += size;
+            let item = T::from_bytes(&bytes[offset..offset + item_len])?;
+            offset += item_len;
+            result.push(item);
         }
 
-        Some(vec)
+        Some(result)
     }
 }

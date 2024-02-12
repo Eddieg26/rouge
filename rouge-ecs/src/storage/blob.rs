@@ -130,21 +130,13 @@ impl Blob {
     pub fn to_vec<T: 'static>(&mut self) -> Vec<T> {
         let mut vec: Vec<T> = Vec::with_capacity(self.len);
 
-        let src = self.data.as_mut_ptr();
-        let dst = vec.as_mut_ptr() as *mut u8;
-
-        unsafe {
-            for index in 0..self.len {
-                let src = src.add(index * self.aligned_layout.size());
-                let dst = dst.add(index * self.aligned_layout.size());
-
-                std::ptr::copy_nonoverlapping(src, dst, self.aligned_layout.size());
-            }
-            self.data.set_len(0);
+        for i in 0..self.len {
+            let ptr = self.offset(i) as *mut T;
+            let data = unsafe { std::ptr::read(ptr) };
+            vec.push(data);
         }
 
-        self.len = 0;
-        self.capacity = 0;
+        self.dealloc();
 
         vec
     }
@@ -204,7 +196,7 @@ impl Blob {
 
     pub fn remove<T>(&mut self, index: usize) -> Option<T> {
         if index >= self.len {
-            return None
+            return None;
         }
 
         unsafe {
@@ -306,9 +298,21 @@ impl Blob {
             return;
         }
 
-        self.data
-            .reserve_exact(self.aligned_layout.size() * (new_capacity - self.capacity));
+        let new_layout = self.aligned_layout;
+        let new_size = new_layout.size() * new_capacity;
 
+        let mut new_data = Vec::with_capacity(new_size);
+        unsafe {
+            new_data.set_len(new_size);
+        }
+
+        let src = self.data.as_ptr();
+        let dst = new_data.as_mut_ptr();
+        unsafe {
+            std::ptr::copy_nonoverlapping(src, dst, self.len * self.aligned_layout.size());
+        }
+
+        self.data = new_data;
         self.capacity = new_capacity;
     }
 

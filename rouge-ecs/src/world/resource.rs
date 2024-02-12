@@ -105,6 +105,10 @@ impl Resources {
         let mut data = self.resources.remove(&ty)?;
         data.data.remove(0)
     }
+
+    pub fn contains<R: Resource>(&self) -> bool {
+        self.resources.contains_key(&ResourceType::new::<R>())
+    }
 }
 
 pub struct ResourceData {
@@ -212,5 +216,9 @@ impl LocalResources {
         let ty = ResourceType::new_local::<R>();
         let mut data = self.resources.remove(&ty)?;
         data.data.remove(0)
+    }
+
+    pub fn contains<R: LocalResource>(&self) -> bool {
+        self.resources.contains_key(&ResourceType::new_local::<R>())
     }
 }

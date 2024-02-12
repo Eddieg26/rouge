@@ -1,9 +1,11 @@
 use std::{
+    num::NonZeroUsize,
     sync::mpsc::Sender,
     thread::{sleep, JoinHandle},
 };
 
 pub mod barrier;
+pub mod process;
 
 struct Worker {
     id: usize,
@@ -158,4 +160,10 @@ impl<'a> ScopedTaskPool<'a> {
     pub fn join(&mut self) {
         self.sender.send(None).unwrap();
     }
+}
+
+pub fn available_threads() -> usize {
+    std::thread::available_parallelism()
+        .unwrap_or(NonZeroUsize::new(1).unwrap())
+        .into()
 }

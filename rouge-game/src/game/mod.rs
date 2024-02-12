@@ -3,6 +3,7 @@ use crate::{
     plugin::{Plugin, Plugins},
     time::Time,
 };
+use rouge_core::Environment;
 use rouge_ecs::{
     core::Component,
     schedule::{Schedule, SchedulePhase},
@@ -34,6 +35,7 @@ impl Game {
         let mut world = World::new();
         world.add_resource(Time::new());
         world.add_resource(GameState::new());
+        world.add_resource(GameEnvironment::new(Environment::Development));
 
         Self {
             world,
@@ -41,6 +43,12 @@ impl Game {
             engines: Engines::new(),
             runner: None,
         }
+    }
+
+    pub fn set_environment(&mut self, environment: Environment) -> &mut Self {
+        self.world.add_resource(GameEnvironment::new(environment));
+
+        self
     }
 
     pub fn register<C: Component>(&mut self) -> &mut Self {
@@ -116,6 +124,18 @@ impl Game {
         self.world.resource_mut::<R>()
     }
 
+    pub fn has_resource<R: Resource>(&self) -> bool {
+        self.world.has_resource::<R>()
+    }
+
+    pub fn try_resource<R: Resource>(&self) -> Option<&R> {
+        self.world.try_resource::<R>()
+    }
+
+    pub fn try_resource_mut<R: Resource>(&self) -> Option<&mut R> {
+        self.world.try_resource_mut::<R>()
+    }
+
     pub fn actions(&self) -> &Actions {
         self.world.actions()
     }
@@ -130,6 +150,18 @@ impl Game {
 
     pub fn local_resource_mut<R: LocalResource>(&self) -> &mut R {
         self.world.local_resource_mut::<R>()
+    }
+
+    pub fn has_local_resource<R: LocalResource>(&self) -> bool {
+        self.world.has_local_resource::<R>()
+    }
+
+    pub fn try_local_resource<R: LocalResource>(&self) -> Option<&R> {
+        self.world.try_local_resource::<R>()
+    }
+
+    pub fn try_local_resource_mut<R: LocalResource>(&self) -> Option<&mut R> {
+        self.world.try_local_resource_mut::<R>()
     }
 
     pub fn engine<E: Engine>(&self) -> &GameEngine {
@@ -342,3 +374,30 @@ impl GameState {
 }
 
 impl Resource for GameState {}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GameEnvironment(Environment);
+
+impl GameEnvironment {
+    pub fn new(environment: Environment) -> Self {
+        Self(environment)
+    }
+
+    pub fn is_development(&self) -> bool {
+        self.0 == Environment::Development
+    }
+
+    pub fn is_release(&self) -> bool {
+        self.0 == Environment::Release
+    }
+}
+
+impl std::ops::Deref for GameEnvironment {
+    type Target = Environment;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Resource for GameEnvironment {}

@@ -18,6 +18,7 @@ impl GenId {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct IdAllocator {
     next_id: usize,
     free: Vec<usize>,

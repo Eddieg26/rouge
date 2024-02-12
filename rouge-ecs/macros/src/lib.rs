@@ -20,7 +20,7 @@ pub fn derive_resource(input: TokenStream) -> TokenStream {
     let name = input.ident;
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
     let output = quote! {
-        impl #impl_generics Resource for #name #ty_generics #where_clause {}
+        impl #impl_generics rouge_ecs::resource::Resource for #name #ty_generics #where_clause {}
     };
     output.into()
 }

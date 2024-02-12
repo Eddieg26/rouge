@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Debug};
 
 #[derive(Debug, Clone, Hash, Ord, PartialOrd, Eq, PartialEq)]
 pub struct SparseArray<V> {
@@ -250,7 +250,8 @@ where
     }
 
     pub fn drain(&mut self) -> impl Iterator<Item = (K, V)> + '_ {
-        let values = self.keys
+        let values = self
+            .keys
             .drain(..)
             .zip(self.values.drain(..))
             .map(|(key, value)| (key, value));
@@ -383,6 +384,30 @@ where
 {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl<K: Clone, V: Clone> Clone for SparseMap<K, V>
+where
+    K: Eq + std::hash::Hash + Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            keys: self.keys.clone(),
+            values: self.values.clone(),
+            map: self.map.clone(),
+        }
+    }
+}
+
+impl<K: Debug, V: Debug> Debug for SparseMap<K, V>
+where
+    K: Eq + std::hash::Hash + Clone,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_map()
+            .entries(self.keys.iter().zip(self.values.iter()))
+            .finish()
     }
 }
 

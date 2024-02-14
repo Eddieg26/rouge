@@ -1,13 +1,14 @@
 use rouge_asset::{
-    actions::LoadAsset,
+    actions::{AssetLoaded, LoadAsset},
     loader::AssetLoader,
     plugin::{AssetGameExt, AssetPlugin},
-    Asset, DefaultSettings,
+    storage::Assets,
+    Asset, AssetId, DefaultSettings,
 };
 use rouge_ecs::{
     observer::{
         builtin::{AddComponent, CreateEntity, DeleteEntity, RemoveComponent},
-        Actions, Observers,
+        Actions, IntoObserver, Observers,
     },
     query::Query,
     Component, Entity, IntoSystem, World,
@@ -112,7 +113,8 @@ impl AssetLoader for TextFile {
 }
 
 fn load_text_file(mut actions: Actions) {
-    actions.add(LoadAsset::<TextFile>::process("text_file.txt"))
+    actions.add(LoadAsset::<TextFile>::process("test.txt"))
+    // actions.add(LoadAsset::<TextFile>::new("test.txt"));
 }
 
 fn main() {
@@ -134,6 +136,16 @@ fn main() {
     // game.add_observers(add_player_systems);
     // game.add_observers(remove_player_systems);
     // game.add_observers(delete_entity_systems);
+
+    let asset_loaded = Observers::<AssetLoaded<TextFile>>::new().add_system(
+        |ids: &[AssetId], assets: &Assets<TextFile>| {
+            for id in ids {
+                println!("Asset Loaded: {:?}", assets.get(id).unwrap().contents());
+            }
+        },
+    );
+
+    game.add_observers(asset_loaded);
 
     game.run();
 }

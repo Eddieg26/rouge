@@ -77,10 +77,7 @@ impl Action for ImportFolder {
     type Output = PathBuf;
 
     fn execute(&mut self, _: &mut rouge_ecs::World) -> Self::Output {
-        let path = std::mem::take(&mut self.path);
-
-        println!("Importing folder: {:?}", &path);
-        path
+        std::mem::take(&mut self.path)
     }
 }
 
@@ -134,8 +131,9 @@ impl<A: Asset> Action for LoadAsset<A> {
                     None => {
                         let config = world.resource::<AssetConfig>();
                         let full_path = config.asset_path().join(path);
+                        let info_path = config.asset_info_path(&full_path);
                         let info = config
-                            .load_asset_info::<A>(&full_path)
+                            .load_asset_info::<A>(&info_path)
                             .expect("Failed to load asset info.");
 
                         db.set_path_id(info.id(), &path);
@@ -363,6 +361,5 @@ impl Process for ImportProcess {
         world.flush();
 
         world.resource_mut::<AssetDatabase>().set_imported();
-        println!("Assets imported.");
     }
 }

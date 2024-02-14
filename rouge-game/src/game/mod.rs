@@ -6,6 +6,7 @@ use crate::{
 use rouge_core::Environment;
 use rouge_ecs::{
     core::Component,
+    observer::Observer,
     schedule::{Schedule, SchedulePhase},
     system::{
         observer::{Action, Actions, Observers},
@@ -89,6 +90,12 @@ impl Game {
 
     pub fn add_schedule(&mut self, phase: impl SchedulePhase, schedule: Schedule) -> &mut Self {
         self.world.add_schedule(phase, schedule);
+        self
+    }
+
+    pub fn add_observer<A: Action>(&mut self, observer: Observer<A>) -> &mut Self {
+        self.world.add_observer(observer);
+
         self
     }
 

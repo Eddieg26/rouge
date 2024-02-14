@@ -8,7 +8,7 @@ use self::{
 use crate::{
     archetype::Archetypes,
     core::{Component, ComponentId, Components, Entities, Entity},
-    observer::graph::Observables,
+    observer::{graph::Observables, Observer},
     process::StartProcess,
     runner::RunMode,
     schedule::{GlobalSchedules, LocalSchedules, Schedule, SchedulePhase},
@@ -181,6 +181,12 @@ impl World {
     pub fn add_schedule(&mut self, phase: impl SchedulePhase, schedule: Schedule) {
         let schedules = self.resources.get_mut::<GlobalSchedules>();
         schedules.add_schedule(phase, schedule);
+    }
+
+    pub fn add_observer<A: Action>(&mut self, observer: Observer<A>) {
+        self.resources
+            .get_mut::<Observables>()
+            .add_observer(observer);
     }
 
     pub fn add_observers<A: Action>(&mut self, observers: Observers<A>) {

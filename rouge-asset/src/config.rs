@@ -61,19 +61,23 @@ impl AssetConfig {
         &self,
         path: impl Into<AssetPath>,
     ) -> Result<AssetMetadata<S>, AssetError> {
-        let path = match path.into() {
-            AssetPath::Id(id) => self.cached_meta_path(&id),
-            AssetPath::Path(path) => self.meta_path(Path::new(&path)),
-        };
-
-        let metadata = std::fs::read_to_string(&path)?;
-        toml::from_str::<AssetMetadata<S>>(&metadata).map_err(|e| {
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("Failed to parse metadata: {}", e),
-            )
-            .into()
-        })
+        match path.into() {
+            AssetPath::Id(id) => {
+                let path = self.cached_meta_path(&id);
+                let bytes = std::fs::read(&path).map_err(|e| AssetError::from(e))?;
+                AssetMetadata::from_bytes(&bytes).ok_or(AssetError::InvalidData)
+            }
+            AssetPath::Path(path) => {
+                let metadata = std::fs::read_to_string(&path)?;
+                toml::from_str::<AssetMetadata<S>>(&metadata).map_err(|e| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("Failed to parse metadata: {}", e),
+                    )
+                    .into()
+                })
+            }
+        }
     }
 
     pub fn save_metadata<S: Settings>(
@@ -88,7 +92,6 @@ impl AssetConfig {
                 std::fs::write(&path, &bytes).map_err(|e| AssetError::from(e))?;
             }
             AssetPath::Path(path) => {
-                let path = self.meta_path(Path::new(&path));
                 let meta = toml::to_string(&metadata).map_err(|_| AssetError::InvalidSettings)?;
 
                 std::fs::write(path, meta).map_err(|e| AssetError::from(e))?;
@@ -99,8 +102,7 @@ impl AssetConfig {
     }
 
     pub fn load_asset_info<A: Asset>(&self, path: &Path) -> Result<AssetInfo, AssetError> {
-        let path = self.asset_info_path(path);
-        let bytes = std::fs::read(&path).map_err(|e| AssetError::from(e))?;
+        let bytes = std::fs::read(path).map_err(|e| AssetError::from(e))?;
         AssetInfo::from_bytes(&bytes).ok_or(AssetError::InvalidData)
     }
 

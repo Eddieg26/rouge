@@ -2,13 +2,15 @@ use std::path::PathBuf;
 
 use crate::{
     actions::{
-        meta::AssetLoaderMetas, AssetLoaded, ImportAssets, ImportFolder, ImportProcess, LoadAsset,
-        ProcessAsset, SettingsLoaded, UnloadAsset,
+        meta::AssetLoaderMetas,
+        observers::{on_import_assets, on_load_assets, on_process_assets, on_unload_assets},
+        AssetLoaded, ImportAssets, ImportFolder, ImportProcess, LoadAsset, ProcessAsset,
+        SettingsLoaded, UnloadAsset,
     },
     config::AssetConfig,
     database::AssetDatabase,
     loader::AssetLoader,
-    storage::Assets,
+    storage::{AssetSettings, Assets},
     Asset,
 };
 use rouge_ecs::{observer::Actions, process::StartProcess, IntoSystem};
@@ -58,7 +60,7 @@ pub fn init_assets(config: &AssetConfig, environment: &GameEnvironment) {
     match **environment {
         Environment::Development => {
             let _ = std::fs::create_dir_all(config.asset_path());
-            let _ = std::fs::create_dir_all(config.cache_path());
+            let _ = std::fs::create_dir_all(PathBuf::from(config.cache_path()).join("lib"));
         }
         _ => (),
     }
@@ -94,6 +96,12 @@ impl AssetGameExt for Game {
 
     fn add_asset_loader<L: AssetLoader>(&mut self) -> &mut Self {
         self.register_action::<SettingsLoaded<L::Settings>>();
+        self.add_resource(AssetSettings::<L::Settings>::new());
+        self.add_observer(on_import_assets::<L>());
+        self.add_observer(on_load_assets::<L>());
+        self.add_observer(on_process_assets::<L>());
+        self.add_observer(on_unload_assets::<L>());
+
         if let Some(metas) = self.try_resource_mut::<AssetLoaderMetas>() {
             metas.add::<L>();
         } else {

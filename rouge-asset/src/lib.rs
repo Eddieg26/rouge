@@ -31,7 +31,7 @@ impl Settings for DefaultSettings {}
 
 impl AsBytes for DefaultSettings {
     fn to_bytes(&self) -> Vec<u8> {
-        Vec::new()
+        self.value.to_bytes()
     }
 
     fn from_bytes(bytes: &[u8]) -> Option<Self> {

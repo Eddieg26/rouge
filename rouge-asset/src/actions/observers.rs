@@ -42,10 +42,7 @@ pub fn on_import_assets<L: AssetLoader>() -> Observer<ImportAssets<L::Asset>> {
                         );
                         match config.save_metadata(&meta_path, &metadata) {
                             Ok(_) => (metadata, true),
-                            Err(e) => {
-                                println!("Failed to save metadata: {:?}", e);
-                                continue;
-                            }
+                            Err(_) => continue,
                         }
                     }
                 };
@@ -60,9 +57,11 @@ pub fn on_import_assets<L: AssetLoader>() -> Observer<ImportAssets<L::Asset>> {
                         Err(_) => {
                             let asset_info =
                                 AssetInfo::with_checksum::<L::Asset>(metadata.id(), checksum);
-                            match config.save_asset_info::<L::Asset>(path, &asset_info) {
+                            match config.save_asset_info::<L::Asset>(&info_path, &asset_info) {
                                 Ok(_) => (asset_info, true),
-                                Err(_) => continue,
+                                Err(_) => {
+                                    continue;
+                                }
                             }
                         }
                     };
@@ -92,7 +91,7 @@ pub fn on_import_assets<L: AssetLoader>() -> Observer<ImportAssets<L::Asset>> {
 
                 if meta_created || asset_info.checksum() != checksum {
                     let _ = config.save_metadata(metadata.id(), &metadata);
-                    let _ = config.save_asset_info::<L::Asset>(path, &asset_info);
+                    let _ = config.save_asset_info::<L::Asset>(&info_path, &asset_info);
                 }
             }
         }
@@ -119,7 +118,7 @@ pub fn on_import_assets<L: AssetLoader>() -> Observer<ImportAssets<L::Asset>> {
 pub fn on_load_assets<L: AssetLoader>() -> Observer<LoadAsset<L::Asset>> {
     let callback = |ids: &[AssetId],
                     actions: &mut Actions,
-                    main_actions: &mut MainWorldActions,
+                    mut main_actions: Option<&mut MainWorldActions>,
                     config: &AssetConfig,
                     database: &AssetDatabase,
                     metas: &AssetLoaderMetas,
@@ -168,8 +167,16 @@ pub fn on_load_assets<L: AssetLoader>() -> Observer<LoadAsset<L::Asset>> {
                 }
             };
 
-            main_actions.add(AssetLoaded::<L::Asset>::new(*id, asset));
-            main_actions.add(SettingsLoaded::<L::Settings>::new(*id, metadata.settings));
+            match &mut main_actions {
+                Some(main_actions) => {
+                    main_actions.add(AssetLoaded::<L::Asset>::new(*id, asset));
+                    main_actions.add(SettingsLoaded::<L::Settings>::new(*id, metadata.settings));
+                }
+                None => {
+                    actions.add(AssetLoaded::<L::Asset>::new(*id, asset));
+                    actions.add(SettingsLoaded::<L::Settings>::new(*id, metadata.settings));
+                }
+            }
 
             database.set_load_state(*id, LoadState::Loaded);
             database.set_dependencies::<L::Asset>(
@@ -189,7 +196,10 @@ pub fn on_load_assets<L: AssetLoader>() -> Observer<LoadAsset<L::Asset>> {
                     let meta = metas
                         .get_by_ty(dependent.ty())
                         .expect("Missing Asset Loader metadata.");
-                    meta.add_process_asset(main_actions, *dependent.id())
+                    match &mut main_actions {
+                        Some(main_actions) => meta.add_load_action(main_actions, dependent.id()),
+                        None => meta.add_load_action(actions, dependent.id()),
+                    }
                 }
             }
         }
@@ -205,7 +215,7 @@ pub fn on_load_assets<L: AssetLoader>() -> Observer<LoadAsset<L::Asset>> {
     let observer = Observer::<LoadAsset<L::Asset>>::new(
         move |ids, world| {
             let mut actions = world.actions().clone();
-            let main_actions = world.resource_mut::<MainWorldActions>();
+            let main_actions = world.try_resource_mut::<MainWorldActions>();
             let config = world.resource::<AssetConfig>();
             let database = world.resource::<AssetDatabase>();
             let metas = world.resource::<AssetLoaderMetas>();
@@ -307,7 +317,6 @@ pub fn on_process_assets<L: AssetLoader>() -> Observer<ProcessAsset<L::Asset>> {
 }
 
 pub fn on_import_folder(paths: &[PathBuf], mut actions: Actions, metas: &AssetLoaderMetas) {
-    println!("Importing PATHS: {:?}", paths);
     for path in paths {
         let dir = match std::fs::read_dir(path) {
             Ok(dir) => dir,

@@ -46,7 +46,7 @@ impl BarrierLock {
 
         if count < total {
             std::mem::drop(barrier);
-            let guard = self.guard.lock().unwrap();
+            let guard = self.guard.lock().expect("Failed to lock barrier");
             let _ = self.condvar.wait(guard);
         }
     }

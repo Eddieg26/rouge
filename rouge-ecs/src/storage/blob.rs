@@ -1,4 +1,5 @@
 use super::ptr::Ptr;
+use core::panic;
 use std::{alloc::Layout, marker::PhantomData, ptr::NonNull};
 
 pub struct Blob {
@@ -237,14 +238,13 @@ impl Blob {
     }
 
     pub fn replace<T>(&mut self, index: usize, value: T) -> Option<T> {
-        if index < self.len {
-            unsafe {
-                let src = self.offset(index) as *mut T;
-                let mut old = std::ptr::read(src);
-                Some(std::mem::replace(&mut old, value))
-            }
-        } else {
-            None
+        if self.len <= index {
+            panic!("Index out of bounds");
+        }
+        unsafe {
+            let src = self.offset(index) as *mut T;
+            let mut old = std::ptr::read(src);
+            Some(std::mem::replace(&mut old, value))
         }
     }
 

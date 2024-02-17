@@ -206,7 +206,7 @@ impl Archetypes {
     pub fn add_component(&mut self, entity: Entity, component: ComponentId) -> Option<ArchetypeId> {
         if let Some(id) = self.entities.get(entity.id()).cloned() {
             let components = {
-                let archetype = self.archetypes.get_mut(&id).unwrap();
+                let archetype = self.archetypes.get_mut(&id)?;
                 archetype.entities.remove(&entity.id());
                 archetype.added(component)
             };
@@ -240,7 +240,7 @@ impl Archetypes {
     ) -> Option<ArchetypeId> {
         if let Some(id) = self.entities.get(entity.id()).cloned() {
             let components = {
-                let archetype = self.archetypes.get_mut(&id).unwrap();
+                let archetype = self.archetypes.get_mut(&id)?;
                 archetype.entities.remove(&entity.id());
                 archetype.removed(component)
             };
@@ -268,7 +268,7 @@ impl Archetypes {
 
     pub fn delete_entity(&mut self, entity: Entity) -> Option<ArchetypeId> {
         if let Some(id) = self.entities.remove(entity.id()) {
-            let archetype = self.archetypes.get_mut(&id).unwrap();
+            let archetype = self.archetypes.get_mut(&id)?;
             archetype.entities.remove(&entity.id());
             Some(id)
         } else {
@@ -278,11 +278,12 @@ impl Archetypes {
 
     pub fn has(&self, entity: Entity, component: ComponentId) -> bool {
         if let Some(id) = self.entities.get(entity.id()) {
-            let archetype = self.archetypes.get(id).unwrap();
-            archetype.components().contains(&component)
-        } else {
-            false
+            if let Some(archetype) = self.archetypes.get(id) {
+                return archetype.components().contains(&component);
+            }
         }
+
+        return false;
     }
 
     fn add_component_archetype(&mut self, component: ComponentId, id: ArchetypeId) {

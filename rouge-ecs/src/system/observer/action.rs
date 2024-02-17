@@ -5,7 +5,7 @@ use crate::{
 };
 use std::{
     any::TypeId,
-    sync::{Arc, RwLock},
+    sync::{Arc, Mutex},
     vec,
 };
 
@@ -104,36 +104,36 @@ impl ActionReflectors {
 
 #[derive(Default, Clone)]
 pub struct Actions {
-    actions: Arc<RwLock<Vec<(TypeId, Blob)>>>,
+    actions: Arc<Mutex<Vec<(TypeId, Blob)>>>,
 }
 
 impl Actions {
     pub fn new() -> Self {
         Self {
-            actions: Arc::new(RwLock::new(Vec::new())),
+            actions: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
     pub fn drain(&mut self) -> Vec<(TypeId, Blob)> {
-        let mut actions = self.actions.write().unwrap();
+        let mut actions = self.actions.lock().unwrap();
         std::mem::take(&mut *actions)
     }
 
     pub fn add<A: Action>(&mut self, action: A) {
         let type_id = TypeId::of::<A>();
-        let mut actions = self.actions.write().unwrap();
+        let mut actions = self.actions.lock().unwrap();
         let mut data = Blob::new::<A>();
         data.push(action);
         actions.push((type_id, data));
     }
 
     pub fn pop(&mut self) -> Option<(TypeId, Blob)> {
-        let mut actions = self.actions.write().unwrap();
+        let mut actions = self.actions.lock().unwrap();
         actions.pop()
     }
 
     pub fn filter(&mut self, type_id: &TypeId) -> Vec<Blob> {
-        let mut actions = self.actions.write().unwrap();
+        let mut actions = self.actions.lock().unwrap();
         let mut filtered = Vec::new();
         let mut index = 0;
         while index < actions.len() {
@@ -148,12 +148,12 @@ impl Actions {
     }
 
     pub fn is_empty(&self) -> bool {
-        let actions = self.actions.read().unwrap();
+        let actions = self.actions.lock().unwrap();
         actions.is_empty()
     }
 
     pub fn clear(&mut self) {
-        let mut actions = self.actions.write().unwrap();
+        let mut actions = self.actions.lock().unwrap();
         actions.clear();
     }
 }

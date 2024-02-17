@@ -227,7 +227,8 @@ impl ObserverRunner for ParallelRunner {
                         sender.send(move || {
                             node.run(world, outputs);
 
-                            barrier.lock().unwrap().notify();
+                            let mut barrier_lock = barrier.lock().expect("Failed to lock barrier");
+                            barrier_lock.notify();
                         });
                     }
                 }
@@ -242,7 +243,8 @@ impl ObserverRunner for ParallelRunner {
                     }
                 }
 
-                lock.wait(barrier.lock().unwrap());
+                let barrier_lock = barrier.lock().expect("Failed to lock barrier");
+                lock.wait(barrier_lock);
             });
         }
     }

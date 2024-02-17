@@ -219,11 +219,11 @@ impl SystemGraph {
             }
         }
 
-        hierarchy.sort_by(|a, b| {
-            let a_first = a.first().unwrap();
-            let b_first = b.first().unwrap();
-
-            a_first.cmp(b_first)
+        hierarchy.sort_by(|a, b| match (a.first(), b.first()) {
+            (Some(a), Some(b)) => a.cmp(b),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => std::cmp::Ordering::Equal,
         });
 
         self.hierarchy = hierarchy;

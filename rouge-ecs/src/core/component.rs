@@ -142,7 +142,10 @@ impl Components {
     }
 
     pub fn extend_meta<T: 'static>(&mut self, id: ComponentId, extension: T) {
-        let meta = self.components.get_mut(*id).unwrap();
+        let meta = self
+            .components
+            .get_mut(*id)
+            .expect("Component not registered");
         let mut blob = Blob::new::<T>();
         blob.push(extension);
         meta.extensions.insert(TypeId::of::<T>(), Arc::new(blob));

@@ -18,7 +18,7 @@ impl<'a> Ptr<'a> {
     }
 
     pub fn from_data<T: 'static>(data: T) -> Self {
-        let data = NonNull::new(&data as *const T as *mut u8).unwrap();
+        let data = NonNull::new(&data as *const T as *mut u8).expect("Invalid data pointer");
         Self {
             data,
             layout: Layout::new::<T>(),

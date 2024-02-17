@@ -44,7 +44,13 @@ impl TaskPool {
         for id in 0..size {
             let receiver = receiver.clone();
             let thread = std::thread::spawn(move || loop {
-                let job: Job = receiver.lock().unwrap().recv().unwrap();
+                let job: Job = match receiver.lock() {
+                    Ok(receiver) => match receiver.recv() {
+                        Ok(job) => job,
+                        Err(_) => break,
+                    },
+                    Err(_) => break,
+                };
 
                 match job {
                     Some(job) => job(),
@@ -66,7 +72,7 @@ impl TaskPool {
         for worker in &mut self.workers {
             self.sender.send(None).unwrap();
             if let Some(thread) = worker.thread.take() {
-                thread.join().unwrap();
+                thread.join().expect("Failed to join worker thread");
             }
         }
     }

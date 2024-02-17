@@ -58,7 +58,8 @@ impl ScheduleRunner for ParallelRunner {
                         sender.send(move || {
                             node.run(world);
 
-                            barrier.lock().unwrap().notify();
+                            let mut barrier_lock = barrier.lock().expect("Failed to lock barrier");
+                            barrier_lock.notify();
                         });
                     }
 
@@ -70,7 +71,7 @@ impl ScheduleRunner for ParallelRunner {
                         node.run(world);
                     }
 
-                    lock.wait(barrier.lock().unwrap());
+                    lock.wait(barrier.lock().expect("Failed to lock barrier"));
                 });
             } else {
                 for node in row {

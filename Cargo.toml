@@ -8,5 +8,6 @@ members = [
     "rouge-window",
     "rouge-winit",
     "rouge-graphics",
-    "examples/*",
+    "examples/*", 
+    "rouge-editor",
 ]

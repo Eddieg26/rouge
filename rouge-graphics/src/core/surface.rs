@@ -1,9 +1,9 @@
 use rouge_core::primitives::Size;
-use rouge_ecs::{macros::Resource, world::resource::Resource};
+use rouge_ecs::macros::Resource;
 
 #[derive(Resource)]
 pub struct RenderSurface {
-    surface: Option<wgpu::Surface>,
+    surface: wgpu::Surface,
     adapter: wgpu::Adapter,
     format: wgpu::TextureFormat,
     depth_format: wgpu::TextureFormat,
@@ -17,35 +17,25 @@ impl RenderSurface {
     where
         W: raw_window_handle::HasRawWindowHandle + raw_window_handle::HasRawDisplayHandle,
     {
-        let surface = unsafe { instance.create_surface(window_handle) }.ok();
+        let surface =
+            unsafe { instance.create_surface(window_handle) }.expect("Failed to create surface");
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
-            compatible_surface: surface.as_ref(),
+            compatible_surface: Some(&surface),
             ..Default::default()
         }))
         .expect("Failed to find an appropriate adapter");
 
-        let (format, present_mode, alpha_mode) = match &surface {
-            Some(surface) => {
-                let surface_caps = surface.get_capabilities(&adapter);
-                let surface_format = surface_caps
-                    .formats
-                    .iter()
-                    .copied()
-                    .find(|f| f.is_srgb())
-                    .unwrap_or(surface_caps.formats[0]);
+        let surface_caps = surface.get_capabilities(&adapter);
+        let format = surface_caps
+            .formats
+            .iter()
+            .copied()
+            .find(|f| f.is_srgb())
+            .unwrap_or(surface_caps.formats[0]);
 
-                let present_mode = surface_caps.present_modes[0];
-                let alpha_mode = surface_caps.alpha_modes[0];
-
-                (surface_format, present_mode, alpha_mode)
-            }
-            None => (
-                wgpu::TextureFormat::Bgra8UnormSrgb,
-                wgpu::PresentMode::Fifo,
-                wgpu::CompositeAlphaMode::Opaque,
-            ),
-        };
+        let present_mode = surface_caps.present_modes[0];
+        let alpha_mode = surface_caps.alpha_modes[0];
 
         Self {
             surface,
@@ -58,8 +48,8 @@ impl RenderSurface {
         }
     }
 
-    pub fn inner(&self) -> Option<&wgpu::Surface> {
-        self.surface.as_ref()
+    pub fn inner(&self) -> &wgpu::Surface {
+        &self.surface
     }
 
     pub fn format(&self) -> wgpu::TextureFormat {
@@ -82,10 +72,8 @@ impl RenderSurface {
         &self.adapter
     }
 
-    pub fn capabilities(&self) -> Option<wgpu::SurfaceCapabilities> {
-        self.surface
-            .as_ref()
-            .map(|surface| surface.get_capabilities(&self.adapter))
+    pub fn capabilities(&self) -> wgpu::SurfaceCapabilities {
+        self.surface.get_capabilities(&self.adapter)
     }
 
     pub fn size(&self) -> Size {
@@ -110,26 +98,20 @@ impl RenderSurface {
     }
 
     pub fn default_config(&self, size: Size) -> wgpu::SurfaceConfiguration {
-        match self.surface.as_ref() {
-            Some(surface) => surface
-                .get_default_config(&self.adapter, size.width, size.height)
-                .unwrap_or(Self::default_config_inner(
-                    self.present_mode,
-                    self.alpha_mode,
-                    self.format,
-                    size,
-                )),
-            None => {
-                Self::default_config_inner(self.present_mode, self.alpha_mode, self.format, size)
-            }
-        }
+        self.surface
+            .get_default_config(&self.adapter, size.width, size.height)
+            .unwrap_or(Self::default_config_inner(
+                self.present_mode,
+                self.alpha_mode,
+                self.format,
+                size,
+            ))
     }
 
     pub fn resize(&mut self, device: &wgpu::Device, size: Size) {
-        self.surface.as_ref().map(|surface| {
-            let config = self.default_config(size);
-            surface.configure(device, &config);
-        });
+        let config = self.default_config(size);
+        self.surface.configure(device, &config);
+
         self.size = size;
     }
 }

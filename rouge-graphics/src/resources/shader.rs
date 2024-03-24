@@ -1,4 +1,6 @@
-use crate::core::ty::shader::{ShaderBindGroup, ShaderVariable};
+use rouge_asset::Asset;
+
+use crate::core::ty::shader::{IntoBindGroupLayout, ShaderBindGroup, ShaderVariable};
 
 pub struct ShaderMeta {
     entry: String,
@@ -36,6 +38,13 @@ impl ShaderMeta {
 
     pub fn outputs(&self) -> &[ShaderVariable] {
         &self.outputs
+    }
+
+    pub fn create_layouts(&self, device: &wgpu::Device) -> Vec<wgpu::BindGroupLayout> {
+        self.bindings
+            .iter()
+            .map(|group| group.into_bind_group_layout(device))
+            .collect()
     }
 }
 
@@ -81,3 +90,5 @@ impl Shader {
         self.vertex.as_mut()
     }
 }
+
+impl Asset for Shader {}

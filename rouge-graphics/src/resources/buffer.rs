@@ -1,6 +1,14 @@
 use crate::core::{BaseVertex, ResourceId};
-use rouge_ecs::{macros::Resource, storage::sparse::SparseMap, world::resource::Resource};
+use rouge_ecs::{macros::Resource, storage::sparse::SparseMap};
 use wgpu::util::DeviceExt;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BufferType {
+    Uniform,
+    Vertex,
+    Index,
+    Storage,
+}
 
 pub trait BaseBuffer: Send + Sync + 'static {
     fn inner(&self) -> &wgpu::Buffer;

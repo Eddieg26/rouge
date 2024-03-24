@@ -1,5 +1,5 @@
 use crate::core::ResourceId;
-use rouge_ecs::{macros::Resource, storage::sparse::SparseMap, world::resource::Resource};
+use rouge_ecs::{macros::Resource, storage::sparse::SparseMap};
 
 pub type Dimension = wgpu::TextureDimension;
 pub type Format = wgpu::TextureFormat;
@@ -278,9 +278,9 @@ impl Texture for Texture2D {
 }
 
 pub struct GpuTexture {
-    texture: wgpu::Texture,
+    texture: Option<wgpu::Texture>,
     view: wgpu::TextureView,
-    sampler: wgpu::Sampler,
+    sampler: Option<wgpu::Sampler>,
 }
 
 impl GpuTexture {
@@ -324,22 +324,37 @@ impl GpuTexture {
         });
 
         Self {
-            texture: gpu_texture,
+            texture: Some(gpu_texture),
             view,
-            sampler,
+            sampler: Some(sampler),
         }
     }
 
-    pub fn texture(&self) -> &wgpu::Texture {
-        &self.texture
+    pub fn from_texture(texture: &wgpu::Texture, desc: &wgpu::TextureViewDescriptor) -> Self {
+        let view = texture.create_view(desc);
+
+        Self {
+            texture: None,
+            view,
+            sampler: None,
+        }
+    }
+
+    pub fn with_sampler(mut self, sampler: wgpu::Sampler) -> Self {
+        self.sampler = Some(sampler);
+        self
+    }
+
+    pub fn texture(&self) -> Option<&wgpu::Texture> {
+        self.texture.as_ref()
     }
 
     pub fn view(&self) -> &wgpu::TextureView {
         &self.view
     }
 
-    pub fn sampler(&self) -> &wgpu::Sampler {
-        &self.sampler
+    pub fn sampler(&self) -> Option<&wgpu::Sampler> {
+        self.sampler.as_ref()
     }
 }
 

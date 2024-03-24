@@ -1,5 +1,5 @@
 use crate::core::{ty::shader::IntoBindGroupLayout, ResourceId};
-use rouge_ecs::{macros::Resource, storage::sparse::SparseMap, world::resource::Resource};
+use rouge_ecs::{macros::Resource, storage::sparse::SparseMap};
 use std::collections::HashMap;
 
 pub struct BindGroups {

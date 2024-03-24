@@ -10,8 +10,10 @@ pollster = "0.3.0"
 rouge-core = { path = "../rouge-core", version = "0.1.0" }
 rouge-ecs = { path = "../rouge-ecs", version = "0.1.0" }
 rouge-window = { path = "../rouge-window", version = "0.1.0" }
+rouge-asset = { path = "../rouge-asset", version = "0.1.0" }
 wgpu = "0.18.0"
 raw-window-handle = "0.5.0"
+downcast-rs = "1.2.0"
 
 [dependencies.bytemuck]
 version = "1.14.0"

@@ -1,10 +1,9 @@
+use rouge_core::ResourceId;
+use rouge_ecs::storage::sparse::SparseMap;
 use std::{
     any::TypeId,
     hash::{Hash, Hasher},
 };
-
-use crate::core::ResourceId;
-use rouge_ecs::storage::sparse::SparseMap;
 use wgpu::PrimitiveState;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]

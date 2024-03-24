@@ -1,4 +1,5 @@
-use crate::core::{ty::shader::IntoBindGroupLayout, ResourceId};
+use crate::core::ty::shader::IntoBindGroupLayout;
+use rouge_core::ResourceId;
 use rouge_ecs::{macros::Resource, storage::sparse::SparseMap};
 use std::collections::HashMap;
 

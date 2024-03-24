@@ -1,4 +1,4 @@
-use crate::core::ResourceId;
+use rouge_core::ResourceId;
 use rouge_ecs::{macros::Resource, storage::sparse::SparseMap};
 
 pub type Dimension = wgpu::TextureDimension;

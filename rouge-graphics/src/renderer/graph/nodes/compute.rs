@@ -1,12 +1,11 @@
+use super::GraphNode;
 use crate::{
-    core::ResourceId,
     renderer::graph::{context::RenderContext, resources::GraphResources},
     resources::shader::Shader,
 };
 use rouge_asset::{storage::Assets, AssetId};
+use rouge_core::ResourceId;
 use rouge_ecs::{ArgItem, SystemArg, World};
-
-use super::GraphNode;
 
 pub trait ComputeExecutor: Send + Sync + 'static {
     type Arg: SystemArg;
@@ -93,7 +92,11 @@ impl GraphNode for ComputePass {
 
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: None,
-            bind_group_layouts: bind_group_layouts.iter().map(|l| l).collect::<Vec<_>>().as_slice(),
+            bind_group_layouts: bind_group_layouts
+                .iter()
+                .map(|l| l)
+                .collect::<Vec<_>>()
+                .as_slice(),
             push_constant_ranges: &[],
         });
 

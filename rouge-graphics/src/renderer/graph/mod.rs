@@ -1,13 +1,11 @@
-use std::collections::HashMap;
-use crate::{
-    core::ResourceId,
-    resources::{buffer::BaseBuffer, texture::GpuTexture},
-};
 use self::{
-    nodes::{NodeId, GraphNode},
+    nodes::{GraphNode, NodeId},
     resources::{GraphResources, TextureDesc},
 };
+use crate::resources::{buffer::BaseBuffer, texture::GpuTexture};
+use rouge_core::ResourceId;
 use rouge_ecs::macros::Resource;
+use std::collections::HashMap;
 
 pub mod context;
 pub mod nodes;
@@ -34,7 +32,9 @@ impl RenderGraph {
     }
 
     pub fn node_mut<N: GraphNode>(&mut self, id: NodeId) -> Option<&mut N> {
-        self.nodes.get_mut(&id).map(|n| n.downcast_mut::<N>().unwrap())
+        self.nodes
+            .get_mut(&id)
+            .map(|n| n.downcast_mut::<N>().unwrap())
     }
 
     pub fn add_node<N: GraphNode>(&mut self, id: NodeId, node: N) -> &mut Self {
@@ -72,13 +72,14 @@ impl RenderGraph {
 
     fn build_heirarchy(&mut self) {
         let mut hierarchy = Vec::new();
-        for (_, node) in &self.nodes {
+        for (id, node) in &self.nodes {
             let mut parents = Vec::new();
             for (parent_id, parent_node) in &self.nodes {
-                if parent_node
-                    .writes()
-                    .iter()
-                    .any(|r| node.reads().contains(r))
+                if id != parent_id
+                    && parent_node
+                        .writes()
+                        .iter()
+                        .any(|r| node.reads().contains(r))
                 {
                     parents.push(*parent_id);
                 }

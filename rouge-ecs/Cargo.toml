@@ -7,3 +7,4 @@ edition = "2021"
 
 [dependencies]
 rouge-macros = { path = "macros", version = "0.1.0" }
+rouge-core = { path = "../rouge-core", version = "0.1.0" }

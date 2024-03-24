@@ -1,12 +1,9 @@
-use crate::{
-    core::ResourceId,
-    renderer::graph::{
-        context::RenderContext,
-        resources::{GraphResources, TextureId},
-    },
+use crate::renderer::graph::{
+    context::RenderContext,
+    resources::{GraphResources, TextureId},
 };
 use rouge_ecs::{ArgItem, SystemArg, World};
-
+use rouge_core::ResourceId;
 use super::GraphNode;
 
 pub enum Attachment {
@@ -186,7 +183,7 @@ impl GraphNode for RenderPass {
         ctx.submit(encoder);
     }
 
-    fn reads(&self) -> Vec<crate::core::ResourceId> {
+    fn reads(&self) -> Vec<ResourceId> {
         self.writes()
     }
 

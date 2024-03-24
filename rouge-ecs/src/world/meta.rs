@@ -2,6 +2,7 @@ use crate::{
     core::{Component, Entity},
     system::observer::{action::ActionOutputs, builtin::RemoveComponent},
 };
+use rouge_core::ResourceId;
 use std::any::TypeId;
 
 use super::resource::{LocalResource, Resource};
@@ -18,6 +19,7 @@ pub enum AccessType {
     Component(TypeId),
     Resource(TypeId),
     Local(TypeId),
+    Id(ResourceId),
 }
 
 impl AccessType {
@@ -35,6 +37,10 @@ impl AccessType {
 
     pub fn world() -> Self {
         Self::World
+    }
+
+    pub fn id(id: ResourceId) -> Self {
+        Self::Id(id)
     }
 
     pub fn none() -> Self {

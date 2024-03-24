@@ -1,5 +1,5 @@
 use super::context::RenderContext;
-use crate::core::ResourceId;
+use rouge_core::ResourceId;
 use downcast_rs::{impl_downcast, Downcast};
 use std::hash::{Hash, Hasher};
 

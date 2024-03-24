@@ -1,5 +1,5 @@
 use super::buffer::{AccessMode, BufferLayout, ShaderBuffer};
-use crate::core::ResourceId;
+use rouge_core::ResourceId;
 use std::{
     hash::{Hash, Hasher},
     num::{NonZeroU32, NonZeroU64},
@@ -147,7 +147,7 @@ impl Into<ResourceId> for ShaderBindGroup {
     fn into(self) -> ResourceId {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         self.bindings.hash(&mut hasher);
-        ResourceId(hasher.finish())
+        ResourceId::new(hasher.finish())
     }
 }
 
@@ -225,6 +225,6 @@ impl Into<ResourceId> for ShaderResourceGroup {
     fn into(self) -> ResourceId {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         self.resources.hash(&mut hasher);
-        ResourceId(hasher.finish())
+        ResourceId::new(hasher.finish())
     }
 }

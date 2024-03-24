@@ -1,7 +1,5 @@
-use crate::{
-    core::ResourceId,
-    resources::{buffer::BaseBuffer, texture::GpuTexture},
-};
+use crate::resources::{buffer::BaseBuffer, texture::GpuTexture};
+use rouge_core::ResourceId;
 use std::collections::HashMap;
 
 pub type TextureId = ResourceId;
@@ -36,7 +34,10 @@ impl GraphResources {
 
     pub fn buffer(&self, id: impl Into<ResourceId>) -> &dyn BaseBuffer {
         let id = id.into();
-        self.buffers.get(&id).map(|b| &**b).expect("Buffer not found")
+        self.buffers
+            .get(&id)
+            .map(|b| &**b)
+            .expect("Buffer not found")
     }
 
     pub fn texture_checked(&self, id: impl Into<ResourceId>) -> Option<&GpuTexture> {

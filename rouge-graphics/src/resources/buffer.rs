@@ -1,4 +1,5 @@
-use crate::core::{BaseVertex, ResourceId};
+use crate::core::BaseVertex;
+use rouge_core::ResourceId;
 use rouge_ecs::{macros::Resource, storage::sparse::SparseMap};
 use wgpu::util::DeviceExt;
 

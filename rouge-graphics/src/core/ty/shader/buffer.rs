@@ -1,5 +1,5 @@
 use super::{attribute::ShaderVariable, field::ShaderInput};
-use crate::core::ResourceId;
+use rouge_core::ResourceId;
 use std::hash::{Hash, Hasher};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -61,7 +61,7 @@ impl Into<ResourceId> for BufferLayout {
     fn into(self) -> ResourceId {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         self.hash(&mut hasher);
-        ResourceId(hasher.finish())
+        ResourceId::new(hasher.finish())
     }
 }
 
@@ -152,6 +152,6 @@ impl Into<ResourceId> for ShaderBuffer {
     fn into(self) -> ResourceId {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         self.hash(&mut hasher);
-        ResourceId(hasher.finish())
+        ResourceId::new(hasher.finish())
     }
 }

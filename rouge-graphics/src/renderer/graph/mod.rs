@@ -38,6 +38,12 @@ impl RenderGraph {
     }
 
     pub fn add_node<N: GraphNode>(&mut self, id: NodeId, node: N) -> &mut Self {
+        assert!(
+            !self.nodes.contains_key(&id),
+            "Node with id {:?} already exists",
+            id
+        );
+
         self.nodes.insert(id, Box::new(node));
         self
     }

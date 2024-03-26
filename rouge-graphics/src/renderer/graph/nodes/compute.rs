@@ -1,4 +1,4 @@
-use super::GraphNode;
+use super::{GraphNode, RenderPhase};
 use crate::{
     renderer::graph::{context::RenderContext, resources::GraphResources},
     resources::shader::Shader,
@@ -59,6 +59,7 @@ impl ComputeExecutorInstance {
 }
 
 pub struct ComputePass {
+    phase: RenderPhase,
     executor: ComputeExecutorInstance,
     pipeline: Option<wgpu::ComputePipeline>,
 }
@@ -66,9 +67,15 @@ pub struct ComputePass {
 impl ComputePass {
     pub fn new(executor: impl ComputeExecutor) -> Self {
         Self {
+            phase: RenderPhase::Process,
             executor: ComputeExecutorInstance::new(executor),
             pipeline: None,
         }
+    }
+
+    pub fn set_phase(mut self, phase: RenderPhase) -> Self {
+        self.phase = phase;
+        self
     }
 }
 
@@ -120,5 +127,9 @@ impl GraphNode for ComputePass {
             .execute(ctx.system_arg::<&World>(), ctx.resources(), pass);
 
         ctx.submit(encoder);
+    }
+
+    fn phase(&self) -> RenderPhase {
+        self.phase
     }
 }

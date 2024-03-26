@@ -6,6 +6,13 @@ use std::hash::{Hash, Hasher};
 pub mod compute;
 pub mod render;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RenderPhase {
+    Process,
+    PostProcess,
+    Present,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct NodeId(u64);
 
@@ -22,6 +29,9 @@ pub trait GraphNode: Downcast + Send + Sync + 'static {
     fn execute(&self, ctx: RenderContext);
     fn reads(&self) -> Vec<ResourceId>;
     fn writes(&self) -> Vec<ResourceId>;
+    fn phase(&self) -> RenderPhase {
+        RenderPhase::Process
+    }
 }
 
 impl_downcast!(GraphNode);

@@ -1,10 +1,10 @@
+use super::{GraphNode, RenderPhase};
 use crate::renderer::graph::{
     context::RenderContext,
     resources::{GraphResources, TextureId},
 };
-use rouge_ecs::{ArgItem, SystemArg, World};
 use rouge_core::ResourceId;
-use super::GraphNode;
+use rouge_ecs::{ArgItem, SystemArg, World};
 
 pub enum Attachment {
     Surface,
@@ -27,6 +27,7 @@ pub struct DepthAttachment {
 }
 
 pub struct RenderPass {
+    phase: RenderPhase,
     colors: Vec<ColorAttachment>,
     depth: Option<DepthAttachment>,
     subpasses: Vec<Subpass>,
@@ -35,10 +36,16 @@ pub struct RenderPass {
 impl RenderPass {
     pub fn new() -> Self {
         Self {
+            phase: RenderPhase::Process,
             colors: Vec::new(),
             depth: None,
             subpasses: Vec::new(),
         }
+    }
+
+    pub fn set_phase(mut self, phase: RenderPhase) -> Self {
+        self.phase = phase;
+        self
     }
 
     pub fn with_color(
@@ -212,6 +219,10 @@ impl GraphNode for RenderPass {
         }
 
         writes
+    }
+
+    fn phase(&self) -> RenderPhase {
+        self.phase
     }
 }
 

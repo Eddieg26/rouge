@@ -10,7 +10,6 @@ use crate::{
     core::{Component, ComponentId, Components, Entities, Entity},
     observer::{graph::Observables, Observer},
     process::StartProcess,
-    runner::RunMode,
     schedule::{GlobalSchedules, LocalSchedules, Schedule, SchedulePhase},
     storage::table::Tables,
     system::{
@@ -103,7 +102,7 @@ impl World {
         let mut resources = Resources::new();
         resources.insert(GlobalSchedules::new());
         resources.insert(LocalSchedules::new());
-        resources.insert(Observables::new(RunMode::Parallel));
+        resources.insert(Observables::new());
         resources.insert(ActionOutputs::new());
         resources.insert(ActionReflectors::new());
 
@@ -128,7 +127,7 @@ impl World {
         let mut resources = Resources::new();
         resources.insert(GlobalSchedules::new());
         resources.insert(LocalSchedules::new());
-        resources.insert(Observables::new(RunMode::Parallel));
+        resources.insert(Observables::new());
         resources.insert(ActionOutputs::new());
         resources.insert(main.resource::<ActionReflectors>().clone());
 

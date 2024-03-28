@@ -1,4 +1,5 @@
 use crate::{
+    runner::RunMode,
     system::System,
     world::{meta::AccessType, World},
 };
@@ -81,13 +82,15 @@ impl Node {
 pub struct SystemGraph {
     nodes: Vec<Node>,
     hierarchy: Vec<Vec<NodeId>>,
+    mode: RunMode,
 }
 
 impl SystemGraph {
-    pub fn new() -> Self {
+    pub fn new(mode: RunMode) -> Self {
         Self {
             nodes: Vec::new(),
             hierarchy: Vec::new(),
+            mode,
         }
     }
 
@@ -104,8 +107,10 @@ impl SystemGraph {
         let node = Node::new(system);
         let node_id = self.add_node(node);
 
-        for after_id in after_ids {
-            self.nodes[*after_id].add_dependency(node_id);
+        if self.mode == RunMode::Parallel {
+            for after_id in after_ids {
+                self.nodes[*after_id].add_dependency(node_id);
+            }
         }
 
         let before_ids = before_systems
@@ -114,8 +119,10 @@ impl SystemGraph {
             .map(|system| self.add_system(system))
             .collect::<Vec<_>>();
 
-        for before_id in before_ids {
-            self.nodes[*node_id].add_dependency(before_id);
+        if self.mode == RunMode::Parallel {
+            for before_id in before_ids {
+                self.nodes[*node_id].add_dependency(before_id);
+            }
         }
 
         node_id

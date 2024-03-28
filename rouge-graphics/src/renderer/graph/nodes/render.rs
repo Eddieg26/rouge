@@ -3,8 +3,11 @@ use crate::renderer::graph::{
     context::RenderContext,
     resources::{GraphResources, TextureId},
 };
-use rouge_core::ResourceId;
-use rouge_ecs::{ArgItem, SystemArg, World};
+
+use rouge_ecs::{
+    meta::{Access, AccessMeta, AccessType},
+    ArgItem, SystemArg, World,
+};
 
 pub enum Attachment {
     Surface,
@@ -190,39 +193,50 @@ impl GraphNode for RenderPass {
         ctx.submit(encoder);
     }
 
-    fn reads(&self) -> Vec<ResourceId> {
-        self.writes()
+    fn phase(&self) -> RenderPhase {
+        self.phase
     }
 
-    fn writes(&self) -> Vec<ResourceId> {
+    fn access(&self) -> Vec<rouge_ecs::meta::AccessMeta> {
         let mut writes = Vec::new();
 
         for color in &self.colors {
             match color.attachment {
-                Attachment::Surface => writes.push(GraphResources::SURFACE.into()),
-                Attachment::Texture(id) => writes.push(id),
+                Attachment::Surface => writes.push(AccessMeta::new(
+                    AccessType::Id(GraphResources::SURFACE.into()),
+                    Access::Write,
+                )),
+                Attachment::Texture(id) => {
+                    writes.push(AccessMeta::new(AccessType::Id(id), Access::Write))
+                }
             }
 
             if let Some(ref resolve_target) = color.resolve_target {
                 match resolve_target {
-                    Attachment::Surface => writes.push(GraphResources::SURFACE.into()),
-                    Attachment::Texture(id) => writes.push(*id),
+                    Attachment::Surface => writes.push(AccessMeta::new(
+                        AccessType::Id(GraphResources::SURFACE.into()),
+                        Access::Write,
+                    )),
+                    Attachment::Texture(id) => {
+                        writes.push(AccessMeta::new(AccessType::Id(*id), Access::Write))
+                    }
                 }
             }
         }
 
         if let Some(depth) = &self.depth {
             match depth.attachment {
-                Attachment::Surface => writes.push(GraphResources::SURFACE.into()),
-                Attachment::Texture(id) => writes.push(id),
+                Attachment::Surface => writes.push(AccessMeta::new(
+                    AccessType::Id(GraphResources::SURFACE.into()),
+                    Access::Write,
+                )),
+                Attachment::Texture(id) => {
+                    writes.push(AccessMeta::new(AccessType::Id(id), Access::Write))
+                }
             }
         }
 
         writes
-    }
-
-    fn phase(&self) -> RenderPhase {
-        self.phase
     }
 }
 

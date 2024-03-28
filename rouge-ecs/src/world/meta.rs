@@ -6,13 +6,13 @@ use rouge_core::ResourceId;
 use std::any::TypeId;
 
 use super::resource::{LocalResource, Resource};
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Access {
     Read,
     Write,
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum AccessType {
     None,
     World,
@@ -78,6 +78,14 @@ impl AccessMeta {
                 Access::Write => writes.push(meta.ty()),
             }
         }
+    }
+
+    pub fn select(metas: &[AccessMeta], access: Access) -> Vec<AccessType> {
+        metas
+            .iter()
+            .filter(|meta| meta.access() == access)
+            .map(|meta| meta.ty())
+            .collect()
     }
 
     pub fn collect(types: &[AccessType], access: Access) -> Vec<AccessMeta> {

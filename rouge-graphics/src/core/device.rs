@@ -1,3 +1,6 @@
+use rouge_ecs::macros::Resource;
+
+#[derive(Resource)]
 pub struct RenderDevice(wgpu::Device);
 
 impl RenderDevice {

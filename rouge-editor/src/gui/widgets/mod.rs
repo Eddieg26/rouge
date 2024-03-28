@@ -2,8 +2,8 @@ use super::{
     attributes::{Attributes, Properties},
     context::Context,
     core::ElementId,
-    elements::{quad::Quad, Element},
-    event::{BaseListeners, Click, Event, EventListeners, EventType},
+    elements::Element,
+    event::{BaseListeners, Event, EventListeners, EventType},
 };
 use std::collections::HashMap;
 

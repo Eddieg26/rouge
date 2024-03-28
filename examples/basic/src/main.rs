@@ -6,14 +6,16 @@ use rouge_asset::{
     Asset, AssetId, DefaultSettings,
 };
 use rouge_ecs::{
+    meta::{Access, AccessMeta, AccessType},
     observer::{
         builtin::{AddComponent, CreateEntity, DeleteEntity, RemoveComponent},
         Actions, IntoObserver, Observers,
     },
     query::Query,
-    Component, Entity, IntoSystem, World,
+    Component, Entity, IntoSystem, ResourceId, World,
 };
 use rouge_game::game::{Game, PostInit, PostUpdate, Start, Update};
+use rouge_graphics::renderer::graph::{nodes::GraphNode, resources::TextureDesc, RenderGraph};
 
 #[derive(Debug)]
 pub struct Player {
@@ -117,35 +119,101 @@ fn load_text_file(mut actions: Actions) {
     // actions.add(LoadAsset::<TextFile>::new("test.txt"));
 }
 
+// fn main() {
+//     let mut game = Game::new();
+//     game.add_plugin(AssetPlugin::default())
+//         .register_asset::<TextFile>()
+//         .add_asset_loader::<TextFile>();
+
+//     game.register::<Player>();
+//     game.add_system(PostInit, load_text_file);
+//     game.add_system(Update, update.after(start));
+//     game.add_system(Update, test.before(world_system));
+//     game.add_system(PostUpdate, post_update);
+
+//     let add_player_systems = Observers::<AddComponent<Player>>::new().add_system(player_added);
+//     let remove_player_systems =
+//         Observers::<RemoveComponent<Player>>::new().add_system(player_removed);
+//     let delete_entity_systems = Observers::<DeleteEntity>::new().add_system(entities_deleted);
+//     game.add_observers(add_player_systems);
+//     game.add_observers(remove_player_systems);
+//     game.add_observers(delete_entity_systems);
+
+//     let asset_loaded = Observers::<AssetLoaded<TextFile>>::new().add_system(
+//         |ids: &[AssetId], assets: &Assets<TextFile>| {
+//             for id in ids {
+//                 println!("Asset Loaded: {:?}", assets.get(id).unwrap().contents());
+//             }
+//         },
+//     );
+
+//     game.add_observers(asset_loaded);
+
+//     game.run();
+// }
+
+pub struct TestNode {
+    name: String,
+    access: Vec<AccessMeta>,
+}
+
+impl TestNode {
+    pub fn new(name: &str) -> Self {
+        Self {
+            name: name.to_string(),
+            access: vec![],
+        }
+    }
+
+    pub fn add_read(mut self, ty: AccessType) -> Self {
+        self.access.push(AccessMeta::new(ty, Access::Read));
+        self
+    }
+
+    pub fn add_write(mut self, ty: AccessType) -> Self {
+        self.access.push(AccessMeta::new(ty, Access::Write));
+        self
+    }
+
+    pub fn add_meta(mut self, ty: AccessType, access: Access) -> Self {
+        self.access.push(AccessMeta::new(ty, access));
+        self
+    }
+}
+
+impl GraphNode for TestNode {
+    fn execute(&self, _: rouge_graphics::renderer::graph::context::RenderContext) {
+        println!("Executing TestNode: {:?}", &self.name);
+    }
+
+    fn prepare(&mut self, _: rouge_graphics::renderer::graph::context::RenderContext) {}
+
+    fn phase(&self) -> rouge_graphics::renderer::graph::nodes::RenderPhase {
+        rouge_graphics::renderer::graph::nodes::RenderPhase::Process
+    }
+
+    fn access(&self) -> Vec<rouge_ecs::meta::AccessMeta> {
+        self.access.clone()
+    }
+}
+
 fn main() {
-    let mut game = Game::new();
-    game.add_plugin(AssetPlugin::default())
-        .register_asset::<TextFile>()
-        .add_asset_loader::<TextFile>();
+    let mut graph = RenderGraph::new();
 
-    game.register::<Player>();
-    game.add_system(PostInit, load_text_file);
-    game.add_system(Update, update.after(start));
-    game.add_system(Update, test.before(world_system));
-    game.add_system(PostUpdate, post_update);
+    let texture = graph.create_texture("texture", TextureDesc::default());
+    let read_node = TestNode::new("Read Node").add_read(AccessType::id(texture));
+    let write_node = TestNode::new("Write Node").add_read(AccessType::World);
 
-    // let add_player_systems = Observers::<AddComponent<Player>>::new().add_system(player_added);
-    // let remove_player_systems =
-    //     Observers::<RemoveComponent<Player>>::new().add_system(player_removed);
-    // let delete_entity_systems = Observers::<DeleteEntity>::new().add_system(entities_deleted);
-    // game.add_observers(add_player_systems);
-    // game.add_observers(remove_player_systems);
-    // game.add_observers(delete_entity_systems);
+    graph.add_node("write_node", write_node);
+    graph.add_node("read_node", read_node);
 
-    let asset_loaded = Observers::<AssetLoaded<TextFile>>::new().add_system(
-        |ids: &[AssetId], assets: &Assets<TextFile>| {
-            for id in ids {
-                println!("Asset Loaded: {:?}", assets.get(id).unwrap().contents());
-            }
-        },
-    );
+    graph.build_hierarchy();
 
-    game.add_observers(asset_loaded);
-
-    game.run();
+    for (row, ids) in graph.hierarchy().iter().enumerate() {
+        println!("Row: {}", row);
+        for id in ids {
+            let node = graph.node::<TestNode>(*id).unwrap();
+            println!("Node: {:?}", &node.name);
+        }
+    }
 }

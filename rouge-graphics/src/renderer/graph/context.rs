@@ -13,17 +13,12 @@ pub struct RenderContext<'a> {
 }
 
 impl<'a> RenderContext<'a> {
-    pub fn new(
-        world: &'a World,
-        resources: &'a GraphResources,
-        device: &'a RenderDevice,
-        buffers: &Arc<Mutex<Vec<wgpu::CommandBuffer>>>,
-    ) -> Self {
+    pub fn new(world: &'a World, resources: &'a GraphResources, device: &'a RenderDevice) -> Self {
         Self {
             world,
             resources,
             device,
-            buffers: buffers.clone(),
+            buffers: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -47,5 +42,9 @@ impl<'a> RenderContext<'a> {
     pub fn submit(&self, encoder: wgpu::CommandEncoder) {
         let mut buffers = self.buffers.lock().unwrap();
         buffers.push(encoder.finish());
+    }
+
+    pub(crate) fn buffers(&self) -> Arc<Mutex<Vec<wgpu::CommandBuffer>>> {
+        self.buffers.clone()
     }
 }

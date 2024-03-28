@@ -4,15 +4,13 @@ use crate::{
     resources::shader::Shader,
 };
 use rouge_asset::{storage::Assets, AssetId};
-use rouge_core::ResourceId;
-use rouge_ecs::{ArgItem, SystemArg, World};
+use rouge_ecs::{meta::AccessMeta, ArgItem, SystemArg, World};
 
 pub trait ComputeExecutor: Send + Sync + 'static {
     type Arg: SystemArg;
 
     fn shader(&self) -> AssetId;
-    fn reads(&self) -> Vec<ResourceId>;
-    fn writes(&self) -> Vec<ResourceId>;
+    fn access(&self) -> Vec<AccessMeta>;
     fn execute(
         &self,
         resources: &GraphResources,
@@ -24,16 +22,17 @@ pub trait ComputeExecutor: Send + Sync + 'static {
 pub struct ComputeExecutorInstance {
     execute: Box<dyn Fn(&World, &GraphResources, wgpu::ComputePass) + Send + Sync>,
     shader: AssetId,
-    reads: Vec<ResourceId>,
-    writes: Vec<ResourceId>,
+    access: Vec<AccessMeta>,
 }
 
 impl ComputeExecutorInstance {
     pub fn new<'a, E: ComputeExecutor>(executor: E) -> Self {
+        let mut access = executor.access();
+        access.append(&mut E::Arg::metas());
+
         Self {
             shader: executor.shader(),
-            reads: executor.reads(),
-            writes: executor.writes(),
+            access,
             execute: Box::new(move |world, resources, pass| {
                 let arg = E::Arg::get(world);
                 executor.execute(resources, arg, pass);
@@ -45,14 +44,10 @@ impl ComputeExecutorInstance {
         self.shader
     }
 
-    pub fn reads(&self) -> Vec<ResourceId> {
-        self.reads.clone()
+    pub fn access(&self) -> &[AccessMeta] {
+        &self.access
     }
-
-    pub fn writes(&self) -> Vec<ResourceId> {
-        self.writes.clone()
-    }
-
+    
     pub fn execute(&self, world: &World, resources: &GraphResources, pass: wgpu::ComputePass) {
         (self.execute)(world, resources, pass);
     }
@@ -80,14 +75,6 @@ impl ComputePass {
 }
 
 impl GraphNode for ComputePass {
-    fn reads(&self) -> Vec<ResourceId> {
-        self.executor.reads()
-    }
-
-    fn writes(&self) -> Vec<ResourceId> {
-        self.executor.writes()
-    }
-
     fn prepare(&mut self, ctx: RenderContext) {
         let device = ctx.device();
         let shader = ctx

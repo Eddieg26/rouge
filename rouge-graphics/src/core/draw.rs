@@ -1,6 +1,6 @@
 use rouge_ecs::macros::Resource;
 
-pub trait Partition<D: Draw>: Send + Sync + 'static {
+pub trait Partition<D>: Send + Sync + 'static {
     type Query;
 
     fn new() -> Self;

@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt::Debug};
+use std::{collections::HashMap, fmt::Debug, ops::{Index, IndexMut}};
 
 #[derive(Debug, Clone, Hash, Ord, PartialOrd, Eq, PartialEq)]
 pub struct SparseArray<V> {
@@ -236,6 +236,10 @@ where
         self.values.iter_mut().enumerate().filter_map(filter)
     }
 
+    pub fn index(&self, key: &K) -> Option<usize> {
+        self.map.get(key).copied()
+    }
+
     pub fn remove(&mut self, key: &K) -> Option<V> {
         if let Some(index) = self.map.remove(key) {
             let value = self.values.swap_remove(index);
@@ -263,6 +267,10 @@ where
 
     pub fn iter(&self) -> impl Iterator<Item = (&K, &V)> {
         self.keys.iter().zip(self.values.iter())
+    }
+
+    pub fn iter_rev(&self) -> impl Iterator<Item = (&K, &V)> {
+        self.keys.iter().rev().zip(self.values.iter().rev())
     }
 
     pub fn iter_mut(&mut self) -> impl Iterator<Item = (&K, &mut V)> {
@@ -408,6 +416,26 @@ where
         f.debug_map()
             .entries(self.keys.iter().zip(self.values.iter()))
             .finish()
+    }
+}
+
+impl<K, V> Index<&K> for SparseMap<K, V>
+where
+    K: Eq + std::hash::Hash + Clone,
+{
+    type Output = V;
+
+    fn index(&self, key: &K) -> &Self::Output {
+        self.get(key).expect("Key not found")
+    }
+}
+
+impl<K, V> IndexMut<&K> for SparseMap<K, V>
+where
+    K: Eq + std::hash::Hash + Clone,
+{
+    fn index_mut(&mut self, key: &K) -> &mut Self::Output {
+        self.get_mut(key).expect("Key not found")
     }
 }
 

@@ -10,6 +10,16 @@ pub struct TextureDesc {
     pub usage: wgpu::TextureUsages,
 }
 
+impl Default for TextureDesc {
+    fn default() -> Self {
+        Self {
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        }
+    }
+
+}
+
 pub struct GraphResources {
     textures: HashMap<ResourceId, GpuTexture>,
     buffers: HashMap<ResourceId, Box<dyn BaseBuffer>>,
@@ -60,9 +70,10 @@ impl GraphResources {
         self.buffers.insert(id, Box::new(buffer));
     }
 
-    pub fn create_texture(&mut self, id: impl Into<ResourceId>, desc: TextureDesc) {
+    pub fn create_texture(&mut self, id: impl Into<ResourceId>, desc: TextureDesc) -> ResourceId {
         let id = id.into();
         self.texture_descs.insert(id, desc);
+        id
     }
 
     pub(crate) fn build(&mut self, device: &wgpu::Device, width: u32, height: u32) {

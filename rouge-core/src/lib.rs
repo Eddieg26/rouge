@@ -9,7 +9,7 @@ pub enum Environment {
     Release,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ResourceId(u64);
 
 impl ResourceId {

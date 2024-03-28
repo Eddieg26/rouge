@@ -258,7 +258,13 @@ pub struct Observables {
 }
 
 impl Observables {
-    pub fn new(mode: RunMode) -> Self {
+    pub fn new() -> Self {
+        #[cfg(target_arch = "wasm32")]
+        let mode = RunMode::Sequential;
+
+        #[cfg(not(target_arch = "wasm32"))]
+        let mode = RunMode::Parallel;
+        
         Self {
             systems: SparseMap::new(),
             graph: ObserverGraph::new(),

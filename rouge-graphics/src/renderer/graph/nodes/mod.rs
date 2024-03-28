@@ -1,16 +1,52 @@
 use super::context::RenderContext;
-use rouge_core::ResourceId;
 use downcast_rs::{impl_downcast, Downcast};
+use rouge_core::ResourceId;
+use rouge_ecs::meta::AccessMeta;
 use std::hash::{Hash, Hasher};
 
 pub mod compute;
 pub mod render;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum RenderPhase {
     Process,
     PostProcess,
     Present,
+}
+
+impl RenderPhase {
+    pub fn iter() -> impl Iterator<Item = RenderPhase> {
+        RenderPhase::Process.into_iter()
+    }
+}
+
+impl From<usize> for RenderPhase {
+    fn from(value: usize) -> Self {
+        match value {
+            0 => RenderPhase::Process,
+            1 => RenderPhase::PostProcess,
+            2 => RenderPhase::Present,
+            _ => panic!("Invalid RenderPhase value"),
+        }
+    }
+}
+
+impl Iterator for RenderPhase {
+    type Item = RenderPhase;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            RenderPhase::Process => {
+                *self = RenderPhase::PostProcess;
+                Some(RenderPhase::Process)
+            }
+            RenderPhase::PostProcess => {
+                *self = RenderPhase::Present;
+                Some(RenderPhase::PostProcess)
+            }
+            RenderPhase::Present => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -24,13 +60,26 @@ impl NodeId {
     }
 }
 
+impl From<&str> for NodeId {
+    fn from(id: &str) -> Self {
+        Self::new(id)
+    }
+}
+
+impl From<&String> for NodeId {
+    fn from(id: &String) -> Self {
+        Self::new(id)
+    }
+}
+
 pub trait GraphNode: Downcast + Send + Sync + 'static {
     fn prepare(&mut self, _: RenderContext) {}
     fn execute(&self, ctx: RenderContext);
-    fn reads(&self) -> Vec<ResourceId>;
-    fn writes(&self) -> Vec<ResourceId>;
     fn phase(&self) -> RenderPhase {
         RenderPhase::Process
+    }
+    fn access(&self) -> Vec<AccessMeta> {
+        vec![]
     }
 }
 

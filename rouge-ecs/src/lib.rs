@@ -6,6 +6,7 @@ pub mod system;
 pub mod tasks;
 pub mod world;
 
+pub use rouge_core::*;
 pub use rouge_macros as macros;
 
 pub use archetype::*;

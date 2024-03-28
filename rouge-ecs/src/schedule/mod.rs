@@ -7,7 +7,7 @@ use std::any::{Any, TypeId};
 
 use self::{
     graph::SystemGraph,
-    runner::{ParallelRunner, ScheduleRunner},
+    runner::{ParallelRunner, RunMode, ScheduleRunner, SequentialRunner},
 };
 
 pub mod graph;
@@ -24,9 +24,18 @@ pub struct Schedule {
 
 impl Schedule {
     pub fn new() -> Self {
+        #[cfg(target_arch = "wasm32")]
+        let mode = RunMode::Sequential;
+
+        #[cfg(not(target_arch = "wasm32"))]
+        let mode = RunMode::Parallel;
+
         Self {
-            graph: SystemGraph::new(),
-            runner: Box::new(ParallelRunner),
+            graph: SystemGraph::new(mode),
+            runner: match mode {
+                RunMode::Parallel => Box::new(ParallelRunner),
+                RunMode::Sequential => Box::new(SequentialRunner),
+            },
         }
     }
 

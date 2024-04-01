@@ -1,3 +1,4 @@
+use super::ty::color::Color;
 use rouge_ecs::macros::Resource;
 
 pub trait Partition<D>: Send + Sync + 'static {
@@ -10,7 +11,9 @@ pub trait Partition<D>: Send + Sync + 'static {
 }
 
 pub trait Draw: Send + Sync + Sized + 'static {
+    const PRIORITY: u16 = 0;
     type Partition: Partition<Self>;
+    type Render: Render;
 }
 
 #[derive(Resource)]
@@ -55,5 +58,35 @@ impl<D: Draw> Partition<D> for Vec<D> {
 
     fn clear(&mut self) {
         self.clear();
+    }
+}
+
+pub trait Render: Send + Sync + 'static {
+    fn clear(&self) -> Option<Color>;
+    fn depth(&self) -> u32;
+    fn as_any(&self) -> &dyn std::any::Any;
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
+}
+
+#[derive(Resource)]
+pub struct Renders {
+    calls: Vec<Box<dyn Render>>,
+}
+
+impl Renders {
+    pub fn new() -> Self {
+        Self { calls: Vec::new() }
+    }
+
+    pub fn insert(&mut self, render: impl Render) {
+        self.calls.push(Box::new(render));
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &dyn Render> {
+        self.calls.iter().map(|r| &**r)
+    }
+
+    pub fn clear(&mut self) {
+        self.calls.clear();
     }
 }

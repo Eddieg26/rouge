@@ -1,5 +1,6 @@
 use rouge_core::primitives::Size;
 use rouge_ecs::macros::Resource;
+use wgpu::SurfaceTexture;
 
 #[derive(Resource)]
 pub struct RenderSurface {
@@ -113,5 +114,24 @@ impl RenderSurface {
         self.surface.configure(device, &config);
 
         self.size = size;
+    }
+}
+
+
+#[derive(Resource)]
+pub struct RenderSurfaceTexture {
+    texture: Option<SurfaceTexture>,
+}
+
+impl RenderSurfaceTexture {
+    pub fn set(&mut self, texture: SurfaceTexture) {
+        self.texture = Some(texture);
+    }
+
+    pub fn present(&mut self) -> Result<(), String> {
+        match self.texture.take() {
+            Some(texture) => Ok(texture.present()),
+            None => Err("No texture to present".to_string()),
+        }
     }
 }

@@ -183,3 +183,13 @@ impl Into<[f32; 3]> for Color {
         [self.r as f32, self.g as f32, self.b as f32]
     }
 }
+impl Into<wgpu::Color> for Color {
+    fn into(self) -> wgpu::Color {
+        wgpu::Color {
+            r: self.r,
+            g: self.g,
+            b: self.b,
+            a: self.a,
+        }
+    }
+}

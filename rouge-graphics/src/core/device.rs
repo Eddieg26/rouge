@@ -17,6 +17,7 @@ impl std::ops::Deref for RenderDevice {
     }
 }
 
+#[derive(Resource)]
 pub struct RenderQueue(wgpu::Queue);
 
 impl RenderQueue {

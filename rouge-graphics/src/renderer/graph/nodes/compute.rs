@@ -47,7 +47,7 @@ impl ComputeExecutorInstance {
     pub fn access(&self) -> &[AccessMeta] {
         &self.access
     }
-    
+
     pub fn execute(&self, world: &World, resources: &GraphResources, pass: wgpu::ComputePass) {
         (self.execute)(world, resources, pass);
     }
@@ -76,6 +76,10 @@ impl ComputePass {
 
 impl GraphNode for ComputePass {
     fn prepare(&mut self, ctx: RenderContext) {
+        if self.pipeline.is_some() {
+            return;
+        }
+
         let device = ctx.device();
         let shader = ctx
             .system_arg::<&Assets<Shader>>()

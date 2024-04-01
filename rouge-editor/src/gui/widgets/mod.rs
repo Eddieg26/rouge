@@ -64,6 +64,18 @@ impl View {
         self.element.as_any().downcast_ref::<E>()
     }
 
+    pub fn child(&self, index: usize) -> Option<&View> {
+        self.children.get(index)
+    }
+
+    pub fn child_mut(&mut self, index: usize) -> Option<&mut View> {
+        self.children.get_mut(index)
+    }
+
+    pub fn children(&self) -> &[View] {
+        &self.children
+    }
+
     pub fn add_child(mut self, child: View) -> Self {
         self.children.push(child);
         self
@@ -93,6 +105,17 @@ impl View {
             .unwrap()
             .add_listener(listener);
         self
+    }
+
+    pub fn invoke<E: Event>(&self, event: &E) {
+        let event_type = EventType::new::<E>();
+        if let Some(listeners) = self.event_listeners.get(&event_type) {
+            listeners
+                .as_any()
+                .downcast_ref::<EventListeners<E>>()
+                .unwrap()
+                .invoke(event);
+        }
     }
 }
 

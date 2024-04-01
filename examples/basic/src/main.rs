@@ -15,7 +15,21 @@ use rouge_ecs::{
     Component, Entity, IntoSystem, ResourceId, World,
 };
 use rouge_game::game::{Game, PostInit, PostUpdate, Start, Update};
-use rouge_graphics::renderer::graph::{nodes::GraphNode, resources::TextureDesc, RenderGraph};
+use rouge_graphics::{
+    core::{
+        draw::{Draw, DrawCalls, Render},
+        ty::color::Color,
+    },
+    renderer::graph::{
+        nodes::{
+            render::{Attachment, RenderGroup, RenderPass, Subpass},
+            GraphNode,
+        },
+        resources::TextureDesc,
+        RenderGraph,
+    },
+    wgpu,
+};
 
 #[derive(Debug)]
 pub struct Player {
@@ -197,6 +211,56 @@ impl GraphNode for TestNode {
     }
 }
 
+pub struct Render3d {
+    position: glam::Vec3,
+    rotation: glam::Quat,
+    scale: glam::Vec3,
+    clear: Option<Color>,
+    depth: u32,
+}
+
+impl Render for Render3d {
+    fn clear(&self) -> Option<Color> {
+        self.clear
+    }
+
+    fn depth(&self) -> u32 {
+        self.depth
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+}
+
+pub struct Draw3d;
+
+impl Draw for Draw3d {
+    type Partition = Vec<Self>;
+
+    type Render = Render3d;
+}
+
+pub struct Draw3dGroup;
+
+impl RenderGroup<Draw3d> for Draw3dGroup {
+    type Arg = ();
+
+    fn render<'a>(
+        &self,
+        pass: &mut wgpu::RenderPass,
+        arg: rouge_ecs::ArgItem<'a, Self::Arg>,
+        render: &<Draw3d as Draw>::Render,
+        calls: &DrawCalls<Draw3d>,
+    ) {
+    
+    }
+}
+
 fn main() {
     let mut graph = RenderGraph::new();
 
@@ -206,6 +270,22 @@ fn main() {
 
     graph.add_node("write_node", write_node);
     graph.add_node("read_node", read_node);
+    graph.add_node(
+        "forward",
+        RenderPass::new()
+            .with_color(
+                Attachment::Surface,
+                None,
+                wgpu::StoreOp::Store,
+                Some(Color::black()),
+            )
+            .with_subpass(Subpass::new()),
+    );
+
+    graph
+        .node_mut::<RenderPass>("forward")
+        .unwrap()
+        .add_group(0, Draw3dGroup);
 
     graph.build_hierarchy();
 

@@ -44,7 +44,7 @@ impl<'a> RenderContext<'a> {
         buffers.push(encoder.finish());
     }
 
-    pub(crate) fn buffers(&self) -> Arc<Mutex<Vec<wgpu::CommandBuffer>>> {
-        self.buffers.clone()
+    pub (crate) fn collect(&self) -> Vec<wgpu::CommandBuffer> {
+        self.buffers.lock().unwrap().drain(..).collect()
     }
 }

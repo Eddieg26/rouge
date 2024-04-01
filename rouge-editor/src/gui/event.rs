@@ -1,6 +1,6 @@
 use std::hash::{Hash, Hasher};
 
-pub use Events::*;
+pub use events::*;
 
 pub trait Event: 'static {}
 
@@ -31,7 +31,7 @@ impl<E: Event> EventListeners<E> {
         self.listeners.push(Box::new(listener));
     }
 
-    pub fn notify(&self, event: &E) {
+    pub fn invoke(&self, event: &E) {
         for listener in &self.listeners {
             listener(event);
         }
@@ -53,7 +53,7 @@ impl<E: Event> BaseListeners for EventListeners<E> {
     }
 }
 
-pub mod Events {
+pub mod events {
     use rouge_window::window::KeyCode;
 
     use super::Event;
@@ -61,6 +61,13 @@ pub mod Events {
     pub struct Click;
 
     impl Event for Click {}
+
+    pub struct MouseMove {
+        pub x: f32,
+        pub y: f32,
+    }
+
+    impl Event for MouseMove {}
 
     pub struct Hover;
 

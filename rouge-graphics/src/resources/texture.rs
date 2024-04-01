@@ -65,141 +65,82 @@ pub struct TextureInfo {
 }
 
 impl TextureInfo {
-    pub fn new(
-        width: u32,
-        height: u32,
-        depth: u32,
-        dimension: Dimension,
-        format: Format,
-        filter_mode: FilterMode,
-        wrap_mode: WrapMode,
-        mipmaps: bool,
-        pixels: Vec<u8>,
-    ) -> Self {
+    pub fn new(width: u32, height: u32) -> Self {
         Self {
             width,
             height,
-            depth,
-            dimension,
-            format,
-            filter_mode,
-            wrap_mode,
-            mipmaps,
-            pixels,
+            depth: 1,
+            dimension: Dimension::D2,
+            format: Format::Rgba8UnormSrgb,
+            filter_mode: FilterMode::Bilinear,
+            wrap_mode: WrapMode::Clamp,
+            mipmaps: false,
+            pixels: Vec::new(),
         }
     }
 
-    pub fn d2(
-        width: u32,
-        height: u32,
-        format: Format,
-        filter_mode: FilterMode,
-        wrap_mode: WrapMode,
-        mipmaps: bool,
-        pixels: Vec<u8>,
-    ) -> Self {
-        Self::new(
-            width,
-            height,
-            1,
-            Dimension::D2,
-            format,
-            filter_mode,
-            wrap_mode,
-            mipmaps,
-            pixels,
-        )
+    pub fn width(mut self, width: u32) -> Self {
+        self.width = width;
+        self
     }
 
-    pub fn d3(
-        width: u32,
-        height: u32,
-        depth: u32,
-        format: Format,
-        filter_mode: FilterMode,
-        wrap_mode: WrapMode,
-        mipmaps: bool,
-        pixels: Vec<u8>,
-    ) -> Self {
-        Self::new(
-            width,
-            height,
-            depth,
-            Dimension::D3,
-            format,
-            filter_mode,
-            wrap_mode,
-            mipmaps,
-            pixels,
-        )
+    pub fn height(mut self, height: u32) -> Self {
+        self.height = height;
+        self
     }
 
-    pub fn d2_array(
-        width: u32,
-        height: u32,
-        depth: u32,
-        format: Format,
-        filter_mode: FilterMode,
-        wrap_mode: WrapMode,
-        mipmaps: bool,
-        pixels: Vec<u8>,
-    ) -> Self {
-        Self::new(
-            width,
-            height,
-            depth,
-            Dimension::D2,
-            format,
-            filter_mode,
-            wrap_mode,
-            mipmaps,
-            pixels,
-        )
+    pub fn depth(mut self, depth: u32) -> Self {
+        self.depth = depth;
+        self
     }
 
-    pub fn cube(
-        width: u32,
-        height: u32,
-        format: Format,
-        filter_mode: FilterMode,
-        wrap_mode: WrapMode,
-        mipmaps: bool,
-        pixels: Vec<u8>,
-    ) -> Self {
-        Self::new(
-            width,
-            height,
-            1,
-            Dimension::D2,
-            format,
-            filter_mode,
-            wrap_mode,
-            mipmaps,
-            pixels,
-        )
+    pub fn dimension(mut self, dimension: Dimension) -> Self {
+        self.dimension = dimension;
+        self
     }
 
-    pub fn cube_array(
-        width: u32,
-        height: u32,
-        depth: u32,
-        format: Format,
-        filter_mode: FilterMode,
-        wrap_mode: WrapMode,
-        mipmaps: bool,
-        pixels: Vec<u8>,
-    ) -> Self {
-        Self::new(
-            width,
-            height,
-            depth,
-            Dimension::D2,
-            format,
-            filter_mode,
-            wrap_mode,
-            mipmaps,
-            pixels,
-        )
+    pub fn format(mut self, format: Format) -> Self {
+        self.format = format;
+        self
+    }
+
+    pub fn filter_mode(mut self, filter_mode: FilterMode) -> Self {
+        self.filter_mode = filter_mode;
+        self
+    }
+
+    pub fn wrap_mode(mut self, wrap_mode: WrapMode) -> Self {
+        self.wrap_mode = wrap_mode;
+        self
+    }
+
+    pub fn mipmaps(mut self, mipmaps: bool) -> Self {
+        self.mipmaps = mipmaps;
+        self
+    }
+
+    pub fn pixels(mut self, pixels: Vec<u8>) -> Self {
+        self.pixels = pixels;
+        self
+    }
+
+    pub fn descriptor(&self) -> wgpu::TextureDescriptor {
+        wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d {
+                width: self.width,
+                height: self.height,
+                depth_or_array_layers: self.depth,
+            },
+            mip_level_count: if self.mipmaps { 1 } else { 0 },
+            sample_count: 1,
+            dimension: self.dimension,
+            format: self.format,
+            usage: wgpu::TextureUsages::COPY_DST
+                | wgpu::TextureUsages::COPY_SRC
+                | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        }
     }
 }
 
@@ -277,117 +218,128 @@ impl Texture for Texture2D {
     }
 }
 
-pub struct GpuTexture {
-    texture: Option<wgpu::Texture>,
-    view: wgpu::TextureView,
-    sampler: Option<wgpu::Sampler>,
+#[derive(Resource)]
+pub struct TextureViews {
+    views: SparseMap<ResourceId, wgpu::TextureView>,
 }
 
-impl GpuTexture {
-    pub fn new<T: Texture>(device: &wgpu::Device, texture: &T) -> Self {
-        let gpu_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: None,
-            size: wgpu::Extent3d {
-                width: texture.width(),
-                height: texture.height(),
-                depth_or_array_layers: texture.depth(),
-            },
-            mip_level_count: if texture.mipmaps() {
-                1 + (texture.width() as f32).log2() as u32
-            } else {
-                1
-            },
-            sample_count: 1,
-            dimension: texture.dimension(),
-            format: texture.format(),
-            usage: wgpu::TextureUsages::TEXTURE_BINDING
-                | wgpu::TextureUsages::COPY_DST
-                | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
-
-        let view = gpu_texture.create_view(&wgpu::TextureViewDescriptor::default());
-
-        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: None,
-            address_mode_u: texture.wrap_mode().into(),
-            address_mode_v: texture.wrap_mode().into(),
-            address_mode_w: texture.wrap_mode().into(),
-            mag_filter: texture.filter_mode().into(),
-            min_filter: texture.filter_mode().into(),
-            mipmap_filter: texture.filter_mode().into(),
-            lod_min_clamp: 0.0,
-            lod_max_clamp: 100.0,
-            compare: None,
-            anisotropy_clamp: 1,
-            border_color: None,
-        });
-
+impl TextureViews {
+    pub fn new() -> Self {
         Self {
-            texture: Some(gpu_texture),
-            view,
-            sampler: Some(sampler),
+            views: SparseMap::new(),
         }
     }
 
-    pub fn from_texture(texture: &wgpu::Texture, desc: &wgpu::TextureViewDescriptor) -> Self {
-        let view = texture.create_view(desc);
-
-        Self {
-            texture: None,
-            view,
-            sampler: None,
-        }
+    pub fn insert(&mut self, id: ResourceId, view: wgpu::TextureView) {
+        self.views.insert(id, view);
     }
 
-    pub fn with_sampler(mut self, sampler: wgpu::Sampler) -> Self {
-        self.sampler = Some(sampler);
-        self
+    pub fn get(&self, id: impl Into<ResourceId>) -> Option<&wgpu::TextureView> {
+        self.views.get(&id.into())
     }
 
-    pub fn texture(&self) -> Option<&wgpu::Texture> {
-        self.texture.as_ref()
+    pub fn remove(&mut self, id: impl Into<ResourceId>) -> Option<wgpu::TextureView> {
+        self.views.remove(&id.into())
     }
 
-    pub fn view(&self) -> &wgpu::TextureView {
-        &self.view
+    pub fn contains(&self, id: impl Into<ResourceId>) -> bool {
+        self.views.contains(&id.into())
     }
 
-    pub fn sampler(&self) -> Option<&wgpu::Sampler> {
-        self.sampler.as_ref()
+    pub fn clear(&mut self) {
+        self.views.clear();
     }
 }
 
 #[derive(Resource)]
-pub struct Textures {
-    textures: SparseMap<ResourceId, GpuTexture>,
+pub struct Samplers {
+    samplers: SparseMap<ResourceId, wgpu::Sampler>,
 }
 
-impl Textures {
+impl Samplers {
     pub fn new() -> Self {
         Self {
-            textures: SparseMap::new(),
+            samplers: SparseMap::new(),
         }
     }
 
-    pub fn insert<T: Texture>(&mut self, device: &wgpu::Device, id: ResourceId, texture: &T) {
-        let gpu_texture = GpuTexture::new(device, texture);
-        self.textures.insert(id, gpu_texture);
+    pub fn insert(&mut self, id: ResourceId, sampler: wgpu::Sampler) {
+        self.samplers.insert(id, sampler);
     }
 
-    pub fn get(&self, id: impl Into<ResourceId>) -> Option<&GpuTexture> {
-        self.textures.get(&id.into())
+    pub fn get(&self, id: impl Into<ResourceId>) -> Option<&wgpu::Sampler> {
+        self.samplers.get(&id.into())
     }
 
-    pub fn remove(&mut self, id: impl Into<ResourceId>) -> Option<GpuTexture> {
-        self.textures.remove(&id.into())
+    pub fn remove(&mut self, id: impl Into<ResourceId>) -> Option<wgpu::Sampler> {
+        self.samplers.remove(&id.into())
     }
 
     pub fn contains(&self, id: impl Into<ResourceId>) -> bool {
-        self.textures.contains(&id.into())
+        self.samplers.contains(&id.into())
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (&ResourceId, &GpuTexture)> {
-        self.textures.iter()
+    pub fn clear(&mut self) {
+        self.samplers.clear();
+    }
+}
+
+#[derive(Resource)]
+pub struct DepthTextures {
+    depths: SparseMap<u32, usize>,
+}
+
+impl DepthTextures {
+    pub const ROOT_NAME: &'static str = "Depth_Texture_";
+
+    pub fn new() -> Self {
+        Self {
+            depths: SparseMap::new(),
+        }
+    }
+
+    pub fn texture_id(depth: u32) -> ResourceId {
+        ResourceId::from(Self::ROOT_NAME.to_string() + &depth.to_string())
+    }
+
+    pub fn insert(&mut self, depth: u32) {
+        if let Some(count) = self.depths.get_mut(&depth) {
+            *count += 1;
+        } else {
+            self.depths.insert(depth, 1);
+        }
+    }
+
+    pub fn remove(&mut self, depth: u32) {
+        self.depths.remove(&depth);
+    }
+
+    pub fn contains(&self, depth: u32) -> bool {
+        self.depths.contains(&depth)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&u32, &usize)> {
+        self.depths.iter()
+    }
+
+    pub fn reset(&mut self) {
+        for (_, count) in self.depths.iter_mut() {
+            *count = 0;
+        }
+    }
+
+    pub fn retain(&mut self) -> Vec<u32> {
+        let mut depths = Vec::new();
+
+        self.depths.retain(|depth, count| {
+            if *count == 0 {
+                depths.push(*depth);
+                false
+            } else {
+                true
+            }
+        });
+
+        depths
     }
 }

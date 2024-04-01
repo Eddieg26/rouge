@@ -13,3 +13,4 @@ rouge-window = { path = "../../rouge-window", version = "0.1.0" }
 rouge-asset = { path = "../../rouge-asset", version = "0.1.0" }
 rouge-graphics = { path = "../../rouge-graphics", version = "0.1.0" }
 toml = "0.8.9"
+glam = "0.27.0"

@@ -1,4 +1,4 @@
-use crate::resources::{buffer::BaseBuffer, texture::GpuTexture};
+use crate::resources::buffer::BaseBuffer;
 use rouge_core::ResourceId;
 use std::collections::HashMap;
 
@@ -17,18 +17,18 @@ impl Default for TextureDesc {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
         }
     }
-
 }
 
 pub struct GraphResources {
-    textures: HashMap<ResourceId, GpuTexture>,
+    textures: HashMap<ResourceId, wgpu::TextureView>,
     buffers: HashMap<ResourceId, Box<dyn BaseBuffer>>,
     texture_descs: HashMap<ResourceId, TextureDesc>,
 }
 
 impl GraphResources {
-    pub const SURFACE: &'static str = "surface";
-
+    pub const SURFACE_ID: &'static str = "surface";
+    pub const SURFACE_DEPTH_ID: &'static str = "surface_depth";
+    
     pub fn new() -> Self {
         Self {
             textures: HashMap::new(),
@@ -37,12 +37,22 @@ impl GraphResources {
         }
     }
 
-    pub fn texture(&self, id: impl Into<ResourceId>) -> &GpuTexture {
+    pub fn texture(&self, id: impl Into<ResourceId>) -> Option<&wgpu::TextureView> {
+        let id = id.into();
+        self.textures.get(&id)
+    }
+
+    pub fn texture_unchecked(&self, id: impl Into<ResourceId>) -> &wgpu::TextureView {
         let id = id.into();
         self.textures.get(&id).expect("Texture not found")
     }
 
-    pub fn buffer(&self, id: impl Into<ResourceId>) -> &dyn BaseBuffer {
+    pub fn buffer(&self, id: impl Into<ResourceId>) -> Option<&dyn BaseBuffer> {
+        let id = id.into();
+        self.buffers.get(&id).map(|b| &**b)
+    }
+
+    pub fn buffer_unchecked(&self, id: impl Into<ResourceId>) -> &dyn BaseBuffer {
         let id = id.into();
         self.buffers
             .get(&id)
@@ -50,17 +60,7 @@ impl GraphResources {
             .expect("Buffer not found")
     }
 
-    pub fn texture_checked(&self, id: impl Into<ResourceId>) -> Option<&GpuTexture> {
-        let id = id.into();
-        self.textures.get(&id)
-    }
-
-    pub fn buffer_checked(&self, id: impl Into<ResourceId>) -> Option<&dyn BaseBuffer> {
-        let id = id.into();
-        self.buffers.get(&id).map(|b| &**b)
-    }
-
-    pub fn import_texture(&mut self, id: impl Into<ResourceId>, texture: GpuTexture) {
+    pub fn import_texture(&mut self, id: impl Into<ResourceId>, texture: wgpu::TextureView) {
         let id = id.into();
         self.textures.insert(id, texture);
     }
@@ -68,6 +68,11 @@ impl GraphResources {
     pub fn import_buffer(&mut self, id: impl Into<ResourceId>, buffer: impl BaseBuffer) {
         let id = id.into();
         self.buffers.insert(id, Box::new(buffer));
+    }
+
+    pub fn remove_texture(&mut self, id: impl Into<ResourceId>) -> Option<wgpu::TextureView> {
+        let id = id.into();
+        self.textures.remove(&id)
     }
 
     pub fn create_texture(&mut self, id: impl Into<ResourceId>, desc: TextureDesc) -> ResourceId {
@@ -93,8 +98,7 @@ impl GraphResources {
                 view_formats: &[],
             });
 
-            let gpu_texture =
-                GpuTexture::from_texture(&texture, &wgpu::TextureViewDescriptor::default());
+            let gpu_texture = texture.create_view(&wgpu::TextureViewDescriptor::default());
 
             self.textures.insert(*id, gpu_texture);
         }

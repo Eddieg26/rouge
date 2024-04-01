@@ -1,4 +1,8 @@
-use std::{collections::HashMap, fmt::Debug, ops::{Index, IndexMut}};
+use std::{
+    collections::HashMap,
+    fmt::Debug,
+    ops::{Index, IndexMut},
+};
 
 #[derive(Debug, Clone, Hash, Ord, PartialOrd, Eq, PartialEq)]
 pub struct SparseArray<V> {
@@ -21,6 +25,10 @@ impl<V> SparseArray<V> {
             self.values.resize_with(index + 1, || None);
         }
         self.values[index] = Some(value);
+    }
+
+    pub fn push(&mut self, value: V) {
+        self.values.push(Some(value));
     }
 
     pub fn get(&self, index: usize) -> Option<&V> {
@@ -109,6 +117,13 @@ impl<V> SparseSet<V> {
 
             return None;
         }
+    }
+
+    pub fn push(&mut self, value: V) {
+        let index = self.values.len();
+        self.values.push(value);
+        self.indices.push(index);
+        self.array.insert(index, self.values.len() - 1);
     }
 
     pub fn get(&self, index: usize) -> Option<&V> {
@@ -348,6 +363,24 @@ where
         for (index, key) in old.iter().enumerate() {
             self.values.swap(index, *self.map.get(key).unwrap());
         }
+    }
+
+    pub fn retain(&mut self, mut f: impl FnMut(&K, &V) -> bool) {
+        let mut keys = Vec::new();
+        let mut values = Vec::new();
+        let mut map = HashMap::new();
+
+        for (key, index) in self.map.drain() {
+            if f(&key, &self.values[index]) {
+                keys.push(key.clone());
+                values.push(self.values.remove(index));
+                map.insert(key, values.len() - 1);
+            }
+        }
+
+        self.keys = keys;
+        self.values = values;
+        self.map = map;
     }
 
     pub fn into_immutable(self) -> ImmutableSparseMap<K, V> {

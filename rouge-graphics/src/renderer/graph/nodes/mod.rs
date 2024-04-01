@@ -1,17 +1,18 @@
 use super::context::RenderContext;
 use downcast_rs::{impl_downcast, Downcast};
-use rouge_core::ResourceId;
 use rouge_ecs::meta::AccessMeta;
 use std::hash::{Hash, Hasher};
 
 pub mod compute;
 pub mod render;
+pub mod present;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum RenderPhase {
     Process,
     PostProcess,
-    Present,
+    Finish,
+    Present
 }
 
 impl RenderPhase {
@@ -25,7 +26,8 @@ impl From<usize> for RenderPhase {
         match value {
             0 => RenderPhase::Process,
             1 => RenderPhase::PostProcess,
-            2 => RenderPhase::Present,
+            2 => RenderPhase::Finish,
+            3 => RenderPhase::Present,
             _ => panic!("Invalid RenderPhase value"),
         }
     }
@@ -41,9 +43,13 @@ impl Iterator for RenderPhase {
                 Some(RenderPhase::Process)
             }
             RenderPhase::PostProcess => {
-                *self = RenderPhase::Present;
+                *self = RenderPhase::Finish;
                 Some(RenderPhase::PostProcess)
             }
+            RenderPhase::Finish => {
+                *self = RenderPhase::Present;
+                Some(RenderPhase::Finish)
+            },
             RenderPhase::Present => None,
         }
     }

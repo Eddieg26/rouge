@@ -244,4 +244,13 @@ impl World {
         self.observers.build(self.system_meta.mode());
         self.observers.run(&self, &self.system_meta, invoked);
     }
+
+    #[inline]
+    pub fn flush_type(&mut self, ty: EventId) {
+        let mut invoked = self.events.invoked();
+        if invoked.shift_remove(&ty) {
+            self.observers.build(self.system_meta.mode());
+            self.observers.run(&self, &self.system_meta, vec![ty]);
+        }
+    }
 }

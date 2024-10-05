@@ -1,11 +1,7 @@
-use super::{
-    schedule::SystemGraph,
-    systems::{RunMode, SystemMeta},
-    IntoSystemConfigs, SystemConfig,
-};
+use super::{schedule::SystemGraph, systems::RunMode, IntoSystemConfigs, SystemConfig};
 use crate::{
     event::{Event, EventId},
-    world::{cell::WorldCell, registry::EventHooks, World},
+    world::{cell::WorldCell, registry::EventExtension},
 };
 use hashbrown::HashMap;
 use indexmap::IndexMap;
@@ -92,18 +88,15 @@ impl Observers {
         }
     }
 
-    pub fn run(
-        &self,
-        world: &World,
-        meta: &SystemMeta,
-        invoked: impl IntoIterator<Item = EventId>,
-    ) {
-        let world = WorldCell::from(world);
+    pub fn run(&self, world: WorldCell, invoked: impl IntoIterator<Item = EventId>) {
+        let meta = world.get().configs().meta();
         for ty in invoked {
             if let Some(observers) = self.observers.get(&ty) {
                 let event_meta = world.get().event_meta(&ty);
                 meta.runner().run(&world, &[observers]);
-                event_meta.hooks_as::<EventHooks>().clear(world.get_mut());
+                event_meta
+                    .extension_as::<EventExtension>()
+                    .clear(world.get_mut());
             }
         }
     }

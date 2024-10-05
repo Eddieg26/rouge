@@ -10,11 +10,12 @@ use crate::{
     system::{
         observer::Observers,
         schedule::{Phase, PhaseId},
-        systems::{Global, RunMode, SystemConfigs, SystemMeta, Systems},
+        systems::{Global, RunMode, SystemConfigs, Systems},
         IntoSystemConfigs,
     },
 };
 use action::WorldActions;
+use cell::WorldCell;
 use id::WorldId;
 use registry::{Metadata, Registry};
 
@@ -33,8 +34,7 @@ pub struct World {
     actions: WorldActions,
     resources: Resources<true>,
     non_send_resources: Resources<false>,
-    system_meta: SystemMeta,
-    system_configs: SystemConfigs,
+    configs: SystemConfigs,
     systems: Option<Systems>,
     observers: Observers,
 }
@@ -50,8 +50,7 @@ impl World {
             actions: WorldActions::default(),
             resources: Resources::new(),
             non_send_resources: Resources::new(),
-            system_meta: SystemMeta::new(RunMode::Parallel),
-            system_configs: SystemConfigs::new(),
+            configs: SystemConfigs::new(RunMode::Parallel),
             systems: Some(Systems::new()),
             observers: Observers::new(),
         }
@@ -88,13 +87,23 @@ impl World {
     }
 
     #[inline]
+    pub fn registry(&self) -> &Registry {
+        &self.registry
+    }
+
+    #[inline]
     pub fn event_meta(&self, ty: &EventId) -> &Metadata {
         self.registry.get(ty)
     }
 
     #[inline]
-    pub fn system_meta(&self) -> &SystemMeta {
-        &self.system_meta
+    pub fn configs(&self) -> &SystemConfigs {
+        &self.configs
+    }
+
+    #[inline]
+    pub fn mode(&self) -> RunMode {
+        self.configs.mode()
     }
 
     #[inline]
@@ -201,7 +210,7 @@ impl World {
         phase: impl Phase,
         systems: impl IntoSystemConfigs<M>,
     ) -> &mut Self {
-        self.system_configs
+        self.configs
             .add_systems(Type::of::<Global>(), phase, systems);
         self
     }
@@ -216,9 +225,11 @@ impl World {
     pub fn run(&mut self, phase: impl Phase) {
         let mut systems = self.systems.take().unwrap();
 
-        systems.update(self.system_meta.mode(), &mut self.system_configs);
+        if !self.configs.is_empty() {
+            systems.add_graphs(self.configs.build_graphs());
+        }
 
-        systems.run(phase, &self);
+        systems.run(phase, WorldCell::from(self as &Self));
         self.systems.replace(systems);
     }
 
@@ -236,16 +247,16 @@ impl World {
             invoked
         };
 
-        self.observers.build(self.system_meta.mode());
-        self.observers.run(&self, &self.system_meta, invoked);
+        self.observers.build(self.mode());
+        self.observers.run(WorldCell::from(self as &Self), invoked);
     }
 
     #[inline]
     pub fn flush_type(&mut self, ty: EventId) {
         let mut invoked = self.events.invoked();
         if invoked.shift_remove(&ty) {
-            self.observers.build(self.system_meta.mode());
-            self.observers.run(&self, &self.system_meta, vec![ty]);
+            self.observers.build(self.mode());
+            self.observers.run(WorldCell::from(self as &Self), vec![ty]);
         }
     }
 }
@@ -258,7 +269,13 @@ impl World {
         entity
     }
 
-    pub fn despawn(&mut self, entity: Entity) {}
+    pub fn despawn(&mut self, entity: Entity) -> Option<Row> {
+        if self.entities.despawn(&entity) {
+            self.archetypes.remove_entity(entity).map(|(_, row)| row)
+        } else {
+            None
+        }
+    }
 
     pub fn has_component<C: Component>(&self, entity: Entity) -> bool {
         self.archetypes.has_component::<C>(entity)

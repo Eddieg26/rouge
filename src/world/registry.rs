@@ -7,19 +7,19 @@ use crate::{
 use indexmap::IndexMap;
 use std::{alloc::Layout, any::TypeId, sync::Arc};
 
-pub trait MetadataHooks: downcast_rs::Downcast + 'static {}
-downcast_rs::impl_downcast!(MetadataHooks);
+pub trait MetadataExtension: downcast_rs::Downcast + 'static {}
+downcast_rs::impl_downcast!(MetadataExtension);
 
-impl MetadataHooks for () {}
+impl MetadataExtension for () {}
 
 #[derive(Clone, Copy)]
-pub struct ComponentHooks {
+pub struct ComponentExtension {
     on_added: fn(&mut World, Entity),
-    on_removed: fn(&mut World, Entity),
+    on_removed: fn(&mut World, Entity, ColumnCell),
     on_replaced: fn(&mut World, Entity, ColumnCell),
 }
 
-impl ComponentHooks {
+impl ComponentExtension {
     pub fn new<C: Component>() -> Self {
         Self {
             on_added: |world, entity| {
@@ -27,10 +27,13 @@ impl ComponentHooks {
                     .resource_mut::<Events<ComponentUpdate<C>>>()
                     .add(ComponentUpdate::Added { entity });
             },
-            on_removed: |world, entity| {
+            on_removed: |world, entity, component| {
                 world
                     .resource_mut::<Events<ComponentUpdate<C>>>()
-                    .add(ComponentUpdate::Removed { entity });
+                    .add(ComponentUpdate::Removed {
+                        entity,
+                        component: component.into(),
+                    });
             },
             on_replaced: |world, entity, component| {
                 world
@@ -49,8 +52,8 @@ impl ComponentHooks {
     }
 
     #[inline]
-    pub fn on_removed(&self, world: &mut World, entity: Entity) {
-        (self.on_removed)(world, entity)
+    pub fn on_removed(&self, world: &mut World, entity: Entity, component: ColumnCell) {
+        (self.on_removed)(world, entity, component)
     }
 
     #[inline]
@@ -59,14 +62,14 @@ impl ComponentHooks {
     }
 }
 
-impl MetadataHooks for ComponentHooks {}
+impl MetadataExtension for ComponentExtension {}
 
 #[derive(Clone, Copy)]
-pub struct EventHooks {
+pub struct EventExtension {
     clear: fn(&mut World),
 }
 
-impl EventHooks {
+impl EventExtension {
     pub fn new<E: Event>() -> Self {
         Self {
             clear: |world| world.resource_mut::<Events<E>>().clear(),
@@ -78,23 +81,23 @@ impl EventHooks {
     }
 }
 
-impl MetadataHooks for EventHooks {}
+impl MetadataExtension for EventExtension {}
 
 pub struct Metadata {
     name: &'static str,
     layout: Layout,
     type_id: TypeId,
-    hooks: Arc<dyn MetadataHooks>,
+    extension: Arc<dyn MetadataExtension>,
 }
 
 impl Metadata {
     #[inline]
-    pub fn new<T: 'static>(hooks: impl MetadataHooks) -> Self {
+    pub fn new<T: 'static>(extension: impl MetadataExtension) -> Self {
         Self {
             name: std::any::type_name::<T>(),
             layout: Layout::new::<T>(),
             type_id: TypeId::of::<T>(),
-            hooks: Arc::new(hooks),
+            extension: Arc::new(extension),
         }
     }
 
@@ -114,14 +117,14 @@ impl Metadata {
     }
 
     #[inline]
-    pub fn hooks(&self) -> &Arc<dyn MetadataHooks> {
-        &self.hooks
+    pub fn extension(&self) -> &Arc<dyn MetadataExtension> {
+        &self.extension
     }
 
     #[inline]
-    pub fn hooks_as<T: MetadataHooks>(&self) -> &T {
-        self.hooks.downcast_ref().expect(&format!(
-            "Hooks type mismatch: expected {}, got {}",
+    pub fn extension_as<T: MetadataExtension>(&self) -> &T {
+        self.extension.downcast_ref().expect(&format!(
+            "Extension type mismatch: expected {}, got {}",
             std::any::type_name::<T>(),
             self.name
         ))
@@ -147,13 +150,13 @@ impl Registry {
             .expect(&format!("Type not registered: {:?}", ty))
     }
 
-    pub fn get_hooks<T: MetadataHooks>(&self, ty: &Type) -> &T {
-        self.get(ty).hooks_as()
+    pub fn get_extension<T: MetadataExtension>(&self, ty: &Type) -> &T {
+        self.get(ty).extension_as()
     }
 
     #[inline]
     pub fn register_component<C: Component>(&mut self) -> Type {
-        self.register::<C>(ComponentHooks::new::<C>())
+        self.register::<C>(ComponentExtension::new::<C>())
     }
 
     #[inline]
@@ -163,7 +166,7 @@ impl Registry {
 
     #[inline]
     pub fn register_event<E: Event>(&mut self) -> Type {
-        self.register::<E>(EventHooks::new::<E>())
+        self.register::<E>(EventExtension::new::<E>())
     }
 
     #[inline]
@@ -178,7 +181,7 @@ impl Registry {
         self.metadatas.len()
     }
 
-    fn register<T: 'static>(&mut self, hooks: impl MetadataHooks) -> Type {
+    fn register<T: 'static>(&mut self, hooks: impl MetadataExtension) -> Type {
         let ty = Type::of::<T>();
         let metadata = Metadata::new::<T>(hooks);
         self.metadatas.insert(ty, metadata);

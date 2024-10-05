@@ -3,13 +3,13 @@ use crate::system::SystemArg;
 use std::sync::{Arc, Mutex};
 
 pub trait WorldAction: Send + Sync + 'static {
-    fn execute(self, world: &mut World);
+    fn execute(self, world: &mut World) -> Option<()>;
 }
 
-pub struct WorldActionFn(Box<dyn FnOnce(&mut World) + Send>);
+pub struct WorldActionFn(Box<dyn FnOnce(&mut World) -> Option<()> + Send>);
 impl WorldActionFn {
     pub fn execute(self, world: &mut World) {
-        (self.0)(world)
+        (self.0)(world);
     }
 }
 impl<W: WorldAction> From<W> for WorldActionFn {

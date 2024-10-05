@@ -16,8 +16,9 @@ impl Event for TestEvent {}
 pub struct TestAction;
 
 impl WorldAction for TestAction {
-    fn execute(self, _: &mut world::World) {
+    fn execute(self, _: &mut world::World) -> Option<()> {
         println!("Test Action!");
+        Some(())
     }
 }
 

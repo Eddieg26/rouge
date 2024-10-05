@@ -5,11 +5,7 @@ use super::{
     },
     IntoSystemConfigs,
 };
-use crate::{
-    core::Type,
-    task::ScopedTaskPool,
-    world::{cell::WorldCell, World},
-};
+use crate::{core::Type, task::ScopedTaskPool, world::cell::WorldCell};
 use indexmap::IndexMap;
 use std::{
     num::NonZero,
@@ -22,14 +18,27 @@ impl SystemGroup for Global {}
 
 pub struct SystemConfigs {
     configs: IndexMap<Type, PhaseSystemConfigs>,
+    meta: SystemMeta,
 }
 
 impl SystemConfigs {
-    pub fn new() -> Self {
+    pub fn new(mode: RunMode) -> Self {
         let mut configs = IndexMap::new();
         configs.insert(Type::of::<Global>(), PhaseSystemConfigs::new());
 
-        Self { configs }
+        Self {
+            configs,
+            meta: SystemMeta::new(mode),
+        }
+    }
+
+    #[inline]
+    pub fn meta(&self) -> &SystemMeta {
+        &self.meta
+    }
+
+    pub fn mode(&self) -> RunMode {
+        self.meta.mode()
     }
 
     pub fn len(&self) -> usize {
@@ -56,11 +65,11 @@ impl SystemConfigs {
         self.configs.insert(Type::of::<G>(), configs);
     }
 
-    pub fn build_graphs(&mut self, mode: RunMode) -> SystemGraphs {
+    pub fn build_graphs(&mut self) -> SystemGraphs {
         let graphs = self
             .configs
             .drain(..)
-            .map(|(ty, c)| (ty, c.into_graphs(mode)));
+            .map(|(ty, c)| (ty, c.into_graphs(self.meta.mode())));
         SystemGraphs::with_graphs(graphs.collect())
     }
 }
@@ -250,18 +259,14 @@ impl Systems {
     }
 
     #[inline]
-    pub fn update(&mut self, mode: RunMode, configs: &mut SystemConfigs) {
-        if !configs.is_empty() {
-            let graphs = configs.build_graphs(mode);
-            self.graphs.add_graphs(graphs);
-        }
+    pub fn add_graphs(&mut self, graphs: SystemGraphs) {
+        self.graphs.add_graphs(graphs);
     }
 
     #[inline]
-    pub fn run(&self, phase: impl Phase, world: &World) {
-        let world = WorldCell::from(world);
-        let meta = world.get().system_meta().clone();
-        let runners = world.get().system_meta().phase_runners();
+    pub fn run(&self, phase: impl Phase, world: WorldCell) {
+        let meta = world.get().configs().meta();
+        let runners = meta.phase_runners();
         let mut runners = PhaseRunnersRef::new(runners.lock().unwrap());
         if phase.id() == self.schedule.id() {
             self.schedule.run(&world, self, &meta, &mut runners);

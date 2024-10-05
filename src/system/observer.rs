@@ -5,7 +5,7 @@ use super::{
 };
 use crate::{
     event::{Event, EventId},
-    world::{cell::WorldCell, World},
+    world::{cell::WorldCell, registry::EventHooks, World},
 };
 use hashbrown::HashMap;
 use indexmap::IndexMap;
@@ -103,7 +103,7 @@ impl Observers {
             if let Some(observers) = self.observers.get(&ty) {
                 let event_meta = world.get().event_meta(&ty);
                 meta.runner().run(&world, &[observers]);
-                event_meta.clear(world.get_mut());
+                event_meta.hooks_as::<EventHooks>().clear(world.get_mut());
             }
         }
     }

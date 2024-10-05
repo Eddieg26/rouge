@@ -1,6 +1,6 @@
 use super::{
     internal::blob::{BlobCell, Ptr},
-    registry::Type,
+    Type,
 };
 use hashbrown::HashMap;
 use std::{hash::Hash, thread::ThreadId};

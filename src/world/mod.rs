@@ -1,12 +1,12 @@
 use crate::{
     archetype::{table::Row, Archetypes, EntityMove},
     core::{
-        component::Component,
+        component::{Component, ComponentId},
         entity::{Entities, Entity},
-        registry::Type,
         resource::{Resource, Resources},
+        Type,
     },
-    event::{Event, EventId, EventMeta, EventRegistry, Events},
+    event::{Event, EventId, Events, InvokedEvents},
     system::{
         observer::Observers,
         schedule::{Phase, PhaseId},
@@ -15,19 +15,21 @@ use crate::{
     },
 };
 use action::WorldActions;
-use components::{ComponentId, ComponentMeta};
 use id::WorldId;
+use registry::{Metadata, Registry};
 
 pub mod action;
+pub mod builtin;
 pub mod cell;
-pub mod components;
 pub mod id;
+pub mod registry;
 
 pub struct World {
     id: WorldId,
     entities: Entities,
     archetypes: Archetypes,
-    events: EventRegistry,
+    registry: Registry,
+    events: InvokedEvents,
     actions: WorldActions,
     resources: Resources<true>,
     non_send_resources: Resources<false>,
@@ -43,7 +45,8 @@ impl World {
             id: WorldId::new(),
             entities: Entities::new(),
             archetypes: Archetypes::new(),
-            events: EventRegistry::new(),
+            registry: Registry::new(),
+            events: InvokedEvents::new(),
             actions: WorldActions::default(),
             resources: Resources::new(),
             non_send_resources: Resources::new(),
@@ -70,11 +73,6 @@ impl World {
     }
 
     #[inline]
-    pub fn events(&self) -> &EventRegistry {
-        &self.events
-    }
-
-    #[inline]
     pub fn actions(&self) -> &WorldActions {
         &self.actions
     }
@@ -90,16 +88,8 @@ impl World {
     }
 
     #[inline]
-    pub fn component_meta(&self, ty: &ComponentId) -> Option<&ComponentMeta> {
-        self.archetypes.components().get(ty)
-    }
-
-    #[inline]
-    pub fn event_meta(&self, ty: &EventId) -> EventMeta {
-        self.events
-            .get(ty)
-            .copied()
-            .expect(&format!("EventMeta not found for {:?}", ty))
+    pub fn event_meta(&self, ty: &EventId) -> &Metadata {
+        self.registry.get(ty)
     }
 
     #[inline]
@@ -149,41 +139,42 @@ impl World {
 
     #[inline]
     pub fn register<C: Component>(&mut self) -> &mut Self {
-        let ty = ComponentId::of::<C>();
-        self.archetypes
-            .components_mut()
-            .register(ty, ComponentMeta::new::<C>());
+        self.archetypes.register_component::<C>();
+        self.registry.register_component::<C>();
         self
     }
 
     #[inline]
     pub fn register_event<E: Event>(&mut self) -> &mut Self {
-        let events = self.events.register::<E>();
-        self.resources.add(events);
+        self.registry.register_event::<E>();
         self
     }
 
     #[inline]
     pub fn register_resource<R: Resource + Default + Send>(&mut self) -> &mut Self {
         self.resources.add(R::default());
+        self.registry.register_resource::<R>();
         self
     }
 
     #[inline]
     pub fn register_non_send_resource<R: Resource + Default>(&mut self) -> &mut Self {
         self.non_send_resources.add(R::default());
+        self.registry.register_resource::<R>();
         self
     }
 
     #[inline]
     pub fn add_resource<R: Resource + Send>(&mut self, resource: R) -> &mut Self {
         self.resources.add(resource);
+        self.registry.register_resource::<R>();
         self
     }
 
     #[inline]
     pub fn add_non_send_resource<R: Resource>(&mut self, resource: R) -> &mut Self {
         self.non_send_resources.add(resource);
+        self.registry.register_resource::<R>();
         self
     }
 

@@ -6,7 +6,7 @@ use super::{
     IntoSystemConfigs,
 };
 use crate::{
-    core::registry::Type,
+    core::Type,
     task::ScopedTaskPool,
     world::{cell::WorldCell, World},
 };

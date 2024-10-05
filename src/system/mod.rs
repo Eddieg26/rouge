@@ -1,6 +1,6 @@
 use crate::{
-    core::{entity::Entities, registry::Type, resource::ResourceId},
-    world::{cell::WorldCell, components::ComponentId, World},
+    core::{component::ComponentId, entity::Entities, resource::ResourceId, Type},
+    world::{cell::WorldCell, World},
 };
 use std::hash::Hash;
 

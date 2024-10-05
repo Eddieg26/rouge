@@ -3,7 +3,7 @@ use super::{
     IntoSystemConfigs, System, SystemConfig,
 };
 use crate::{
-    core::registry::Type,
+    core::Type,
     system::{AccessType, WorldAccess},
     world::cell::WorldCell,
 };

@@ -1,10 +1,7 @@
-use crate::{
-    core::{
-        component::Component,
-        entity::Entity,
-        internal::blob::{Blob, BlobCell},
-    },
-    world::components::ComponentId,
+use crate::core::{
+    component::{Component, ComponentId},
+    entity::Entity,
+    internal::blob::{Blob, BlobCell},
 };
 use indexmap::{IndexMap, IndexSet};
 

@@ -1,63 +1,14 @@
 use crate::{
-    core::{
-        registry::{Record, Registry, Type},
-        resource::Resource,
-    },
+    core::{resource::Resource, Type},
     system::schedule::PhaseId,
-    world::World,
 };
 use indexmap::{IndexMap, IndexSet};
 use std::{
-    alloc::Layout,
-    any::{type_name, TypeId},
     hash::Hash,
     sync::{Arc, Mutex, MutexGuard},
 };
 
 pub trait Event: Send + 'static {}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct EventMeta {
-    name: &'static str,
-    layout: Layout,
-    type_id: TypeId,
-    clear: fn(&mut World),
-}
-
-impl EventMeta {
-    pub fn new<E: Event>() -> Self {
-        let name = type_name::<E>();
-        let layout = Layout::new::<E>();
-        let type_id = TypeId::of::<E>();
-
-        Self {
-            name,
-            layout,
-            type_id,
-            clear: |world| world.resource_mut::<Events<E>>().clear(),
-        }
-    }
-
-    pub fn name(&self) -> &'static str {
-        self.name
-    }
-
-    pub fn layout(&self) -> &Layout {
-        &self.layout
-    }
-
-    pub fn type_id(&self) -> &TypeId {
-        &self.type_id
-    }
-
-    pub fn clear(&self, world: &mut World) {
-        (self.clear)(world)
-    }
-}
-
-impl Record for EventMeta {
-    type Type = EventId;
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct EventId(Type);
@@ -116,37 +67,18 @@ impl<'a, E: Event> IntoIterator for &'a Events<E> {
     }
 }
 
-pub struct EventRegistry {
-    events: Registry<EventMeta>,
+pub struct InvokedEvents {
     invoked: Arc<Mutex<IndexSet<EventId>>>,
     deferred: Arc<Mutex<IndexMap<PhaseId, IndexSet<EventId>>>>,
 }
 
-impl EventRegistry {
+impl InvokedEvents {
     #[inline]
     pub fn new() -> Self {
         Self {
-            events: Registry::new(),
             invoked: Arc::default(),
             deferred: Arc::default(),
         }
-    }
-
-    #[inline]
-    pub fn register<E: Event>(&mut self) -> Events<E> {
-        self.events
-            .register(EventId::of::<E>(), EventMeta::new::<E>());
-        Events::new(self.invoked.clone())
-    }
-
-    #[inline]
-    pub fn get(&self, ty: &EventId) -> Option<&EventMeta> {
-        self.events.get(ty)
-    }
-
-    #[inline]
-    pub fn iter(&self) -> impl Iterator<Item = &EventMeta> {
-        self.events.iter()
     }
 
     #[inline]

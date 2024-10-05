@@ -1,6 +1,7 @@
-use crate::{
-    core::{bitset::Bitset, component::Component, entity::Entity},
-    world::components::{ComponentId, Components},
+use crate::core::{
+    bitset::Bitset,
+    component::{Component, ComponentId},
+    entity::Entity,
 };
 use hashbrown::HashSet;
 use indexmap::{IndexMap, IndexSet};
@@ -8,78 +9,10 @@ use std::hash::Hash;
 use table::{ColumnCell, Row, Table};
 
 pub mod table;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct ArchetypeId(u32);
-impl ArchetypeId {
-    pub fn from_iter<'a>(value: impl IntoIterator<Item = &'a ComponentId>) -> Self {
-        let mut hasher = crc32fast::Hasher::new();
-        for component in value {
-            component.hash(&mut hasher);
-        }
-
-        Self(hasher.finalize())
-    }
-}
-
-impl From<&ComponentId> for ArchetypeId {
-    fn from(component: &ComponentId) -> Self {
-        Self(component.value())
-    }
-}
-
-impl From<&[ComponentId]> for ArchetypeId {
-    fn from(components: &[ComponentId]) -> Self {
-        let mut hasher = crc32fast::Hasher::new();
-        components.hash(&mut hasher);
-        Self(hasher.finalize())
-    }
-}
-
-impl From<&[&ComponentId]> for ArchetypeId {
-    fn from(components: &[&ComponentId]) -> Self {
-        let mut hasher = crc32fast::Hasher::new();
-        components.hash(&mut hasher);
-        Self(hasher.finalize())
-    }
-}
-
-pub struct Archetype {
-    id: ArchetypeId,
-    table: Table,
-    bits: Bitset,
-}
-
-impl Archetype {
-    pub fn new(id: ArchetypeId, table: Table, bits: Bitset) -> Self {
-        Self { id, table, bits }
-    }
-
-    pub fn id(&self) -> ArchetypeId {
-        self.id
-    }
-
-    pub fn table(&self) -> &Table {
-        &self.table
-    }
-
-    pub fn has_component(&self, component: usize) -> bool {
-        self.bits.get(component)
-    }
-
-    pub fn has_component_id(&self, component: &ComponentId) -> bool {
-        self.table.has_component(component)
-    }
-
-    pub fn bits(&self) -> &Bitset {
-        &self.bits
-    }
-}
-
 pub struct Archetypes {
     entities: IndexMap<Entity, ArchetypeId>,
     archetypes: IndexMap<ArchetypeId, Archetype>,
-    components: Components,
+    components: IndexSet<ComponentId>,
     root: ArchetypeId,
 }
 
@@ -93,7 +26,7 @@ impl Archetypes {
         Self {
             entities: IndexMap::new(),
             archetypes,
-            components: Components::new(),
+            components: IndexSet::new(),
             root,
         }
     }
@@ -101,16 +34,6 @@ impl Archetypes {
     #[inline]
     pub fn root(&self) -> ArchetypeId {
         self.root
-    }
-
-    #[inline]
-    pub fn components(&self) -> &Components {
-        &self.components
-    }
-
-    #[inline]
-    pub fn components_mut(&mut self) -> &mut Components {
-        &mut self.components
     }
 
     #[inline]
@@ -146,7 +69,7 @@ impl Archetypes {
 
     #[inline]
     pub fn has_component<C: Component>(&self, entity: Entity) -> bool {
-        let index = self.components.index(&ComponentId::of::<C>());
+        let index = self.component_index(&ComponentId::of::<C>());
         match self.entity_archetype(entity) {
             Some(archetype) => archetype.has_component(index),
             None => return false,
@@ -166,6 +89,18 @@ impl Archetypes {
         }
     }
 
+    #[inline]
+    pub fn component_index(&self, component: &ComponentId) -> usize {
+        self.components
+            .get_index_of(component)
+            .expect(&format!("Component not found: {:?}", component))
+    }
+
+    pub fn register_component<C: Component>(&mut self) {
+        let id = ComponentId::of::<C>();
+        self.components.insert(id);
+    }
+
     pub fn add_entity(&mut self, entity: Entity) {
         let row = Row::new();
 
@@ -176,7 +111,7 @@ impl Archetypes {
     pub fn query(&self, ids: &[ComponentId], exclude: &[ComponentId]) -> IndexSet<ArchetypeId> {
         let mut bits = Bitset::with_capacity(self.components.len());
         for component in ids {
-            let index = self.components.index(component);
+            let index = self.component_index(component);
             bits.set(index);
         }
 
@@ -295,7 +230,7 @@ impl Archetypes {
             let table = row.into_table(entity);
             let mut bits = Bitset::with_capacity(self.components.len());
             for component in table.components() {
-                let index = self.components.index(component);
+                let index = self.component_index(component);
                 bits.set(index);
             }
             let archetype = Archetype::new(id, table, bits);
@@ -303,6 +238,73 @@ impl Archetypes {
         }
 
         self.entities.insert(entity, id);
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ArchetypeId(u32);
+impl ArchetypeId {
+    pub fn from_iter<'a>(value: impl IntoIterator<Item = &'a ComponentId>) -> Self {
+        let mut hasher = crc32fast::Hasher::new();
+        for component in value {
+            component.hash(&mut hasher);
+        }
+
+        Self(hasher.finalize())
+    }
+}
+
+impl From<&ComponentId> for ArchetypeId {
+    fn from(component: &ComponentId) -> Self {
+        Self(component.value())
+    }
+}
+
+impl From<&[ComponentId]> for ArchetypeId {
+    fn from(components: &[ComponentId]) -> Self {
+        let mut hasher = crc32fast::Hasher::new();
+        components.hash(&mut hasher);
+        Self(hasher.finalize())
+    }
+}
+
+impl From<&[&ComponentId]> for ArchetypeId {
+    fn from(components: &[&ComponentId]) -> Self {
+        let mut hasher = crc32fast::Hasher::new();
+        components.hash(&mut hasher);
+        Self(hasher.finalize())
+    }
+}
+
+pub struct Archetype {
+    id: ArchetypeId,
+    table: Table,
+    bits: Bitset,
+}
+
+impl Archetype {
+    pub fn new(id: ArchetypeId, table: Table, bits: Bitset) -> Self {
+        Self { id, table, bits }
+    }
+
+    pub fn id(&self) -> ArchetypeId {
+        self.id
+    }
+
+    pub fn table(&self) -> &Table {
+        &self.table
+    }
+
+    pub fn has_component(&self, component: usize) -> bool {
+        self.bits.get(component)
+    }
+
+    pub fn has_component_id(&self, component: &ComponentId) -> bool {
+        self.table.has_component(component)
+    }
+
+    pub fn bits(&self) -> &Bitset {
+        &self.bits
     }
 }
 

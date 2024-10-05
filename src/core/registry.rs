@@ -1,5 +1,5 @@
 use indexmap::IndexMap;
-use std::{any::TypeId, hash::Hash};
+use std::{any::TypeId, fmt::Debug, hash::Hash};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Type(u32);
@@ -28,7 +28,7 @@ impl From<TypeId> for Type {
 }
 
 pub trait Record: 'static {
-    type Type: Into<Type> + Hash + Eq + Copy + 'static;
+    type Type: Into<Type> + Debug + Hash + Eq + Copy + 'static;
 }
 
 pub struct Registry<R: Record> {
@@ -54,8 +54,10 @@ impl<R: Record> Registry<R> {
         self.records.get_mut(ty)
     }
 
-    pub fn index(&self, ty: &R::Type) -> Option<usize> {
-        self.records.get_index_of(ty)
+    pub fn index(&self, ty: &R::Type) -> usize {
+        self.records
+            .get_index_of(ty)
+            .expect(format!("Record not registered: {:?}", ty).as_str())
     }
 
     pub fn len(&self) -> usize {

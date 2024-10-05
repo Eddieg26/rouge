@@ -67,6 +67,10 @@ impl Archetype {
         self.bits.get(component)
     }
 
+    pub fn has_component_id(&self, component: &ComponentId) -> bool {
+        self.table.has_component(component)
+    }
+
     pub fn bits(&self) -> &Bitset {
         &self.bits
     }
@@ -94,33 +98,71 @@ impl Archetypes {
         }
     }
 
+    #[inline]
     pub fn root(&self) -> ArchetypeId {
         self.root
     }
 
+    #[inline]
     pub fn components(&self) -> &Components {
         &self.components
     }
 
+    #[inline]
     pub fn components_mut(&mut self) -> &mut Components {
         &mut self.components
     }
 
+    #[inline]
     pub fn entity_archetype(&self, entity: Entity) -> Option<&Archetype> {
         self.entities
             .get(&entity)
             .and_then(|id| self.archetypes.get(id))
     }
 
+    #[inline]
+    pub fn entity_archetype_mut(&mut self, entity: Entity) -> Option<&mut Archetype> {
+        self.entities
+            .get(&entity)
+            .and_then(|id| self.archetypes.get_mut(id))
+    }
+
+    #[inline]
     pub fn archetype(&self, id: ArchetypeId) -> Option<&Archetype> {
         self.archetypes.get(&id)
     }
 
+    #[inline]
+    pub fn get_component<C: Component>(&self, entity: Entity) -> Option<&C> {
+        let archetype = self.entity_archetype(entity)?;
+        archetype.table.get_component(&entity)
+    }
+
+    #[inline]
+    pub fn get_component_mut<C: Component>(&mut self, entity: Entity) -> Option<&mut C> {
+        let archetype = self.entity_archetype_mut(entity)?;
+        archetype.table.get_component_mut(&entity)
+    }
+
+    #[inline]
     pub fn has_component<C: Component>(&self, entity: Entity) -> bool {
-        let index = self.components.index(&ComponentId::of::<C>()).unwrap();
+        let index = self.components.index(&ComponentId::of::<C>());
         match self.entity_archetype(entity) {
             Some(archetype) => archetype.has_component(index),
             None => return false,
+        }
+    }
+
+    pub fn has_components(
+        &self,
+        entity: Entity,
+        components: impl IntoIterator<Item = impl AsRef<ComponentId>>,
+    ) -> bool {
+        match self.entity_archetype(entity) {
+            Some(archetype) => components
+                .into_iter()
+                .all(|c| archetype.has_component_id(c.as_ref())),
+            None => false,
         }
     }
 
@@ -131,19 +173,21 @@ impl Archetypes {
     }
 
     #[inline]
-    pub fn query(&self, ids: &[ComponentId]) -> IndexSet<ArchetypeId> {
+    pub fn query(&self, ids: &[ComponentId], exclude: &[ComponentId]) -> IndexSet<ArchetypeId> {
         let mut bits = Bitset::with_capacity(self.components.len());
         for component in ids {
-            let index = self.components.index(component).unwrap();
+            let index = self.components.index(component);
             bits.set(index);
         }
 
         let mut set = IndexSet::new();
         for (archetype_id, archetype) in self.archetypes.iter() {
-            if archetype.bits().contains(&bits) {
+            let exclude = exclude.iter().any(|c| archetype.has_component_id(c));
+            if !exclude && bits.contains(archetype.bits()) {
                 set.insert(*archetype_id);
             }
         }
+
         set
     }
 
@@ -251,12 +295,14 @@ impl Archetypes {
             let table = row.into_table(entity);
             let mut bits = Bitset::with_capacity(self.components.len());
             for component in table.components() {
-                let index = self.components.index(component).unwrap();
+                let index = self.components.index(component);
                 bits.set(index);
             }
             let archetype = Archetype::new(id, table, bits);
             self.archetypes.insert(id, archetype);
         }
+
+        self.entities.insert(entity, id);
     }
 }
 

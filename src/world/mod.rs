@@ -1,5 +1,5 @@
 use crate::{
-    archetype::Archetypes,
+    archetype::{table::Row, Archetypes, EntityMove},
     core::{
         component::Component,
         entity::{Entities, Entity},
@@ -273,7 +273,43 @@ impl World {
         self.archetypes.has_component::<C>(entity)
     }
 
+    pub fn has_components(
+        &self,
+        entity: Entity,
+        components: impl IntoIterator<Item = impl AsRef<ComponentId>>,
+    ) -> bool {
+        self.archetypes.has_components(entity, components)
+    }
+
     pub fn get_component<C: Component>(&self, entity: Entity) -> Option<&C> {
-        todo!()
+        self.archetypes.get_component::<C>(entity)
+    }
+
+    pub fn get_component_mut<C: Component>(&mut self, entity: Entity) -> Option<&mut C> {
+        self.archetypes.get_component_mut::<C>(entity)
+    }
+
+    pub fn add_component<C: Component>(
+        &mut self,
+        entity: Entity,
+        component: C,
+    ) -> Option<EntityMove> {
+        self.archetypes.add_component(entity, component)
+    }
+
+    pub fn add_components(&mut self, entity: Entity, components: Row) -> Option<EntityMove> {
+        self.archetypes.add_components(entity, components)
+    }
+
+    pub fn remove_component<C: Component>(&mut self, entity: Entity) -> Option<EntityMove> {
+        self.archetypes.remove_component::<C>(entity)
+    }
+
+    pub fn remove_components(
+        &mut self,
+        entity: Entity,
+        components: impl IntoIterator<Item = impl AsRef<ComponentId>>,
+    ) -> Option<EntityMove> {
+        self.archetypes.remove_components(entity, components)
     }
 }

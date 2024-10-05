@@ -1,7 +1,8 @@
 use crate::{
+    archetype::Archetypes,
     core::{
         component::Component,
-        entity::Entities,
+        entity::{Entities, Entity},
         registry::Type,
         resource::{Resource, Resources},
     },
@@ -14,7 +15,7 @@ use crate::{
     },
 };
 use action::WorldActions;
-use components::{ComponentId, ComponentMeta, Components};
+use components::{ComponentId, ComponentMeta};
 use id::WorldId;
 
 pub mod action;
@@ -24,7 +25,7 @@ pub mod id;
 pub struct World {
     id: WorldId,
     entities: Entities,
-    components: Components,
+    archetypes: Archetypes,
     events: EventRegistry,
     actions: WorldActions,
     resources: Resources<true>,
@@ -40,7 +41,7 @@ impl World {
         Self {
             id: WorldId::new(),
             entities: Entities::new(),
-            components: Components::new(),
+            archetypes: Archetypes::new(),
             events: EventRegistry::new(),
             actions: WorldActions::default(),
             resources: Resources::new(),
@@ -63,8 +64,8 @@ impl World {
     }
 
     #[inline]
-    pub fn components(&self) -> &Components {
-        &self.components
+    pub fn archetypes(&self) -> &Archetypes {
+        &self.archetypes
     }
 
     #[inline]
@@ -89,7 +90,7 @@ impl World {
 
     #[inline]
     pub fn component_meta(&self, ty: &ComponentId) -> Option<&ComponentMeta> {
-        self.components.get(ty)
+        self.archetypes.components().get(ty)
     }
 
     #[inline]
@@ -111,7 +112,7 @@ impl World {
     }
 
     #[inline]
-    pub fn resource_mut<R: Resource + Send>(&self) -> &mut R {
+    pub fn resource_mut<R: Resource + Send>(&mut self) -> &mut R {
         self.resources.get_mut::<R>()
     }
 
@@ -121,7 +122,7 @@ impl World {
     }
 
     #[inline]
-    pub fn non_send_resource_mut<R: Resource>(&self) -> &mut R {
+    pub fn non_send_resource_mut<R: Resource>(&mut self) -> &mut R {
         self.non_send_resources.get_mut::<R>()
     }
 
@@ -131,7 +132,7 @@ impl World {
     }
 
     #[inline]
-    pub fn try_resource_mut<R: Resource + Send>(&self) -> Option<&mut R> {
+    pub fn try_resource_mut<R: Resource + Send>(&mut self) -> Option<&mut R> {
         self.resources.try_get_mut::<R>()
     }
 
@@ -141,14 +142,16 @@ impl World {
     }
 
     #[inline]
-    pub fn try_non_send_resource_mut<R: Resource>(&self) -> Option<&mut R> {
+    pub fn try_non_send_resource_mut<R: Resource>(&mut self) -> Option<&mut R> {
         self.non_send_resources.try_get_mut::<R>()
     }
 
     #[inline]
     pub fn register<C: Component>(&mut self) -> &mut Self {
         let ty = ComponentId::of::<C>();
-        self.components.register(ty, ComponentMeta::new::<C>());
+        self.archetypes
+            .components_mut()
+            .register(ty, ComponentMeta::new::<C>());
         self
     }
 
@@ -252,5 +255,24 @@ impl World {
             self.observers.build(self.system_meta.mode());
             self.observers.run(&self, &self.system_meta, vec![ty]);
         }
+    }
+}
+
+impl World {
+    pub fn spawn(&mut self) -> Entity {
+        let entity = self.entities.spawn();
+        self.archetypes.add_entity(entity);
+
+        entity
+    }
+
+    pub fn despawn(&mut self, entity: Entity) {}
+
+    pub fn has_component<C: Component>(&self, entity: Entity) -> bool {
+        self.archetypes.has_component::<C>(entity)
+    }
+
+    pub fn get_component<C: Component>(&self, entity: Entity) -> Option<&C> {
+        todo!()
     }
 }

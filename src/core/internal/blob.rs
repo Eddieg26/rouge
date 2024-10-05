@@ -96,7 +96,7 @@ impl Blob {
         }
     }
 
-    pub fn get_mut<T>(&self, index: usize) -> Option<&mut T> {
+    pub fn get_mut<T>(&mut self, index: usize) -> Option<&mut T> {
         if index < self.length {
             Some(unsafe { &mut *(self.offset(index) as *mut T) })
         } else {
@@ -338,7 +338,8 @@ impl Blob {
         BlobIterMut::<T>::new(self)
     }
 
-    pub fn ptr<T: 'static>(&self, index: usize) -> Ptr<T> {
+    // Allows for shared access to the blob data.
+    pub unsafe fn ptr<T: 'static>(&self, index: usize) -> Ptr<T> {
         if index >= self.length {
             panic!("Index out of bounds.")
         }
@@ -465,7 +466,7 @@ impl BlobCell {
         unsafe { &*(self.data.as_ptr() as *const T) }
     }
 
-    pub fn value_mut<T: 'static>(&self) -> &mut T {
+    pub fn value_mut<T: 'static>(&mut self) -> &mut T {
         unsafe { &mut *(self.data.as_ptr() as *mut T) }
     }
 
@@ -477,7 +478,7 @@ impl BlobCell {
         }
     }
 
-    pub fn value_mut_checked<T: 'static>(&self) -> Option<&mut T> {
+    pub fn value_mut_checked<T: 'static>(&mut self) -> Option<&mut T> {
         if self.layout.size() == std::mem::size_of::<T>() {
             Some(unsafe { &mut *(self.data.as_ptr() as *mut T) })
         } else {

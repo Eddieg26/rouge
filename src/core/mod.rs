@@ -1,3 +1,4 @@
+pub mod bitset;
 pub mod component;
 pub mod entity;
 pub mod internal;

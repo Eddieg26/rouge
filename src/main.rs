@@ -1,3 +1,5 @@
+use core::component::Component;
+
 use event::Event;
 use system::systems::Root;
 use world::action::WorldAction;
@@ -20,8 +22,12 @@ impl WorldAction for TestAction {
     }
 }
 
+pub struct A;
+impl Component for A {}
+
 fn main() {
     let mut world = world::World::new();
+    world.register::<A>();
     world.register_event::<TestEvent>();
     world.actions().add(TestAction);
     world.run(Root);

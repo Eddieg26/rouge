@@ -13,6 +13,10 @@ impl Type {
     pub fn dynamic(ty: u32) -> Self {
         Self(ty)
     }
+
+    pub fn value(&self) -> u32 {
+        self.0
+    }
 }
 
 impl From<TypeId> for Type {
@@ -48,6 +52,18 @@ impl<R: Record> Registry<R> {
 
     pub fn get_mut(&mut self, ty: &R::Type) -> Option<&mut R> {
         self.records.get_mut(ty)
+    }
+
+    pub fn index(&self, ty: &R::Type) -> Option<usize> {
+        self.records.get_index_of(ty)
+    }
+
+    pub fn len(&self) -> usize {
+        self.records.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.records.is_empty()
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &R> {

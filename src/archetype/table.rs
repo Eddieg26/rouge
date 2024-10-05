@@ -45,8 +45,23 @@ impl<'a> SelectedCell<'a> {
     pub fn value<T: 'static>(&self) -> Option<&T> {
         self.column.get::<T>(self.index)
     }
+}
 
-    pub fn value_mut<T: 'static>(&self) -> Option<&mut T> {
+pub struct SelectedCellMut<'a> {
+    column: &'a mut Column,
+    index: usize,
+}
+
+impl<'a> SelectedCellMut<'a> {
+    fn new(column: &'a mut Column, index: usize) -> Self {
+        Self { column, index }
+    }
+
+    pub fn value<T: 'static>(&self) -> Option<&T> {
+        self.column.get::<T>(self.index)
+    }
+
+    pub fn value_mut<T: 'static>(&mut self) -> Option<&mut T> {
         self.column.get_mut::<T>(self.index)
     }
 }
@@ -78,7 +93,7 @@ impl Column {
         self.data.get::<T>(index)
     }
 
-    pub fn get_mut<T: 'static>(&self, index: usize) -> Option<&mut T> {
+    pub fn get_mut<T: 'static>(&mut self, index: usize) -> Option<&mut T> {
         self.data.get_mut::<T>(index)
     }
 
@@ -107,6 +122,14 @@ impl Column {
             None
         } else {
             Some(SelectedCell::new(self, index))
+        }
+    }
+
+    pub fn select_mut(&mut self, index: usize) -> Option<SelectedCellMut> {
+        if index >= self.len() {
+            None
+        } else {
+            Some(SelectedCellMut::new(self, index))
         }
     }
 
@@ -160,7 +183,7 @@ impl Row {
         }
     }
 
-    pub fn components(&self) -> impl Iterator<Item = &ComponentId> {
+    pub fn ids(&self) -> impl Iterator<Item = &ComponentId> {
         self.components.keys()
     }
 
@@ -177,14 +200,26 @@ impl Row {
     }
 
     pub fn add_component<C: Component>(&mut self, component: C) -> Option<ColumnCell> {
-        self.components
-            .insert(ComponentId::of::<C>(), ColumnCell::from(component))
+        let id = ComponentId::of::<C>();
+        self.components.insert(id, ColumnCell::from(component))
     }
 
-    pub fn remove_component<C: Component>(&mut self) -> Option<C> {
-        self.components
-            .shift_remove(&ComponentId::of::<C>())
-            .and_then(|cell| Some(cell.into()))
+    pub fn replace_component<C: Component>(&mut self, component: C) -> Option<(ComponentId, C)> {
+        let id = ComponentId::of::<C>();
+        let prev = self.components.insert(id, ColumnCell::from(component))?;
+        let prev = prev.into();
+
+        Some((id, prev))
+    }
+
+    pub fn remove_component<C: Component>(&mut self) -> Option<(ComponentId, C)> {
+        let id = ComponentId::of::<C>();
+        let prev = self
+            .components
+            .shift_remove(&id)
+            .and_then(|cell| Some(cell.into()))?;
+
+        Some((id, prev))
     }
 
     pub fn add_cell(&mut self, id: ComponentId, cell: ColumnCell) -> Option<ColumnCell> {
@@ -277,7 +312,32 @@ pub struct SelectedRow<'a> {
 
 impl<'a> SelectedRow<'a> {
     pub fn new(index: usize, row: IndexMap<ComponentId, &'a Column>) -> Self {
-        SelectedRow { index, row }
+        Self { index, row }
+    }
+
+    pub fn get<C: Component>(&self) -> Option<&C> {
+        self.row
+            .get(&ComponentId::of::<C>())
+            .and_then(|column| column.get(self.index))
+    }
+
+    pub fn contains<C: Component>(&self) -> bool {
+        self.row.contains_key(&ComponentId::of::<C>())
+    }
+
+    pub fn contains_id(&self, id: &ComponentId) -> bool {
+        self.row.contains_key(id)
+    }
+}
+
+pub struct SelectedRowMut<'a> {
+    index: usize,
+    row: IndexMap<ComponentId, &'a mut Column>,
+}
+
+impl<'a> SelectedRowMut<'a> {
+    pub fn new(index: usize, row: IndexMap<ComponentId, &'a mut Column>) -> Self {
+        Self { index, row }
     }
 
     pub fn get<C: Component>(&self) -> Option<&C> {
@@ -373,8 +433,8 @@ impl Table {
         column.get(index)
     }
 
-    pub fn get_component_mut<C: Component>(&self, entity: &Entity) -> Option<&mut C> {
-        let column = self.components.get(&ComponentId::of::<C>())?;
+    pub fn get_component_mut<C: Component>(&mut self, entity: &Entity) -> Option<&mut C> {
+        let column = self.components.get_mut(&ComponentId::of::<C>())?;
         let index = self.rows.get_index_of(entity)?;
         column.get_mut(index)
     }

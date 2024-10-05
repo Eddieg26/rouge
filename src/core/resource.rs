@@ -87,10 +87,10 @@ impl ResourceInfo {
         value.value::<R>()
     }
 
-    pub fn as_mut<R: Resource>(&self) -> &mut R {
+    pub fn as_mut<R: Resource>(&mut self) -> &mut R {
         let value = self
             .data
-            .as_ref()
+            .as_mut()
             .expect(&format!("Resource {} no longer exists", self.meta.name));
         value.value_mut::<R>()
     }
@@ -144,7 +144,7 @@ impl<const SEND: bool> Resources<SEND> {
         ))
     }
 
-    pub fn get_mut<R: Resource>(&self) -> &mut R {
+    pub fn get_mut<R: Resource>(&mut self) -> &mut R {
         self.try_get_mut().expect(&format!(
             "Resource {} not found",
             std::any::type_name::<R>()
@@ -156,9 +156,9 @@ impl<const SEND: bool> Resources<SEND> {
         self.resources.get(&id).map(|info| info.as_ref())
     }
 
-    pub fn try_get_mut<R: Resource>(&self) -> Option<&mut R> {
+    pub fn try_get_mut<R: Resource>(&mut self) -> Option<&mut R> {
         let id = ResourceId::of::<R>();
-        self.resources.get(&id).map(|info| info.as_mut())
+        self.resources.get_mut(&id).map(|info| info.as_mut())
     }
 
     pub fn remove<R: Resource>(&mut self) -> Option<R> {

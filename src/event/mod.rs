@@ -34,7 +34,9 @@ impl EventMeta {
             name,
             layout,
             type_id,
-            clear: |world| world.resource_mut::<Events<E>>().clear(),
+            clear: |world| {
+                // world.resource_mut::<Events<E>>().clear()
+            },
         }
     }
 

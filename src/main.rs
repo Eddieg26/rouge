@@ -1,5 +1,4 @@
 use core::component::Component;
-
 use event::Event;
 use system::systems::Root;
 use world::action::WorldAction;

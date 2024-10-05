@@ -5,7 +5,7 @@ use super::{
 };
 use crate::{
     event::{Event, EventId},
-    world::World,
+    world::{cell::WorldCell, World},
 };
 use hashbrown::HashMap;
 use indexmap::IndexMap;
@@ -98,11 +98,12 @@ impl Observers {
         meta: &SystemMeta,
         invoked: impl IntoIterator<Item = EventId>,
     ) {
+        let world = WorldCell::from(world);
         for ty in invoked {
             if let Some(observers) = self.observers.get(&ty) {
-                let event_meta = world.event_meta(&ty);
-                meta.runner().run(world, &[observers]);
-                event_meta.clear(world);
+                let event_meta = world.get().event_meta(&ty);
+                meta.runner().run(&world, &[observers]);
+                event_meta.clear(world.get_mut());
             }
         }
     }

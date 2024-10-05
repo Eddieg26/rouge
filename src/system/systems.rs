@@ -5,7 +5,11 @@ use super::{
     },
     IntoSystemConfigs,
 };
-use crate::{core::registry::Type, task::ScopedTaskPool, world::World};
+use crate::{
+    core::registry::Type,
+    task::ScopedTaskPool,
+    world::{cell::WorldCell, World},
+};
 use indexmap::IndexMap;
 use std::{
     num::NonZero,
@@ -125,12 +129,12 @@ impl RunMode {
 }
 
 pub trait SystemRunner: Send + Sync + 'static {
-    fn run(&self, world: &World, systems: &[&SystemGraph]);
+    fn run(&self, world: &WorldCell, systems: &[&SystemGraph]);
 }
 
 pub struct SequentialRunner;
 impl SystemRunner for SequentialRunner {
-    fn run(&self, world: &World, systems: &[&SystemGraph]) {
+    fn run(&self, world: &WorldCell, systems: &[&SystemGraph]) {
         for graph in systems {
             for system in graph.systems() {
                 system.run(world);
@@ -141,7 +145,7 @@ impl SystemRunner for SequentialRunner {
 
 pub struct ParallelRunner;
 impl SystemRunner for ParallelRunner {
-    fn run(&self, world: &World, systems: &[&SystemGraph]) {
+    fn run(&self, world: &WorldCell, systems: &[&SystemGraph]) {
         for graph in systems {
             for group in graph.order() {
                 let mut pool = ScopedTaskPool::new(RunMode::max_threads() as usize);
@@ -254,15 +258,16 @@ impl Systems {
     }
 
     #[inline]
-    pub fn run(&self, phase: impl Phase, world: &mut World) {
-        let meta = world.system_meta().clone();
-        let runners = world.system_meta().phase_runners();
+    pub fn run(&self, phase: impl Phase, world: &World) {
+        let world = WorldCell::from(world);
+        let meta = world.get().system_meta().clone();
+        let runners = world.get().system_meta().phase_runners();
         let mut runners = PhaseRunnersRef::new(runners.lock().unwrap());
         if phase.id() == self.schedule.id() {
-            self.schedule.run(world, self, &meta, &mut runners);
+            self.schedule.run(&world, self, &meta, &mut runners);
         } else {
             self.schedule
-                .run_child(phase.id(), world, self, &meta, &mut runners);
+                .run_child(phase.id(), &world, self, &meta, &mut runners);
         }
     }
 }
@@ -270,7 +275,7 @@ impl Systems {
 impl Schedule {
     pub fn run(
         &self,
-        world: &mut World,
+        world: &WorldCell,
         systems: &Systems,
         meta: &SystemMeta,
         runners: &mut PhaseRunnersRef,
@@ -282,7 +287,7 @@ impl Schedule {
             runner.run(ctx);
         }
 
-        world.flush(Some(self.id()));
+        world.get_mut().flush(Some(self.id()));
 
         for child in self.children() {
             child.run(world, systems, meta, runners);
@@ -292,7 +297,7 @@ impl Schedule {
     pub fn run_child(
         &self,
         child: PhaseId,
-        world: &mut World,
+        world: &WorldCell,
         systems: &Systems,
         meta: &SystemMeta,
         runners: &mut PhaseRunnersRef,

@@ -19,6 +19,7 @@ use components::{ComponentId, ComponentMeta};
 use id::WorldId;
 
 pub mod action;
+pub mod cell;
 pub mod components;
 pub mod id;
 
@@ -225,8 +226,8 @@ impl World {
         let mut systems = self.systems.take().unwrap();
 
         systems.update(self.system_meta.mode(), &mut self.system_configs);
-        systems.run(phase, self);
 
+        systems.run(phase, &self);
         self.systems.replace(systems);
     }
 

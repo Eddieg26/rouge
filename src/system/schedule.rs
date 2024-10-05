@@ -5,7 +5,7 @@ use super::{
 use crate::{
     core::registry::Type,
     system::{AccessType, WorldAccess},
-    world::World,
+    world::cell::WorldCell,
 };
 use indexmap::IndexMap;
 
@@ -224,14 +224,14 @@ impl PhaseSystemConfigs {
 }
 
 pub struct RunContext<'a> {
-    world: &'a World,
+    world: &'a WorldCell<'a>,
     systems: &'a [&'a SystemGraph],
     runner: &'a dyn SystemRunner,
 }
 
 impl<'a> RunContext<'a> {
     pub fn new(
-        world: &'a World,
+        world: &'a WorldCell,
         systems: &'a [&'a SystemGraph],
         runner: &'a dyn SystemRunner,
     ) -> Self {

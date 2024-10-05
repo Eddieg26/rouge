@@ -1,6 +1,6 @@
 use crate::{
     core::{entity::Entities, registry::Type, resource::ResourceId},
-    world::{components::ComponentId, World},
+    world::{cell::WorldCell, components::ComponentId, World},
 };
 use std::hash::Hash;
 
@@ -21,7 +21,7 @@ impl SystemId {
 pub struct System {
     id: SystemId,
     name: Option<&'static str>,
-    run: Box<dyn Fn(&World) + Sync>,
+    run: Box<dyn Fn(&WorldCell) + Sync>,
 }
 
 impl System {
@@ -41,7 +41,7 @@ impl System {
         self.name
     }
 
-    pub fn run(&self, world: &World) {
+    pub fn run(&self, world: &WorldCell) {
         (self.run)(world)
     }
 }
@@ -49,7 +49,7 @@ impl System {
 pub struct SystemConfig {
     id: SystemId,
     name: Option<&'static str>,
-    run: Box<dyn Fn(&World) + Sync>,
+    run: Box<dyn Fn(&WorldCell) + Sync>,
     access: fn() -> Vec<WorldAccess>,
     after: Option<SystemId>,
 }
@@ -57,7 +57,7 @@ pub struct SystemConfig {
 impl SystemConfig {
     pub fn new(
         name: Option<&'static str>,
-        run: Box<dyn Fn(&World) + Sync>,
+        run: Box<dyn Fn(&WorldCell) + Sync>,
         access: fn() -> Vec<WorldAccess>,
     ) -> Self {
         Self {
@@ -203,7 +203,7 @@ impl WorldAccess {
 pub trait SystemArg {
     type Item<'a>;
 
-    fn get<'a>(world: &'a World) -> Self::Item<'a>;
+    fn get<'a>(world: &'a WorldCell) -> Self::Item<'a>;
     fn access() -> Vec<WorldAccess> {
         Vec::new()
     }
@@ -212,22 +212,22 @@ pub trait SystemArg {
 impl SystemArg for () {
     type Item<'a> = ();
 
-    fn get<'a>(_: &'a World) -> Self::Item<'a> {}
+    fn get<'a>(_: &'a WorldCell) -> Self::Item<'a> {}
 }
 
 impl SystemArg for &World {
     type Item<'a> = &'a World;
 
-    fn get<'a>(world: &'a World) -> Self::Item<'a> {
-        world
+    fn get<'a>(world: &'a WorldCell) -> Self::Item<'a> {
+        world.get()
     }
 }
 
 impl SystemArg for Entities {
     type Item<'a> = &'a Entities;
 
-    fn get<'a>(world: &'a World) -> Self::Item<'a> {
-        world.entities()
+    fn get<'a>(world: &'a WorldCell) -> Self::Item<'a> {
+        world.get().entities()
     }
 }
 
@@ -236,7 +236,7 @@ pub type ArgItem<'a, A> = <A as SystemArg>::Item<'a>;
 impl<F: Fn() + Send + Sync + 'static> IntoSystemConfigs<F> for F {
     fn configs(self) -> Vec<SystemConfig> {
         let name = std::any::type_name::<F>();
-        let run = move |_: &World| {
+        let run = move |_: &WorldCell| {
             self();
         };
         let access = || Vec::new();
@@ -273,7 +273,7 @@ macro_rules! impl_into_system_configs {
         {
             fn configs(self) -> Vec<SystemConfig> {
                 let name = std::any::type_name::<F>();
-                let run = move |world: &World| {
+                let run = move |world: &WorldCell| {
                     let ($($arg,)*) = ($($arg::get(world),)*);
                     self($($arg),*);
                 };
@@ -309,7 +309,7 @@ macro_rules! impl_into_system_configs {
         impl<$($arg: SystemArg),*> SystemArg for ($($arg,)*) {
             type Item<'a> = ($($arg::Item<'a>,)*);
 
-            fn get<'a>(world: &'a World) -> Self::Item<'a> {
+            fn get<'a>(world: &'a WorldCell) -> Self::Item<'a> {
                 ($($arg::get(world),)*)
             }
 

@@ -21,7 +21,7 @@ pub struct EventMeta {
     name: &'static str,
     layout: Layout,
     type_id: TypeId,
-    clear: fn(&World),
+    clear: fn(&mut World),
 }
 
 impl EventMeta {
@@ -34,9 +34,7 @@ impl EventMeta {
             name,
             layout,
             type_id,
-            clear: |world| {
-                // world.resource_mut::<Events<E>>().clear()
-            },
+            clear: |world| world.resource_mut::<Events<E>>().clear(),
         }
     }
 
@@ -52,7 +50,7 @@ impl EventMeta {
         &self.type_id
     }
 
-    pub fn clear(&self, world: &World) {
+    pub fn clear(&self, world: &mut World) {
         (self.clear)(world)
     }
 }

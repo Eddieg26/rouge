@@ -1,6 +1,5 @@
-use core::component::Component;
+use core::{component::Component, resource::Resource};
 use event::Event;
-use system::systems::Root;
 use world::action::WorldAction;
 
 pub mod archetype;
@@ -25,10 +24,11 @@ impl WorldAction for TestAction {
 pub struct A;
 impl Component for A {}
 
+pub struct ResA;
+impl Resource for ResA {}
+
 fn main() {
     let mut world = world::World::new();
     world.register::<A>();
-    world.register_event::<TestEvent>();
-    world.actions().add(TestAction);
-    world.run(Root);
+    world.add_resource(ResA);
 }

@@ -203,10 +203,13 @@ impl WorldAccess {
 pub trait SystemArg {
     type Item<'a>;
 
+    fn init(_world: &WorldCell) {}
     fn get<'a>(world: &'a WorldCell) -> Self::Item<'a>;
     fn access() -> Vec<WorldAccess> {
         Vec::new()
     }
+
+    fn done(_world: &WorldCell) {}
 }
 
 impl SystemArg for () {

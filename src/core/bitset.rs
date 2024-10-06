@@ -13,6 +13,10 @@ impl Bitset {
         Self { bits: vec![0; len] }
     }
 
+    pub fn reserve(&mut self, additional: usize) {
+        self.bits.resize(self.bits.len() + additional, 0);
+    }
+
     pub fn set(&mut self, index: usize) {
         let (word, bit) = (index / 64, index % 64);
         if word >= self.bits.len() {
@@ -43,6 +47,16 @@ impl Bitset {
 
     pub fn is_empty(&self) -> bool {
         self.bits.is_empty()
+    }
+
+    pub fn clear_all(&mut self) {
+        for word in &mut self.bits {
+            *word = 0;
+        }
+    }
+
+    pub fn reset(&mut self) {
+        self.bits.clear();
     }
 
     pub fn iter(&self) -> BitsetIter {

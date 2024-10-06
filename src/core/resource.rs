@@ -1,7 +1,4 @@
-use super::{
-    internal::blob::{BlobCell, Ptr},
-    Type,
-};
+use super::{internal::blob::BlobCell, Type};
 use hashbrown::HashMap;
 use std::{hash::Hash, thread::ThreadId};
 
@@ -173,11 +170,11 @@ impl<const SEND: bool> Resources<SEND> {
 }
 
 pub struct Res<'a, R: Resource> {
-    ptr: Ptr<'a, R>,
+    ptr: &'a R,
 }
 
 impl<'a, R: Resource> Res<'a, R> {
-    pub fn new(ptr: Ptr<'a, R>) -> Self {
+    pub fn new(ptr: &'a R) -> Self {
         Self { ptr }
     }
 }
@@ -191,7 +188,13 @@ impl<'a, R: Resource> std::ops::Deref for Res<'a, R> {
 }
 
 pub struct ResMut<'a, R: Resource> {
-    ptr: Ptr<'a, R>,
+    ptr: &'a mut R,
+}
+
+impl<'a, R: Resource> ResMut<'a, R> {
+    pub fn new(ptr: &'a mut R) -> Self {
+        Self { ptr }
+    }
 }
 
 impl<'a, R: Resource> std::ops::Deref for ResMut<'a, R> {

@@ -2,7 +2,7 @@ use super::{builtin::events::ComponentUpdate, World};
 use crate::{
     archetype::table::ColumnCell,
     core::{component::Component, entity::Entity, resource::Resource, Type},
-    event::{Event, Events},
+    event::Events,
 };
 use indexmap::IndexMap;
 use std::{alloc::Layout, any::TypeId, sync::Arc};
@@ -63,25 +63,6 @@ impl ComponentExtension {
 }
 
 impl MetadataExtension for ComponentExtension {}
-
-#[derive(Clone, Copy)]
-pub struct EventExtension {
-    clear: fn(&mut World),
-}
-
-impl EventExtension {
-    pub fn new<E: Event>() -> Self {
-        Self {
-            clear: |world| world.resource_mut::<Events<E>>().clear(),
-        }
-    }
-
-    pub fn clear(&self, world: &mut World) {
-        (self.clear)(world)
-    }
-}
-
-impl MetadataExtension for EventExtension {}
 
 pub struct Metadata {
     name: &'static str,
@@ -162,11 +143,6 @@ impl Registry {
     #[inline]
     pub fn register_resource<R: Resource>(&mut self) -> Type {
         self.register::<R>(())
-    }
-
-    #[inline]
-    pub fn register_event<E: Event>(&mut self) -> Type {
-        self.register::<E>(EventExtension::new::<E>())
     }
 
     #[inline]

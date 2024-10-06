@@ -1,7 +1,7 @@
 use super::{schedule::SystemGraph, systems::RunMode, IntoSystemConfigs, SystemConfig};
 use crate::{
-    event::{Event, EventId},
-    world::{cell::WorldCell, registry::EventExtension},
+    event::{Event, EventId, Events},
+    world::{cell::WorldCell, World},
 };
 use hashbrown::HashMap;
 use indexmap::IndexMap;
@@ -44,23 +44,45 @@ impl<E: Event> IntoSystemConfigs<()> for Observer<E> {
     }
 }
 
+pub struct EventExtension {
+    clear: fn(&mut World),
+}
+
+impl EventExtension {
+    pub fn new<E: Event>() -> Self {
+        Self {
+            clear: |world| {
+                world.resource_mut::<Events<E>>().clear();
+            },
+        }
+    }
+
+    pub fn clear(&self, world: &mut World) {
+        (self.clear)(world);
+    }
+}
+
 pub struct ObserverConfigs {
     configs: HashMap<EventId, Vec<SystemConfig>>,
+    extensions: HashMap<EventId, EventExtension>,
 }
 
 impl ObserverConfigs {
     pub fn new() -> Self {
         Self {
             configs: HashMap::new(),
+            extensions: HashMap::new(),
         }
     }
 
     pub fn add<E: Event, M>(&mut self, observers: impl IntoSystemConfigs<M>) {
         let ty = EventId::of::<E>();
-        self.configs
-            .entry(ty)
-            .or_default()
-            .extend(observers.configs());
+        if let Some(configs) = self.configs.get_mut(&ty) {
+            configs.extend(observers.configs());
+        } else {
+            self.configs.insert(ty, observers.configs());
+            self.extensions.insert(ty, EventExtension::new::<E>());
+        }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -78,6 +100,7 @@ impl ObserverConfigs {
 pub struct Observers {
     configs: ObserverConfigs,
     observers: IndexMap<EventId, SystemGraph>,
+    extensions: HashMap<EventId, EventExtension>,
 }
 
 impl Observers {
@@ -85,6 +108,7 @@ impl Observers {
         Self {
             configs: ObserverConfigs::new(),
             observers: IndexMap::new(),
+            extensions: HashMap::new(),
         }
     }
 
@@ -92,11 +116,8 @@ impl Observers {
         let meta = world.get().configs().meta();
         for ty in invoked {
             if let Some(observers) = self.observers.get(&ty) {
-                let event_meta = world.get().event_meta(&ty);
                 meta.runner().run(&world, &[observers]);
-                event_meta
-                    .extension_as::<EventExtension>()
-                    .clear(world.get_mut());
+                self.extensions.get(&ty).unwrap().clear(world.get_mut());
             }
         }
     }
@@ -108,6 +129,8 @@ impl Observers {
     pub fn build(&mut self, mode: RunMode) {
         if !self.configs.is_empty() {
             self.observers.extend(self.configs.into_observers(mode));
+            let ext = std::mem::take(&mut self.extensions);
+            self.extensions.extend(ext);
         }
     }
 }

@@ -108,7 +108,7 @@ impl Archetypes {
     }
 
     #[inline]
-    pub fn query(&self, ids: &[ComponentId], exclude: &[ComponentId]) -> IndexSet<ArchetypeId> {
+    pub fn query(&self, ids: &[ComponentId], exclude: &[ComponentId]) -> IndexSet<&Archetype> {
         let mut bits = Bitset::with_capacity(self.components.len());
         for component in ids {
             let index = self.component_index(component);
@@ -116,10 +116,10 @@ impl Archetypes {
         }
 
         let mut set = IndexSet::new();
-        for (archetype_id, archetype) in self.archetypes.iter() {
+        for archetype in self.archetypes.values() {
             let exclude = exclude.iter().any(|c| archetype.has_component_id(c));
             if !exclude && bits.contains(archetype.bits()) {
-                set.insert(*archetype_id);
+                set.insert(archetype);
             }
         }
 
@@ -307,6 +307,20 @@ impl Archetype {
         &self.bits
     }
 }
+
+impl Hash for Archetype {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.id.hash(state);
+    }
+}
+
+impl PartialEq for Archetype {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+
+impl Eq for Archetype {}
 
 pub struct EntityMove {
     pub from: ArchetypeId,

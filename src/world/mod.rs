@@ -14,19 +14,22 @@ use crate::{
         IntoSystemConfigs,
     },
 };
+use access::WorldAccessTracker;
 use action::WorldActions;
 use cell::WorldCell;
 use id::WorldId;
 use registry::{Metadata, Registry};
 
+pub mod access;
 pub mod action;
 pub mod builtin;
 pub mod cell;
-pub mod id;
+pub mod query;
 pub mod registry;
 
 pub struct World {
     id: WorldId,
+    access: WorldAccessTracker,
     entities: Entities,
     archetypes: Archetypes,
     registry: Registry,
@@ -43,6 +46,7 @@ impl World {
     pub fn new() -> Self {
         Self {
             id: WorldId::new(),
+            access: WorldAccessTracker::new(),
             entities: Entities::new(),
             archetypes: Archetypes::new(),
             registry: Registry::new(),
@@ -59,6 +63,11 @@ impl World {
     #[inline]
     pub fn id(&self) -> WorldId {
         self.id
+    }
+
+    #[inline]
+    pub fn access(&self) -> &WorldAccessTracker {
+        &self.access
     }
 
     #[inline]
@@ -150,12 +159,6 @@ impl World {
     pub fn register<C: Component>(&mut self) -> &mut Self {
         self.archetypes.register_component::<C>();
         self.registry.register_component::<C>();
-        self
-    }
-
-    #[inline]
-    pub fn register_event<E: Event>(&mut self) -> &mut Self {
-        self.registry.register_event::<E>();
         self
     }
 
@@ -319,5 +322,28 @@ impl World {
         components: impl IntoIterator<Item = impl AsRef<ComponentId>>,
     ) -> Option<EntityMove> {
         self.archetypes.remove_components(entity, components)
+    }
+}
+
+pub mod id {
+    use std::sync::atomic::AtomicU32;
+
+    pub static mut WORLD_ID: AtomicU32 = AtomicU32::new(0);
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    pub struct WorldId(u32);
+
+    impl WorldId {
+        pub fn new() -> Self {
+            let id = unsafe { WORLD_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed) };
+            Self(id)
+        }
+    }
+    impl std::ops::Deref for WorldId {
+        type Target = u32;
+
+        fn deref(&self) -> &Self::Target {
+            &self.0
+        }
     }
 }

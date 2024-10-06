@@ -1,9 +1,13 @@
 use super::World;
-use crate::{archetype::Archetypes, core::resource::{Res, ResMut, Resource}};
+use crate::{
+    archetype::Archetypes,
+    core::resource::{Res, ResMut, Resource},
+};
 use std::marker::PhantomData;
 
 /// Provides an unsafe way to access world components and resources.
 /// Users must ensure that the Rust's borrowing rules are not violated.
+#[derive(Clone, Copy)]
 pub struct WorldCell<'a>(*mut World, PhantomData<&'a mut World>);
 
 impl<'a> WorldCell<'a> {
@@ -77,9 +81,6 @@ impl<'a> WorldCell<'a> {}
 unsafe impl<'a> Send for WorldCell<'a> {}
 unsafe impl<'a> Sync for WorldCell<'a> {}
 
-
 pub struct ArchetypeCell<'a>(*mut Archetypes, PhantomData<&'a mut Archetypes>);
 
-impl<'a> ArchetypeCell<'a> {
-
-}
+impl<'a> ArchetypeCell<'a> {}

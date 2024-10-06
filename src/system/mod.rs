@@ -52,6 +52,7 @@ pub struct SystemConfig {
     run: Box<dyn Fn(&WorldCell) + Sync>,
     access: fn() -> Vec<WorldAccess>,
     after: Option<SystemId>,
+    is_send: bool,
 }
 
 impl SystemConfig {
@@ -59,6 +60,7 @@ impl SystemConfig {
         name: Option<&'static str>,
         run: Box<dyn Fn(&WorldCell) + Sync>,
         access: fn() -> Vec<WorldAccess>,
+        is_send: bool,
     ) -> Self {
         Self {
             id: SystemId::new(),
@@ -66,6 +68,7 @@ impl SystemConfig {
             run,
             access,
             after: None,
+            is_send,
         }
     }
 
@@ -79,6 +82,14 @@ impl SystemConfig {
 
     pub fn access(&self) -> Vec<WorldAccess> {
         (self.access)()
+    }
+
+    pub fn after(&self) -> Option<SystemId> {
+        self.after
+    }
+
+    pub fn is_send(&self) -> bool {
+        self.is_send
     }
 }
 
@@ -119,7 +130,6 @@ impl IntoSystemConfigs<()> for SystemConfig {
     }
 }
 
-//
 impl<M, I: IntoSystemConfigs<M>> IntoSystemConfigs<M> for Vec<I> {
     fn configs(self) -> Vec<SystemConfig> {
         self.into_iter()
@@ -165,7 +175,62 @@ pub enum WorldAccess {
     World,
 }
 
+pub struct WorldAccessMeta {
+    pub ty: Type,
+    pub access: AccessType,
+    pub send: bool,
+}
+
+impl From<&WorldAccess> for WorldAccessMeta {
+    fn from(value: &WorldAccess) -> Self {
+        match value {
+            WorldAccess::Resource { ty, access, send } => Self {
+                ty: ty.into(),
+                access: *access,
+                send: *send,
+            },
+            WorldAccess::Component { ty, access } => Self {
+                ty: ty.into(),
+                access: *access,
+                send: true,
+            },
+            WorldAccess::World => Self {
+                ty: Type::of::<World>(),
+                access: AccessType::Read,
+                send: false,
+            },
+        }
+    }
+}
+
 impl WorldAccess {
+    pub fn resource<R: crate::core::resource::Resource + Send>() -> Self {
+        Self::Resource {
+            ty: ResourceId::of::<R>(),
+            access: AccessType::Read,
+            send: true,
+        }
+    }
+
+    pub fn non_send_resource<R: crate::core::resource::Resource>() -> Self {
+        Self::Resource {
+            ty: ResourceId::of::<R>(),
+            access: AccessType::Read,
+            send: false,
+        }
+    }
+
+    pub fn component<C: crate::core::component::Component>() -> Self {
+        Self::Component {
+            ty: ComponentId::of::<C>(),
+            access: AccessType::Read,
+        }
+    }
+
+    pub fn world() -> Self {
+        Self::World
+    }
+
     pub fn types_equal(&self, other: &WorldAccess) -> bool {
         match (self, other) {
             (WorldAccess::Resource { ty: a, .. }, WorldAccess::Resource { ty: b, .. }) => a == b,
@@ -198,6 +263,10 @@ impl WorldAccess {
             WorldAccess::World => (Type::of::<World>(), AccessType::Read, true),
         }
     }
+
+    pub fn meta(&self) -> WorldAccessMeta {
+        self.into()
+    }
 }
 
 pub trait SystemArg {
@@ -207,6 +276,10 @@ pub trait SystemArg {
     fn get<'a>(world: &'a WorldCell) -> Self::Item<'a>;
     fn access() -> Vec<WorldAccess> {
         Vec::new()
+    }
+
+    fn is_send() -> bool {
+        true
     }
 
     fn done(_world: &WorldCell) {}
@@ -223,6 +296,10 @@ impl SystemArg for &World {
 
     fn get<'a>(world: &'a WorldCell) -> Self::Item<'a> {
         world.get()
+    }
+
+    fn is_send() -> bool {
+        false
     }
 }
 
@@ -243,8 +320,14 @@ impl<F: Fn() + Send + Sync + 'static> IntoSystemConfigs<F> for F {
             self();
         };
         let access = || Vec::new();
+        let is_send = true;
 
-        vec![SystemConfig::new(Some(name), Box::new(run), access)]
+        vec![SystemConfig::new(
+            Some(name),
+            Box::new(run),
+            access,
+            is_send,
+        )]
     }
 
     fn before<Marker>(self, system: impl IntoSystemConfigs<Marker>) -> Vec<SystemConfig> {
@@ -286,7 +369,9 @@ macro_rules! impl_into_system_configs {
                     metas
                 };
 
-                vec![SystemConfig::new(Some(name), Box::new(run), access)]
+                let is_send = ($($arg::is_send() &&)* true);
+
+                vec![SystemConfig::new(Some(name), Box::new(run), access, is_send)]
             }
 
             fn before<Marker>(self, system: impl IntoSystemConfigs<Marker>) -> Vec<SystemConfig> {
@@ -320,6 +405,10 @@ macro_rules! impl_into_system_configs {
                 let mut metas = Vec::new();
                 $(metas.extend($arg::access());)*
                 metas
+            }
+
+            fn is_send() -> bool {
+                ($($arg::is_send() &&)* true)
             }
         }
     };

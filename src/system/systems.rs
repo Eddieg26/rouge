@@ -12,9 +12,9 @@ use std::{
     sync::{Arc, Mutex, MutexGuard},
 };
 
-pub trait SystemGroup: 'static {}
+pub trait SystemGroupTag: 'static {}
 pub struct Global;
-impl SystemGroup for Global {}
+impl SystemGroupTag for Global {}
 
 pub struct SystemConfigs {
     configs: IndexMap<Type, PhaseSystemConfigs>,
@@ -61,7 +61,7 @@ impl SystemConfigs {
             .add_systems(phase, configs);
     }
 
-    pub fn add_phase_configs<G: SystemGroup>(&mut self, configs: PhaseSystemConfigs) {
+    pub fn add_phase_configs<G: SystemGroupTag>(&mut self, configs: PhaseSystemConfigs) {
         self.configs.insert(Type::of::<G>(), configs);
     }
 
@@ -156,13 +156,18 @@ pub struct ParallelRunner;
 impl SystemRunner for ParallelRunner {
     fn run(&self, world: &WorldCell, systems: &[&SystemGraph]) {
         for graph in systems {
-            for group in graph.order() {
-                let mut pool = ScopedTaskPool::new(RunMode::max_threads() as usize);
-                for index in group {
+            for group in graph.groups() {
+                let pool_size = group.indexes().len().min(RunMode::max_threads());
+                let mut pool = ScopedTaskPool::new(pool_size);
+                for index in group.indexes()[..pool_size].iter() {
                     pool.spawn(move || graph.systems()[*index].run(world));
                 }
 
                 pool.run();
+
+                for index in group.indexes()[pool_size..].iter() {
+                    graph.systems()[*index].run(world);
+                }
             }
         }
     }

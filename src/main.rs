@@ -1,5 +1,6 @@
 use core::{component::Component, resource::Resource};
 use event::Event;
+use system::systems::Root;
 use world::action::WorldAction;
 
 pub mod archetype;
@@ -31,4 +32,5 @@ fn main() {
     let mut world = world::World::new();
     world.register::<A>();
     world.add_resource(ResA);
+    world.run(Root);
 }

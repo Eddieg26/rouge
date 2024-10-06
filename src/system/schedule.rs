@@ -4,7 +4,7 @@ use super::{
 };
 use crate::{
     core::Type,
-    system::{AccessType, WorldAccess},
+    system::{AccessType, WorldAccess, WorldAccessMeta},
     world::cell::WorldCell,
 };
 use indexmap::IndexMap;
@@ -38,44 +38,66 @@ impl Into<Type> for PhaseId {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct SystemGroup {
+    indexes: Vec<usize>,
+    non_send: usize,
+}
+
+impl SystemGroup {
+    pub fn new(indexes: Vec<usize>, non_send: usize) -> Self {
+        Self { indexes, non_send }
+    }
+
+    pub fn indexes(&self) -> &[usize] {
+        &self.indexes
+    }
+
+    pub fn non_send(&self) -> usize {
+        self.non_send
+    }
+}
+
 pub struct SystemGraph {
     systems: Vec<System>,
-    order: Vec<Vec<usize>>,
+    groups: Vec<SystemGroup>,
 }
 
 impl SystemGraph {
     pub fn new(mode: RunMode, mut configs: Vec<SystemConfig>) -> Self {
-        let (order, systems) = match mode {
+        let (groups, systems) = match mode {
             RunMode::Sequential => {
                 let systems = configs.drain(..).map(System::new).collect::<Vec<_>>();
-                let order = vec![systems.iter().enumerate().map(|(i, _)| i).collect()];
-                (order, systems)
+                let indexes = (0..systems.len()).collect::<Vec<_>>();
+                let group = SystemGroup::new(indexes, systems.len());
+                (vec![group], systems)
             }
             RunMode::Parallel => {
                 #[derive(Default)]
-                struct Group {
-                    indexes: Vec<usize>,
+                struct GroupInfo {
+                    send: Vec<usize>,
+                    non_send: Vec<usize>,
                     access: IndexMap<Type, (bool, bool)>,
-                    exclusive: bool,
                 }
 
-                impl Group {
-                    fn new(index: usize, world_access: Vec<WorldAccess>) -> Self {
-                        let mut group = Self {
-                            indexes: vec![index],
-                            access: IndexMap::new(),
-                            exclusive: false,
-                        };
-
-                        group.with_access(world_access);
+                impl GroupInfo {
+                    #[inline]
+                    fn new_send(index: usize, access: Vec<WorldAccess>) -> Self {
+                        let mut group = Self::default();
+                        group.with_access(access);
+                        group.send.push(index);
                         group
                     }
 
-                    fn set_exclusive(mut self) -> Self {
-                        self.exclusive = true;
-                        self
+                    #[inline]
+                    fn new_non_send(index: usize, access: Vec<WorldAccess>) -> Self {
+                        let mut group = Self::default();
+                        group.with_access(access);
+                        group.non_send.push(index);
+                        group
                     }
 
+                    #[inline]
                     fn with_access(&mut self, access: Vec<WorldAccess>) {
                         for access in access {
                             let (ty, access, _) = access.access_ty();
@@ -86,81 +108,72 @@ impl SystemGraph {
                     }
                 }
 
-                pub enum GroupType {
-                    Exclusive(usize),
-                    Shared(usize),
-                }
-
-                let mut groups = Vec::<Group>::new();
+                let mut groups = Vec::<GroupInfo>::new();
                 let mut systems = Vec::with_capacity(configs.len());
 
                 for (index, config) in configs.drain(..).enumerate() {
-                    let mut last_valid_group: Option<GroupType> = None;
+                    let mut last_group_index: Option<usize> = None;
                     let access = config.access();
                     for (group_index, group) in groups.iter().enumerate().rev() {
-                        if group.exclusive {
-                            continue;
-                        }
-
-                        let mut group_ty = Some(GroupType::Shared(group_index));
+                        let mut has_dependency = false;
                         for world_access in &access {
-                            let (ty, access, exclusive) = world_access.access_ty();
-
-                            if exclusive {
-                                group_ty = Some(GroupType::Exclusive(group_index));
-                                break;
-                            }
-
+                            let WorldAccessMeta { ty, access, .. } = world_access.meta();
                             if group
                                 .access
                                 .get(&ty)
                                 .is_some_and(|(_, write)| *write || access == AccessType::Write)
                             {
-                                group_ty = None;
+                                has_dependency = true;
                                 break;
                             }
                         }
 
-                        match group_ty {
-                            Some(GroupType::Exclusive(index)) => {
-                                last_valid_group = Some(GroupType::Exclusive(index));
-                                break;
-                            }
-                            Some(GroupType::Shared(index)) => {
-                                last_valid_group = Some(GroupType::Shared(index))
-                            }
-                            None => (),
+                        if !has_dependency {
+                            last_group_index = Some(group_index);
                         }
                     }
 
-                    match last_valid_group {
-                        Some(GroupType::Exclusive(group)) => {
-                            groups.insert(group, Group::new(index, access).set_exclusive());
-                        }
-                        Some(GroupType::Shared(group)) => {
-                            groups[group].indexes.push(index);
+                    match last_group_index {
+                        Some(group) => {
+                            groups[group].send.push(index);
                             groups[group].with_access(access);
                         }
-                        None => groups.push(Group::new(index, access)),
+                        None => {
+                            let group = match config.is_send {
+                                true => GroupInfo::new_send(index, access),
+                                false => GroupInfo::new_non_send(index, access),
+                            };
+
+                            groups.push(group);
+                        }
                     }
 
-                    systems.push(config.into());
+                    systems.push(System::new(config));
                 }
 
-                let order = groups.drain(..).map(|group| group.indexes).collect();
-                (order, systems)
+                let groups = groups
+                    .into_iter()
+                    .map(|group| {
+                        let mut indexes = group.send;
+                        let non_send = indexes.len();
+                        indexes.extend(group.non_send);
+                        SystemGroup::new(indexes, non_send)
+                    })
+                    .collect();
+
+                (groups, systems)
             }
         };
 
-        Self { systems, order }
+        Self { systems, groups }
     }
 
     pub fn systems(&self) -> &[System] {
         &self.systems
     }
 
-    pub fn order(&self) -> &[Vec<usize>] {
-        &self.order
+    pub fn groups(&self) -> &[SystemGroup] {
+        &self.groups
     }
 }
 

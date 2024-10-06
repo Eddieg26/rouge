@@ -1,9 +1,11 @@
 use super::{cell::WorldCell, World};
 use crate::{
-    archetype::{table::SelectedRow, Archetype},
+    archetype::{table::SelectedRow, Archetype, Archetypes},
     core::{
         component::{Component, ComponentId},
         entity::Entity,
+        resource::ResourceId,
+        Type,
     },
     system::{AccessType, SystemArg, WorldAccess},
 };
@@ -330,7 +332,14 @@ impl<Q: BaseQuery, F: QueryFilter> SystemArg for Query<'_, Q, F> {
     }
 
     fn access() -> Vec<WorldAccess> {
-        Q::access()
+        let mut access = Q::access();
+        access.push(WorldAccess::Resource {
+            ty: ResourceId::dynamic(Type::of::<Archetypes>()),
+            access: AccessType::Read,
+            send: true,
+        });
+
+        access
     }
 }
 

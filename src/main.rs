@@ -5,6 +5,7 @@ use world::{
     action::WorldAction,
     cell::WorldCell,
     query::{Not, Query},
+    spawner::{SpawnedEntity, Spawner},
 };
 
 pub mod archetype;
@@ -40,9 +41,13 @@ fn main() {
     let mut world = world::World::new();
     world.register::<A>();
     world.register::<B>();
-    let entity = world.spawn();
-    world.add_component(entity, A);
-    world.add_component(entity, B);
+    // let entity = world.spawn();
+    // world.add_component(entity, A);
+    // world.add_component(entity, B);
+    let mut spawner = world.spawner();
+    spawner.spawn().with(A).done();
+    spawner.done();
+    
     for (entity, a) in Query::<(Entity, &mut A), Not<B>>::new(&WorldCell::from(&world)) {
         println!("Entity: {:?}, A: {:?}", entity, a);
     }

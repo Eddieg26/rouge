@@ -97,8 +97,8 @@ impl InvokedEvents {
     }
 
     #[inline]
-    pub fn invoked(&self) -> MutexGuard<IndexSet<EventId>> {
-        self.invoked.lock().unwrap()
+    pub fn invoked(&self) -> &Arc<Mutex<IndexSet<EventId>>> {
+        &self.invoked
     }
 
     #[inline]

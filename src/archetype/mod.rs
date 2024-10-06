@@ -139,7 +139,10 @@ impl Archetypes {
         entity: Entity,
         component: C,
     ) -> Option<EntityMove> {
-        let (archetype, mut components) = self.remove_entity(entity)?;
+        let (archetype, mut components) = match self.remove_entity(entity) {
+            Some(data) => data,
+            None => (self.root, Row::new()),
+        };
         let id = ComponentId::of::<C>();
         let mut replaced = Row::new();
         let mut added = HashSet::new();
@@ -160,7 +163,10 @@ impl Archetypes {
     }
 
     pub fn add_components(&mut self, entity: Entity, mut components: Row) -> Option<EntityMove> {
-        let (archetype, mut row) = self.remove_entity(entity)?;
+        let (archetype, mut row) = match self.remove_entity(entity) {
+            Some(data) => data,
+            None => (self.root, Row::new()),
+        };
         let mut replaced = Row::new();
         let mut added = HashSet::new();
 
@@ -182,7 +188,10 @@ impl Archetypes {
     }
 
     pub fn remove_component<C: Component>(&mut self, entity: Entity) -> Option<EntityMove> {
-        let (archetype, mut row) = self.remove_entity(entity)?;
+        let (archetype, mut row) = match self.remove_entity(entity) {
+            Some(data) => data,
+            None => (self.root, Row::new()),
+        };
         let id = ComponentId::of::<C>();
         let component = row.remove_cell(&id)?;
         let mut removed = Row::new();
@@ -200,7 +209,10 @@ impl Archetypes {
         entity: Entity,
         components: impl IntoIterator<Item = impl AsRef<ComponentId>>,
     ) -> Option<EntityMove> {
-        let (archetype, mut row) = self.remove_entity(entity)?;
+        let (archetype, mut row) = match self.remove_entity(entity) {
+            Some(data) => data,
+            None => (self.root, Row::new()),
+        };
         let mut removed = Row::new();
 
         for component in components {

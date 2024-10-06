@@ -16,6 +16,10 @@ use crate::{
 };
 use access::WorldAccessTracker;
 use action::WorldActions;
+use builtin::{
+    components::{Children, Parent},
+    events::{ComponentUpdate, Despawned, HierarchyUpdate, Spawned},
+};
 use cell::WorldCell;
 use id::WorldId;
 use registry::{Metadata, Registry};
@@ -26,6 +30,7 @@ pub mod builtin;
 pub mod cell;
 pub mod query;
 pub mod registry;
+pub mod spawner;
 
 pub struct World {
     id: WorldId,
@@ -44,7 +49,7 @@ pub struct World {
 
 impl World {
     pub fn new() -> Self {
-        Self {
+        let mut world = Self {
             id: WorldId::new(),
             access: WorldAccessTracker::new(),
             entities: Entities::new(),
@@ -57,7 +62,10 @@ impl World {
             configs: SystemConfigs::new(RunMode::Parallel),
             systems: Some(Systems::new()),
             observers: Observers::new(),
-        }
+        };
+
+        world.register_builtin();
+        world
     }
 
     #[inline]
@@ -73,6 +81,11 @@ impl World {
     #[inline]
     pub fn entities(&self) -> &Entities {
         &self.entities
+    }
+
+    #[inline]
+    pub fn entities_mut(&mut self) -> &mut Entities {
+        &mut self.entities
     }
 
     #[inline]
@@ -159,6 +172,13 @@ impl World {
     pub fn register<C: Component>(&mut self) -> &mut Self {
         self.archetypes.register_component::<C>();
         self.registry.register_component::<C>();
+        self.register_event::<ComponentUpdate<C>>()
+    }
+
+    #[inline]
+    pub fn register_event<E: Event>(&mut self) -> &mut Self {
+        let invoked = self.events.invoked();
+        self.resources.add(Events::<E>::new(invoked.clone()));
         self
     }
 
@@ -241,7 +261,8 @@ impl World {
         self.actions.drain().drain(..).for_each(|a| a.execute(self));
 
         let invoked = {
-            let mut invoked = self.events.invoked();
+            let invoked = self.events.invoked();
+            let mut invoked = invoked.lock().unwrap();
             let mut invoked = invoked.drain(..).collect::<Vec<_>>();
             if let Some(phases) = phase.and_then(|p| self.events.deferred(p)) {
                 invoked.extend(phases);
@@ -256,15 +277,28 @@ impl World {
 
     #[inline]
     pub fn flush_type(&mut self, ty: EventId) {
-        let mut invoked = self.events.invoked();
+        let invoked = self.events.invoked();
+        let mut invoked = invoked.lock().unwrap();
         if invoked.shift_remove(&ty) {
             self.observers.build(self.mode());
             self.observers.run(WorldCell::from(self as &Self), vec![ty]);
         }
     }
+
+    fn register_builtin(&mut self) {
+        self.register::<Parent>();
+        self.register::<Children>();
+        self.register_event::<Spawned>();
+        self.register_event::<Despawned>();
+        self.register_event::<HierarchyUpdate>();
+    }
 }
 
 impl World {
+    pub fn spawner(&mut self) -> spawner::Spawner {
+        spawner::Spawner::new(self)
+    }
+
     pub fn spawn(&mut self) -> Entity {
         let entity = self.entities.spawn();
         self.archetypes.add_entity(entity);

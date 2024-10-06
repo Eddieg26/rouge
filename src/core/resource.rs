@@ -10,6 +10,10 @@ impl ResourceId {
     pub fn of<R: Resource>() -> Self {
         Self(Type::of::<R>())
     }
+
+    pub fn dynamic(ty: Type) -> Self {
+        Self(ty)
+    }
 }
 impl std::ops::Deref for ResourceId {
     type Target = Type;

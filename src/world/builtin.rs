@@ -1,6 +1,4 @@
 pub mod actions {
-    use std::process::Child;
-
     use super::{
         components::{Children, Parent},
         events::{Despawned, HierarchyUpdate, Spawned},
@@ -9,7 +7,7 @@ pub mod actions {
         archetype::table::Row,
         core::{component::Component, entity::Entity},
         event::Events,
-        world::{action::WorldAction, cell::WorldCell, registry::ComponentExtension},
+        world::{action::WorldAction, cell::WorldCell, registry::ComponentExtension, World},
     };
 
     pub struct Spawn {
@@ -30,7 +28,7 @@ pub mod actions {
     }
 
     impl WorldAction for Spawn {
-        fn execute(self, world: &mut crate::world::World) -> Option<()> {
+        fn execute(self, world: &mut World) -> Option<()> {
             let entity = world.spawn();
             let mv = world.add_components(entity, self.components)?;
 
@@ -166,35 +164,59 @@ pub mod events {
         event::Event,
     };
 
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-    pub struct Spawned(Entity);
+    #[derive(Debug, Clone)]
+    pub struct Spawned {
+        entities: Vec<Entity>,
+    }
 
-    impl Spawned {
-        pub fn entity(&self) -> Entity {
-            self.0
+    impl std::ops::Deref for Spawned {
+        type Target = [Entity];
+
+        fn deref(&self) -> &Self::Target {
+            &self.entities
         }
     }
 
     impl From<Entity> for Spawned {
         fn from(entity: Entity) -> Self {
-            Self(entity)
+            Self {
+                entities: vec![entity],
+            }
+        }
+    }
+
+    impl From<Vec<Entity>> for Spawned {
+        fn from(entities: Vec<Entity>) -> Self {
+            Self { entities }
         }
     }
 
     impl Event for Spawned {}
 
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-    pub struct Despawned(Entity);
+    #[derive(Debug, Clone)]
+    pub struct Despawned {
+        entities: Vec<Entity>,
+    }
 
-    impl Despawned {
-        pub fn entity(&self) -> Entity {
-            self.0
+    impl std::ops::Deref for Despawned {
+        type Target = [Entity];
+
+        fn deref(&self) -> &Self::Target {
+            &self.entities
         }
     }
 
     impl From<Entity> for Despawned {
         fn from(entity: Entity) -> Self {
-            Self(entity)
+            Self {
+                entities: vec![entity],
+            }
+        }
+    }
+
+    impl From<Vec<Entity>> for Despawned {
+        fn from(entities: Vec<Entity>) -> Self {
+            Self { entities }
         }
     }
 

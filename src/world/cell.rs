@@ -67,6 +67,18 @@ impl<'a> From<&mut World> for WorldCell<'a> {
     }
 }
 
+impl<'a> From<&&mut World> for WorldCell<'a> {
+    fn from(world: &&mut World) -> Self {
+        WorldCell(*world as *const _ as *mut _, PhantomData)
+    }
+}
+
+impl<'a> From<&&World> for WorldCell<'a> {
+    fn from(world: &&World) -> Self {
+        WorldCell(*world as *const _ as *mut _, PhantomData)
+    }
+}
+
 impl<'a> From<&World> for WorldCell<'a> {
     fn from(world: &World) -> Self {
         WorldCell(world as *const _ as *mut _, PhantomData)

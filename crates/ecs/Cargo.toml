@@ -1,0 +1,12 @@
+[package]
+name = "ecs"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+crc32fast = {workspace = true}
+downcast-rs = {workspace = true}
+hashbrown = {workspace = true}
+indexmap = {workspace = true}
+rayon = {workspace = true}
+ulid = {workspace = true}

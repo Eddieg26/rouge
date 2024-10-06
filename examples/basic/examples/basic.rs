@@ -1,19 +1,14 @@
-use core::{component::Component, entity::Entity, resource::Resource};
-use event::Event;
-use system::systems::Root;
-use world::{
-    action::WorldAction,
-    cell::WorldCell,
-    query::{Not, Query},
-    spawner::{SpawnedEntity, Spawner},
+use ecs::{
+    core::{component::Component, entity::Entity, resource::Resource},
+    event::Event,
+    system::systems::Root,
+    world::{
+        self,
+        action::WorldAction,
+        cell::WorldCell,
+        query::{Not, Query},
+    },
 };
-
-pub mod archetype;
-pub mod core;
-pub mod event;
-pub mod system;
-pub mod task;
-pub mod world;
 
 pub struct TestEvent;
 impl Event for TestEvent {}
@@ -47,7 +42,7 @@ fn main() {
     let mut spawner = world.spawner();
     spawner.spawn().with(A).done();
     spawner.done();
-    
+
     for (entity, a) in Query::<(Entity, &mut A), Not<B>>::new(&WorldCell::from(&world)) {
         println!("Entity: {:?}, A: {:?}", entity, a);
     }

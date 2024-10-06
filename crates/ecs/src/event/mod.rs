@@ -5,7 +5,7 @@ use crate::{
 use indexmap::{IndexMap, IndexSet};
 use std::{
     hash::Hash,
-    sync::{Arc, Mutex, MutexGuard},
+    sync::{Arc, Mutex},
 };
 
 pub trait Event: Send + 'static {}

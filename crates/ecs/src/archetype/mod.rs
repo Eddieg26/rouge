@@ -31,43 +31,36 @@ impl Archetypes {
         }
     }
 
-    #[inline]
     pub fn root(&self) -> ArchetypeId {
         self.root
     }
 
-    #[inline]
     pub fn entity_archetype(&self, entity: Entity) -> Option<&Archetype> {
         self.entities
             .get(&entity)
             .and_then(|id| self.archetypes.get(id))
     }
 
-    #[inline]
     pub fn entity_archetype_mut(&mut self, entity: Entity) -> Option<&mut Archetype> {
         self.entities
             .get(&entity)
             .and_then(|id| self.archetypes.get_mut(id))
     }
 
-    #[inline]
     pub fn archetype(&self, id: ArchetypeId) -> Option<&Archetype> {
         self.archetypes.get(&id)
     }
 
-    #[inline]
     pub fn get_component<C: Component>(&self, entity: Entity) -> Option<&C> {
         let archetype = self.entity_archetype(entity)?;
         archetype.table.get_component(&entity)
     }
 
-    #[inline]
     pub fn get_component_mut<C: Component>(&mut self, entity: Entity) -> Option<&mut C> {
         let archetype = self.entity_archetype_mut(entity)?;
         archetype.table.get_component_mut(&entity)
     }
 
-    #[inline]
     pub fn has_component<C: Component>(&self, entity: Entity) -> bool {
         let index = self.component_index(&ComponentId::of::<C>());
         match self.entity_archetype(entity) {
@@ -89,7 +82,6 @@ impl Archetypes {
         }
     }
 
-    #[inline]
     pub fn component_index(&self, component: &ComponentId) -> usize {
         self.components
             .get_index_of(component)

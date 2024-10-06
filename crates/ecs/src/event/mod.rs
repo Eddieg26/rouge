@@ -73,7 +73,6 @@ pub struct InvokedEvents {
 }
 
 impl InvokedEvents {
-    #[inline]
     pub fn new() -> Self {
         Self {
             invoked: Arc::default(),
@@ -81,12 +80,10 @@ impl InvokedEvents {
         }
     }
 
-    #[inline]
     pub fn invoke<E: Event>(&self) {
         self.invoked.lock().unwrap().insert(EventId::of::<E>());
     }
 
-    #[inline]
     pub fn defer<E: Event>(&self, phase: PhaseId) {
         self.deferred
             .lock()
@@ -96,12 +93,10 @@ impl InvokedEvents {
             .insert(EventId::of::<E>());
     }
 
-    #[inline]
     pub fn invoked(&self) -> &Arc<Mutex<IndexSet<EventId>>> {
         &self.invoked
     }
 
-    #[inline]
     pub fn deferred(&self, phase: PhaseId) -> Option<IndexSet<EventId>> {
         let mut invoked = self.deferred.lock().unwrap();
         invoked.shift_remove(&phase)

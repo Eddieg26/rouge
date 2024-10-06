@@ -426,32 +426,26 @@ pub struct Table {
 }
 
 impl Table {
-    #[inline]
     pub fn builder() -> TableBuilder {
         TableBuilder::new()
     }
 
-    #[inline]
     pub fn entities(&self) -> &IndexSet<Entity> {
         &self.rows
     }
 
-    #[inline]
     pub fn ids(&self) -> impl Iterator<Item = &ComponentId> {
         self.components.keys()
     }
 
-    #[inline]
     pub fn components(&self) -> &IndexMap<ComponentId, Column> {
         &self.components
     }
 
-    #[inline]
     pub fn contains(&self, entity: &Entity) -> bool {
         self.rows.contains(entity)
     }
 
-    #[inline]
     pub fn has_component(&self, id: &ComponentId) -> bool {
         self.components.contains_key(id)
     }
@@ -518,7 +512,6 @@ impl Table {
         Some(row)
     }
 
-    #[inline]
     pub fn len(&self) -> usize {
         self.rows.len()
     }

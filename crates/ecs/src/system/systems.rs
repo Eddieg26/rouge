@@ -32,7 +32,6 @@ impl SystemConfigs {
         }
     }
 
-    #[inline]
     pub fn meta(&self) -> &SystemMeta {
         &self.meta
     }
@@ -240,7 +239,6 @@ pub struct Systems {
 }
 
 impl Systems {
-    #[inline]
     pub fn new() -> Self {
         Self {
             graphs: SystemGraphs::new(),
@@ -248,27 +246,22 @@ impl Systems {
         }
     }
 
-    #[inline]
     pub fn graphs(&self) -> &SystemGraphs {
         &self.graphs
     }
 
-    #[inline]
     pub fn schedule(&self) -> &Schedule {
         &self.schedule
     }
 
-    #[inline]
     pub fn schedule_mut(&mut self) -> &mut Schedule {
         &mut self.schedule
     }
 
-    #[inline]
     pub fn add_graphs(&mut self, graphs: SystemGraphs) {
         self.graphs.add_graphs(graphs);
     }
 
-    #[inline]
     pub fn run(&self, phase: impl Phase, world: WorldCell) {
         let meta = world.get().configs().meta();
         let runners = meta.phase_runners();

@@ -46,17 +46,14 @@ impl ComponentExtension {
         }
     }
 
-    #[inline]
     pub fn on_added(&self, world: &mut World, entity: Entity) {
         (self.on_added)(world, entity)
     }
 
-    #[inline]
     pub fn on_removed(&self, world: &mut World, entity: Entity, component: ColumnCell) {
         (self.on_removed)(world, entity, component)
     }
 
-    #[inline]
     pub fn on_replaced(&self, world: &mut World, entity: Entity, component: ColumnCell) {
         (self.on_replaced)(world, entity, component)
     }
@@ -72,7 +69,6 @@ pub struct Metadata {
 }
 
 impl Metadata {
-    #[inline]
     pub fn new<T: 'static>(extension: impl MetadataExtension) -> Self {
         Self {
             name: std::any::type_name::<T>(),
@@ -82,27 +78,22 @@ impl Metadata {
         }
     }
 
-    #[inline]
     pub fn name(&self) -> &'static str {
         self.name
     }
 
-    #[inline]
     pub fn layout(&self) -> Layout {
         self.layout
     }
 
-    #[inline]
     pub fn type_id(&self) -> TypeId {
         self.type_id
     }
 
-    #[inline]
     pub fn extension(&self) -> &Arc<dyn MetadataExtension> {
         &self.extension
     }
 
-    #[inline]
     pub fn extension_as<T: MetadataExtension>(&self) -> &T {
         self.extension.downcast_ref().expect(&format!(
             "Extension type mismatch: expected {}, got {}",
@@ -117,14 +108,12 @@ pub struct Registry {
 }
 
 impl Registry {
-    #[inline]
     pub fn new() -> Self {
         Self {
             metadatas: IndexMap::new(),
         }
     }
 
-    #[inline]
     pub fn get(&self, ty: &Type) -> &Metadata {
         self.metadatas
             .get(ty)
@@ -135,24 +124,20 @@ impl Registry {
         self.get(ty).extension_as()
     }
 
-    #[inline]
     pub fn register_component<C: Component>(&mut self) -> Type {
         self.register::<C>(ComponentExtension::new::<C>())
     }
 
-    #[inline]
     pub fn register_resource<R: Resource>(&mut self) -> Type {
         self.register::<R>(())
     }
 
-    #[inline]
     pub fn index_of(&self, ty: &Type) -> usize {
         self.metadatas
             .get_index_of(ty)
             .expect(&format!("Type not registered: {:?}", ty))
     }
 
-    #[inline]
     pub fn len(&self) -> usize {
         self.metadatas.len()
     }

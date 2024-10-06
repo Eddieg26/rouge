@@ -81,7 +81,6 @@ impl SystemGraph {
                 }
 
                 impl GroupInfo {
-                    #[inline]
                     fn new_send(index: usize, access: Vec<WorldAccess>) -> Self {
                         let mut group = Self::default();
                         group.with_access(access);
@@ -89,7 +88,6 @@ impl SystemGraph {
                         group
                     }
 
-                    #[inline]
                     fn new_non_send(index: usize, access: Vec<WorldAccess>) -> Self {
                         let mut group = Self::default();
                         group.with_access(access);
@@ -97,7 +95,6 @@ impl SystemGraph {
                         group
                     }
 
-                    #[inline]
                     fn with_access(&mut self, access: Vec<WorldAccess>) {
                         for access in access {
                             let (ty, access, _) = access.access_ty();

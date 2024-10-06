@@ -12,12 +12,10 @@ impl Entity {
         generation: 0,
     };
 
-    #[inline]
     pub const fn new(id: u32) -> Self {
         Self { id, generation: 0 }
     }
 
-    #[inline]
     pub fn with_generation(mut self, generation: u32) -> Self {
         self.generation = generation;
         self

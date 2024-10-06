@@ -1,7 +1,11 @@
-use core::{component::Component, resource::Resource};
+use core::{component::Component, entity::Entity, resource::Resource};
 use event::Event;
 use system::systems::Root;
-use world::action::WorldAction;
+use world::{
+    action::WorldAction,
+    cell::WorldCell,
+    query::{Not, Query},
+};
 
 pub mod archetype;
 pub mod core;
@@ -22,8 +26,12 @@ impl WorldAction for TestAction {
     }
 }
 
+#[derive(Debug)]
 pub struct A;
 impl Component for A {}
+
+pub struct B;
+impl Component for B {}
 
 pub struct ResA;
 impl Resource for ResA {}
@@ -31,6 +39,12 @@ impl Resource for ResA {}
 fn main() {
     let mut world = world::World::new();
     world.register::<A>();
-    world.add_resource(ResA);
+    world.register::<B>();
+    let entity = world.spawn();
+    world.add_component(entity, A);
+    world.add_component(entity, B);
+    for (entity, a) in Query::<(Entity, &mut A), Not<B>>::new(&WorldCell::from(&world)) {
+        println!("Entity: {:?}, A: {:?}", entity, a);
+    }
     world.run(Root);
 }

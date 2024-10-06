@@ -229,7 +229,7 @@ impl Archetypes {
         } else {
             let table = row.into_table(entity);
             let mut bits = Bitset::with_capacity(self.components.len());
-            for component in table.components() {
+            for component in table.ids() {
                 let index = self.component_index(component);
                 bits.set(index);
             }

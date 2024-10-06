@@ -1,8 +1,5 @@
 use super::World;
-use crate::{
-    archetype::Archetypes,
-    core::resource::{Res, ResMut, Resource},
-};
+use crate::core::resource::{Res, ResMut, Resource};
 use std::marker::PhantomData;
 
 /// Provides an unsafe way to access world components and resources.
@@ -80,7 +77,3 @@ impl<'a> WorldCell<'a> {}
 
 unsafe impl<'a> Send for WorldCell<'a> {}
 unsafe impl<'a> Sync for WorldCell<'a> {}
-
-pub struct ArchetypeCell<'a>(*mut Archetypes, PhantomData<&'a mut Archetypes>);
-
-impl<'a> ArchetypeCell<'a> {}

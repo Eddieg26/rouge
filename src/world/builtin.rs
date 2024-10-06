@@ -1,7 +1,9 @@
 pub mod actions {
+    use std::process::Child;
+
     use super::{
-        components::Children,
-        events::{Despawned, Spawned},
+        components::{Children, Parent},
+        events::{Despawned, HierarchyUpdate, Spawned},
     };
     use crate::{
         archetype::table::Row,
@@ -101,6 +103,29 @@ pub mod actions {
 
     impl WorldAction for AddChild {
         fn execute(self, world: &mut crate::world::World) -> Option<()> {
+            let world = WorldCell::from(world);
+            if let Some(prev_parent) = world.get().get_component::<Parent>(self.child) {
+                if let Some(children) = world.get_mut().get_component_mut::<Children>(**prev_parent)
+                {
+                    children.remove(self.child);
+                }
+            }
+
+            if let Some(children) = world.get_mut().get_component_mut::<Children>(self.parent) {
+                children.add(self.child);
+            } else {
+                let mut children = Children::new();
+                children.add(self.child);
+                world.get_mut().add_component(self.parent, children);
+            }
+
+            let update = HierarchyUpdate::AddChild {
+                parent: self.parent,
+                child: self.child,
+            };
+
+            world.resource_mut::<Events<HierarchyUpdate>>().add(update);
+
             Some(())
         }
     }
@@ -118,6 +143,18 @@ pub mod actions {
 
     impl WorldAction for RemoveChild {
         fn execute(self, world: &mut crate::world::World) -> Option<()> {
+            world.remove_component::<Parent>(self.child)?;
+            if let Some(children) = world.get_component_mut::<Children>(self.parent) {
+                children.remove(self.child);
+            }
+
+            let update = HierarchyUpdate::RemoveChild {
+                parent: self.parent,
+                child: self.child,
+            };
+
+            world.resource_mut::<Events<HierarchyUpdate>>().add(update);
+
             Some(())
         }
     }
@@ -180,6 +217,14 @@ pub mod events {
     }
 
     impl<C: Component> Event for ComponentUpdate<C> {}
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    pub enum HierarchyUpdate {
+        AddChild { parent: Entity, child: Entity },
+        RemoveChild { parent: Entity, child: Entity },
+    }
+
+    impl Event for HierarchyUpdate {}
 }
 
 pub mod components {

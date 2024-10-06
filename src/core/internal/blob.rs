@@ -104,6 +104,14 @@ impl Blob {
         }
     }
 
+    pub unsafe fn get_mut_unsafe<T: 'static>(&self, index: usize) -> Option<&mut T> {
+        if index < self.length {
+            Some(unsafe { &mut *(self.offset(index) as *mut T) })
+        } else {
+            None
+        }
+    }
+
     pub fn push<T: 'static>(&mut self, value: T) {
         if self.length == self.capacity {
             self.reserve(self.capacity.max(1));
@@ -484,6 +492,10 @@ impl BlobCell {
         } else {
             None
         }
+    }
+
+    pub unsafe fn value_mut_unsafe<T: 'static>(&self) -> &mut T {
+        unsafe { &mut *(self.data.as_ptr() as *mut T) }
     }
 
     pub fn ptr<T: 'static>(&self) -> Ptr<T> {

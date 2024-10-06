@@ -24,6 +24,10 @@ impl ColumnCell {
         self.data.value_mut()
     }
 
+    pub unsafe fn value_mut_unsafe<T: 'static>(&self) -> *mut T {
+        self.data.value_mut_unsafe()
+    }
+
     pub fn into<T: 'static>(self) -> T {
         self.data.into()
     }
@@ -41,6 +45,10 @@ impl<'a> SelectedCell<'a> {
 
     pub fn value<T: 'static>(&self) -> Option<&T> {
         self.column.get::<T>(self.index)
+    }
+
+    pub unsafe fn value_mut<T: 'static>(&mut self) -> Option<&mut T> {
+        self.column.get_mut_unsafe::<T>(self.index)
     }
 }
 
@@ -60,6 +68,10 @@ impl<'a> SelectedCellMut<'a> {
 
     pub fn value_mut<T: 'static>(&mut self) -> Option<&mut T> {
         self.column.get_mut::<T>(self.index)
+    }
+
+    pub unsafe fn value_mut_unsafe<T: 'static>(&self) -> Option<&mut T> {
+        self.column.get_mut_unsafe::<T>(self.index)
     }
 }
 
@@ -92,6 +104,10 @@ impl Column {
 
     pub fn get_mut<T: 'static>(&mut self, index: usize) -> Option<&mut T> {
         self.data.get_mut::<T>(index)
+    }
+
+    pub unsafe fn get_mut_unsafe<T: 'static>(&self, index: usize) -> Option<&mut T> {
+        self.data.get_mut_unsafe::<T>(index)
     }
 
     pub fn push<T: 'static>(&mut self, value: T) {
@@ -318,6 +334,12 @@ impl<'a> SelectedRow<'a> {
             .and_then(|column| column.get(self.index))
     }
 
+    pub unsafe fn get_mut<C: Component>(&self) -> Option<&mut C> {
+        self.row
+            .get(&ComponentId::of::<C>())
+            .and_then(|column| column.get_mut_unsafe(self.index))
+    }
+
     pub fn contains<C: Component>(&self) -> bool {
         self.row.contains_key(&ComponentId::of::<C>())
     }
@@ -404,22 +426,32 @@ pub struct Table {
 }
 
 impl Table {
+    #[inline]
     pub fn builder() -> TableBuilder {
         TableBuilder::new()
     }
 
+    #[inline]
     pub fn entities(&self) -> &IndexSet<Entity> {
         &self.rows
     }
 
-    pub fn components(&self) -> impl Iterator<Item = &ComponentId> {
+    #[inline]
+    pub fn ids(&self) -> impl Iterator<Item = &ComponentId> {
         self.components.keys()
     }
 
+    #[inline]
+    pub fn components(&self) -> &IndexMap<ComponentId, Column> {
+        &self.components
+    }
+
+    #[inline]
     pub fn contains(&self, entity: &Entity) -> bool {
         self.rows.contains(entity)
     }
 
+    #[inline]
     pub fn has_component(&self, id: &ComponentId) -> bool {
         self.components.contains_key(id)
     }
@@ -434,6 +466,32 @@ impl Table {
         let column = self.components.get_mut(&ComponentId::of::<C>())?;
         let index = self.rows.get_index_of(entity)?;
         column.get_mut(index)
+    }
+
+    pub fn cell(&self, entity: Entity, id: &ComponentId) -> Option<SelectedCell> {
+        let index = self.rows.get_index_of(&entity)?;
+        let column = self.components.get(id)?;
+        Some(SelectedCell::new(column, index))
+    }
+
+    pub fn select(&self, entity: &Entity) -> Option<SelectedRow> {
+        let index = self.rows.get_index_of(entity)?;
+        let row = self
+            .components
+            .iter()
+            .map(|(id, column)| (*id, column))
+            .collect();
+        Some(SelectedRow::new(index, row))
+    }
+
+    pub fn select_mut(&mut self, entity: &Entity) -> Option<SelectedRowMut> {
+        let index = self.rows.get_index_of(entity)?;
+        let row = self
+            .components
+            .iter_mut()
+            .map(|(id, column)| (*id, column))
+            .collect();
+        Some(SelectedRowMut::new(index, row))
     }
 
     pub fn add_entity(&mut self, entity: Entity, mut row: Row) {
@@ -458,5 +516,10 @@ impl Table {
         }
 
         Some(row)
+    }
+
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.rows.len()
     }
 }

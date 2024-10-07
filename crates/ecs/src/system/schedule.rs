@@ -318,6 +318,10 @@ impl Schedule {
         }
     }
 
+    pub fn from<P: Phase>() -> Self {
+        Self::new(PhaseId::of::<P>())
+    }
+
     pub fn id(&self) -> PhaseId {
         self.id
     }
@@ -338,6 +342,18 @@ impl Schedule {
 
     pub fn add_child(&mut self, child: Schedule) {
         self.children.push(child);
+    }
+
+    pub fn add_sub_child<Main: Phase, Sub: Phase>(&mut self) -> bool {
+        let main = PhaseId::of::<Main>();
+        if let Some(index) = self.children.iter().position(|child| child.id == main) {
+            self.children[index].add_child(Sub::schedule());
+            true
+        } else {
+            self.children
+                .iter_mut()
+                .any(|schedule| schedule.add_sub_child::<Main, Sub>())
+        }
     }
 
     pub fn insert_before<Main: Phase, Before: Phase>(&mut self) -> bool {

@@ -4,9 +4,11 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-crc32fast = {workspace = true}
-downcast-rs = {workspace = true}
-hashbrown = {workspace = true}
-indexmap = {workspace = true}
-rayon = {workspace = true}
-ulid = {workspace = true}
+crc32fast = { workspace = true }
+downcast-rs = { workspace = true }
+hashbrown = { workspace = true }
+indexmap = { workspace = true }
+rayon = { workspace = true }
+ulid = { workspace = true }
+threadpool = { workspace = true }
+futures = { workspace = true }

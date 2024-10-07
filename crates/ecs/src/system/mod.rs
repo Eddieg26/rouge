@@ -21,7 +21,7 @@ impl SystemId {
 pub struct System {
     id: SystemId,
     name: Option<&'static str>,
-    run: Box<dyn Fn(&WorldCell) + Sync>,
+    run: Box<dyn Fn(&WorldCell) + Send + Sync>,
 }
 
 impl System {
@@ -49,7 +49,7 @@ impl System {
 pub struct SystemConfig {
     id: SystemId,
     name: Option<&'static str>,
-    run: Box<dyn Fn(&WorldCell) + Sync>,
+    run: Box<dyn Fn(&WorldCell) + Send + Sync>,
     access: fn() -> Vec<WorldAccess>,
     after: Option<SystemId>,
     is_send: bool,
@@ -58,7 +58,7 @@ pub struct SystemConfig {
 impl SystemConfig {
     pub fn new(
         name: Option<&'static str>,
-        run: Box<dyn Fn(&WorldCell) + Sync>,
+        run: Box<dyn Fn(&WorldCell) + Send + Sync>,
         access: fn() -> Vec<WorldAccess>,
         is_send: bool,
     ) -> Self {

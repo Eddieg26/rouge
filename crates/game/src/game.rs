@@ -1,121 +1,148 @@
-use crate::app::{App, AppTag, Apps};
+use crate::{
+    app::{AppBuilders, AppTag, Apps, MainApp},
+    phases::{Execute, PostExecute, PreExecute, Shutdown, Startup},
+    plugin::{Plugin, Plugins},
+};
 use ecs::{
     core::{component::Component, resource::Resource},
     event::Event,
     system::{schedule::Phase, IntoSystemConfigs},
+    task::TaskPool,
     world::World,
 };
 
 pub struct GameBuilder {
-    apps: Apps,
-    runner: Box<dyn GameRunner>,
+    apps: AppBuilders,
+    plugins: Plugins,
+    runner: Box<dyn Fn(Game) + 'static>,
 }
 
 impl GameBuilder {
     pub fn new() -> Self {
+        let mut apps = AppBuilders::new();
+        apps.main_app_mut().world_mut().add_phase::<Startup>();
+        apps.main_app_mut().world_mut().add_phase::<PreExecute>();
+        apps.main_app_mut().world_mut().add_phase::<Execute>();
+        apps.main_app_mut().world_mut().add_phase::<PostExecute>();
+        apps.main_app_mut().world_mut().add_phase::<Shutdown>();
+
         Self {
-            apps: Apps::new(),
+            apps,
+            plugins: Plugins::new(),
             runner: Box::new(default_runner),
         }
     }
 
     pub fn resource<R: Resource + Send>(&self) -> &R {
-        self.apps.main().resource::<R>()
+        self.apps.main_world().resource::<R>()
     }
 
     pub fn resource_mut<R: Resource + Send>(&mut self) -> &mut R {
-        self.apps.main_mut().resource_mut::<R>()
+        self.apps.main_world_mut().resource_mut::<R>()
     }
 
     pub fn non_send_resource<R: Resource>(&self) -> &R {
-        self.apps.main().non_send_resource::<R>()
+        self.apps.main_world().non_send_resource::<R>()
     }
 
     pub fn non_send_resource_mut<R: Resource>(&mut self) -> &mut R {
-        self.apps.main_mut().non_send_resource_mut::<R>()
+        self.apps.main_world_mut().non_send_resource_mut::<R>()
     }
 
     pub fn try_resource<R: Resource + Send>(&self) -> Option<&R> {
-        self.apps.main().try_resource::<R>()
+        self.apps.main_world().try_resource::<R>()
     }
 
     pub fn try_resource_mut<R: Resource + Send>(&mut self) -> Option<&mut R> {
-        self.apps.main_mut().try_resource_mut::<R>()
+        self.apps.main_world_mut().try_resource_mut::<R>()
     }
 
     pub fn try_non_send_resource<R: Resource>(&self) -> Option<&R> {
-        self.apps.main().try_non_send_resource::<R>()
+        self.apps.main_world().try_non_send_resource::<R>()
     }
 
     pub fn try_non_send_resource_mut<R: Resource>(&mut self) -> Option<&mut R> {
-        self.apps.main_mut().try_non_send_resource_mut::<R>()
+        self.apps.main_world_mut().try_non_send_resource_mut::<R>()
     }
 
     pub fn register<C: Component>(&mut self) -> &mut Self {
-        self.apps.main_mut().register::<C>();
+        self.apps.main_world_mut().register::<C>();
         self
     }
 
     pub fn register_event<E: Event>(&mut self) -> &mut Self {
-        self.apps.main_mut().register_event::<E>();
+        self.apps.main_world_mut().register_event::<E>();
         self
     }
 
     pub fn register_resource<R: Resource + Default + Send>(&mut self) -> &mut Self {
-        self.apps.main_mut().register_resource::<R>();
+        self.apps.main_world_mut().register_resource::<R>();
         self
     }
 
     pub fn register_non_send_resource<R: Resource + Default>(&mut self) -> &mut Self {
-        self.apps.main_mut().register_non_send_resource::<R>();
+        self.apps.main_world_mut().register_non_send_resource::<R>();
+        self
+    }
+
+    pub fn add_plugin<P: Plugin>(&mut self, plugin: P) -> &mut Self {
+        let mut plugins = plugin.dependencies().flatten();
+        for (_, plugin) in plugins.iter_mut() {
+            plugin.start(self);
+        }
+        self.plugins.extend(plugins);
         self
     }
 
     pub fn add_resource<R: Resource + Send>(&mut self, resource: R) -> &mut Self {
-        self.apps.main_mut().add_resource(resource);
+        self.apps.main_world_mut().add_resource(resource);
         self
     }
 
     pub fn add_non_send_resource<R: Resource>(&mut self, resource: R) -> &mut Self {
-        self.apps.main_mut().add_non_send_resource::<R>(resource);
+        self.apps
+            .main_world_mut()
+            .add_non_send_resource::<R>(resource);
         self
     }
 
     pub fn remove_resource<R: Resource + Send>(&mut self) -> Option<R> {
-        self.apps.main_mut().remove_resource::<R>()
+        self.apps.main_world_mut().remove_resource::<R>()
     }
 
     pub fn remove_non_send_resource<R: Resource>(&mut self) -> Option<R> {
-        self.apps.main_mut().remove_non_send_resource::<R>()
+        self.apps.main_world_mut().remove_non_send_resource::<R>()
     }
 
     pub fn invoke_event<E: Event>(&mut self, event: E) -> &mut Self {
-        self.apps.main_mut().invoke_event(event);
+        self.apps.main_world_mut().invoke_event(event);
         self
     }
 
-    pub fn add_sub_app<A: AppTag>(&mut self) -> &mut App {
-        self.apps.add::<A>()
+    pub fn add_sub_app<A: AppTag>(&mut self) -> &mut World {
+        self.apps.add::<A>().world_mut()
     }
 
-    pub fn sub_app<A: AppTag>(&self) -> &App {
+    pub fn sub_app<A: AppTag>(&self) -> &World {
         self.apps
             .sub::<A>()
             .expect(&format!("Sub app {:?} not found", A::NAME))
+            .world()
     }
 
-    pub fn sub_app_mut<A: AppTag>(&mut self) -> &mut App {
+    pub fn sub_app_mut<A: AppTag>(&mut self) -> &mut World {
         self.apps
             .sub_mut::<A>()
             .expect(&format!("Sub app {:?} not found", A::NAME))
+            .world_mut()
     }
 
-    pub fn try_sub_app<A: AppTag>(&self) -> Option<&App> {
-        self.apps.sub::<A>()
+    pub fn try_sub_app<A: AppTag>(&self) -> Option<&World> {
+        self.apps.sub::<A>().map(|app| app.world())
     }
 
-    pub fn try_sub_app_mut<A: AppTag>(&mut self) -> Option<&mut App> {
-        self.apps.sub_mut::<A>()
+    pub fn try_sub_app_mut<A: AppTag>(&mut self) -> Option<&mut World> {
+        self.apps.sub_mut::<A>().map(|app| app.world_mut())
     }
 
     pub fn add_systems<M>(
@@ -123,34 +150,66 @@ impl GameBuilder {
         phase: impl Phase,
         systems: impl IntoSystemConfigs<M>,
     ) -> &mut Self {
-        self.apps.main_mut().add_systems::<M>(phase, systems);
+        self.apps.main_world_mut().add_systems::<M>(phase, systems);
         self
     }
 
     pub fn observe<E: Event, M>(&mut self, observers: impl IntoSystemConfigs<M>) -> &mut Self {
-        self.apps.main_mut().observe::<E, M>(observers);
+        self.apps.main_world_mut().observe::<E, M>(observers);
         self
     }
 
-    pub fn set_runner(&mut self, runner: impl GameRunner) {
+    pub fn set_runner(&mut self, runner: impl Fn(Game) + 'static) {
         self.runner = Box::new(runner);
     }
 
-    pub fn run(&mut self) {}
-}
+    pub fn run(&mut self) {
+        let mut plugins = std::mem::take(&mut self.plugins);
+        plugins.run(self);
+        plugins.finish(self);
 
-pub struct Game {
-    world: World,
-}
-
-pub trait GameRunner: 'static {
-    fn run(&self, game: &mut Game);
-}
-
-impl<F: Fn(&mut Game) + 'static> GameRunner for F {
-    fn run(&self, game: &mut Game) {
-        self(game);
+        self.add_resource(TaskPool::default());
+        let apps = self.apps.into_apps();
+        let game = Game { apps };
+        (self.runner)(game);
     }
 }
 
-fn default_runner(game: &mut Game) {}
+pub struct Game {
+    apps: Apps,
+}
+
+impl Game {
+    pub fn new() -> GameBuilder {
+        GameBuilder::new()
+    }
+
+    pub fn app(&self) -> &MainApp {
+        self.apps.main_app()
+    }
+
+    pub fn app_mut(&mut self) -> &mut MainApp {
+        self.apps.main_app_mut()
+    }
+
+    pub fn startup(&mut self) {
+        self.apps.main_app_mut().run(Startup);
+    }
+
+    pub fn update(&mut self) {
+        self.apps.main_app_mut().run(PreExecute);
+        self.apps.main_app_mut().run(Execute);
+        self.apps.run();
+        self.apps.main_app_mut().run(PostExecute);
+    }
+
+    pub fn shutdown(&mut self) {
+        self.apps.main_app_mut().run(Shutdown);
+    }
+}
+
+fn default_runner(mut game: Game) {
+    game.startup();
+    game.update();
+    game.shutdown();
+}

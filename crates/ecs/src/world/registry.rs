@@ -7,7 +7,7 @@ use crate::{
 use indexmap::IndexMap;
 use std::{alloc::Layout, any::TypeId, sync::Arc};
 
-pub trait MetadataExtension: downcast_rs::Downcast + 'static {}
+pub trait MetadataExtension: downcast_rs::Downcast + Send + Sync + 'static {}
 downcast_rs::impl_downcast!(MetadataExtension);
 
 impl MetadataExtension for () {}
@@ -142,10 +142,17 @@ impl Registry {
         self.metadatas.len()
     }
 
+    pub fn contains(&self, ty: &Type) -> bool {
+        self.metadatas.contains_key(ty)
+    }
+
     fn register<T: 'static>(&mut self, hooks: impl MetadataExtension) -> Type {
         let ty = Type::of::<T>();
-        let metadata = Metadata::new::<T>(hooks);
-        self.metadatas.insert(ty, metadata);
+        if !self.contains(&ty) {
+            let metadata = Metadata::new::<T>(hooks);
+            self.metadatas.insert(ty, metadata);
+        }
+
         ty
     }
 }

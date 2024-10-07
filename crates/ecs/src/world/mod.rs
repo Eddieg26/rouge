@@ -43,7 +43,7 @@ pub struct World {
     resources: Resources<true>,
     non_send_resources: Resources<false>,
     configs: SystemConfigs,
-    systems: Option<Systems>,
+    systems: Systems,
     observers: Observers,
 }
 
@@ -60,7 +60,7 @@ impl World {
             resources: Resources::new(),
             non_send_resources: Resources::new(),
             configs: SystemConfigs::new(RunMode::Parallel),
-            systems: Some(Systems::new()),
+            systems: Systems::new(),
             observers: Observers::new(),
         };
 
@@ -160,20 +160,30 @@ impl World {
         self
     }
 
-    pub fn register_resource<R: Resource + Default + Send>(&mut self) -> &mut Self {
-        self.resources.add(R::default());
+    pub fn register_resource<R: Resource + Send>(&mut self) -> &mut Self {
         self.registry.register_resource::<R>();
         self
     }
 
-    pub fn register_non_send_resource<R: Resource + Default>(&mut self) -> &mut Self {
-        self.non_send_resources.add(R::default());
+    pub fn register_non_send_resource<R: Resource>(&mut self) -> &mut Self {
+        self.registry.register_resource::<R>();
+        self
+    }
+
+    pub fn init_resource<R: Resource + Default + Send>(&mut self) -> &mut Self {
+        self.resources.add(R::default());
         self.registry.register_resource::<R>();
         self
     }
 
     pub fn add_resource<R: Resource + Send>(&mut self, resource: R) -> &mut Self {
         self.resources.add(resource);
+        self.registry.register_resource::<R>();
+        self
+    }
+
+    pub fn init_non_send_resource<R: Resource + Default>(&mut self) -> &mut Self {
+        self.non_send_resources.add(R::default());
         self.registry.register_resource::<R>();
         self
     }
@@ -213,15 +223,32 @@ impl World {
         self
     }
 
-    pub fn run(&mut self, phase: impl Phase) {
-        let mut systems = self.systems.take().unwrap();
+    pub fn add_phase<P: Phase>(&mut self) -> &mut Self {
+        self.systems.schedule_mut().add_child(P::schedule());
+        self
+    }
 
+    pub fn add_sub_phase<Main: Phase, Sub: Phase>(&mut self) -> &mut Self {
+        self.systems.schedule_mut().add_sub_child::<Main, Sub>();
+        self
+    }
+
+    pub fn add_phase_before<P: Phase, Before: Phase>(&mut self) -> &mut Self {
+        self.systems.schedule_mut().insert_before::<P, Before>();
+        self
+    }
+
+    pub fn add_phase_after<P: Phase, After: Phase>(&mut self) -> &mut Self {
+        self.systems.schedule_mut().insert_after::<P, After>();
+        self
+    }
+
+    pub fn run(&mut self, phase: impl Phase) {
         if !self.configs.is_empty() {
-            systems.add_graphs(self.configs.build_graphs());
+            self.systems.add_graphs(self.configs.build_graphs());
         }
 
-        systems.run(phase, WorldCell::from(self as &Self));
-        self.systems.replace(systems);
+        self.systems.run(phase, WorldCell::from(self as &Self));
     }
 
     pub fn flush(&mut self, phase: Option<PhaseId>) {

@@ -36,9 +36,6 @@ fn main() {
     let mut world = world::World::new();
     world.register::<A>();
     world.register::<B>();
-    // let entity = world.spawn();
-    // world.add_component(entity, A);
-    // world.add_component(entity, B);
     let mut spawner = world.spawner();
     spawner.spawn().with(A).done();
     spawner.done();

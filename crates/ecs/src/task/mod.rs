@@ -73,12 +73,12 @@ impl Default for TaskPool {
     }
 }
 
-pub struct AsyncTaskPool<Output> {
+pub struct AsyncTaskPool<'a, Output> {
     size: usize,
-    pool: Vec<Pin<Box<dyn futures::Future<Output = Output>>>>,
+    pool: Vec<Pin<Box<dyn futures::Future<Output = Output> + 'a>>>,
 }
 
-impl<Output> AsyncTaskPool<Output> {
+impl<'a, Output> AsyncTaskPool<'a, Output> {
     pub fn new(size: usize) -> Self {
         AsyncTaskPool {
             size,
@@ -86,7 +86,7 @@ impl<Output> AsyncTaskPool<Output> {
         }
     }
 
-    pub fn spawn(&mut self, future: impl futures::Future<Output = Output> + 'static) {
+    pub fn spawn(&mut self, future: impl futures::Future<Output = Output> + 'a) {
         self.pool.push(Box::pin(future));
     }
 

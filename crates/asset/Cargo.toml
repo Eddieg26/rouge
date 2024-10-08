@@ -12,3 +12,5 @@ futures-io = "0.3.31"
 async-std = "1.13.0"
 notify-debouncer-full = "0.3.1"
 stackfuture = "0.3.0"
+ulid.workspace = true
+serde.workspace = true

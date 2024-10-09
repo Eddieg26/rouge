@@ -179,5 +179,37 @@ impl<T: AsRef<Path>> PathExt for T {
 }
 
 pub struct AssetSources {
-    sources: HashMap<SourceId, Arc<AssetSource>>,
+    sources: HashMap<SourceId, AssetSource>,
+}
+
+impl AssetSources {
+    pub fn new() -> Self {
+        Self {
+            sources: HashMap::new(),
+        }
+    }
+
+    pub fn add(&mut self, id: SourceId, source: AssetSource) {
+        self.sources.insert(id, source);
+    }
+
+    pub fn remove(&mut self, id: &SourceId) {
+        self.sources.remove(id);
+    }
+
+    pub fn get(&self, id: &SourceId) -> Option<&AssetSource> {
+        self.sources.get(id)
+    }
+
+    pub fn contains(&self, id: &SourceId) -> bool {
+        self.sources.contains_key(id)
+    }
+
+    pub fn len(&self) -> usize {
+        self.sources.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.sources.is_empty()
+    }
 }

@@ -1,8 +1,8 @@
-use std::path::{Path, PathBuf};
-
+use crate::io::SourceId;
 use ecs::core::{internal::blob::BlobCell, resource::Resource, Type};
 use hashbrown::{hash_map, HashMap};
 use serde::ser::SerializeStruct;
+use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
 pub trait Asset: serde::Serialize + for<'a> serde::Deserialize<'a> + 'static {}
@@ -72,25 +72,34 @@ impl Into<Type> for AssetType {
 
 #[derive(Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum AssetPath {
-    Id(AssetId),
-    Path(PathBuf),
+    Id { source: SourceId, id: AssetId },
+    Path { source: SourceId, path: PathBuf },
 }
 
 impl From<AssetId> for AssetPath {
-    fn from(value: AssetId) -> Self {
-        AssetPath::Id(value)
+    fn from(id: AssetId) -> Self {
+        AssetPath::Id {
+            source: SourceId::Default,
+            id,
+        }
     }
 }
 
 impl From<&AssetId> for AssetPath {
     fn from(value: &AssetId) -> Self {
-        AssetPath::Id(*value)
+        AssetPath::Id {
+            source: SourceId::Default,
+            id: *value,
+        }
     }
 }
 
 impl<A: AsRef<Path>> From<A> for AssetPath {
     fn from(value: A) -> Self {
-        AssetPath::Path(value.as_ref().to_path_buf())
+        AssetPath::Path {
+            source: SourceId::Default,
+            path: value.as_ref().to_path_buf(),
+        }
     }
 }
 

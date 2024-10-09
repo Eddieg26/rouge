@@ -1,4 +1,4 @@
-use super::{AssetReader, AssetWriter};
+use super::{AssetIoError, AssetReader, AssetWriter};
 use async_std::{
     fs::File,
     io::{ReadExt, WriteExt},
@@ -8,19 +8,28 @@ use std::path::PathBuf;
 
 pub struct LocalFS;
 
-pub struct LocalFile;
+pub struct LocalEntry {
+    path: PathBuf,
+    file: Option<File>,
+}
 
-impl AssetReader for LocalFile {
-    fn read<'a>(
-        &'a mut self,
-        path: &'a std::path::Path,
-        buf: &'a mut [u8],
-    ) -> super::AssetFuture<'a, usize> {
+impl AssetReader for LocalEntry {
+    fn path(&self) -> &std::path::Path {
+        &self.path
+    }
+
+    fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> super::AssetFuture<'a, usize> {
         let result = async move {
-            let mut file = match File::open(path).await {
-                Ok(file) => file,
-                Err(error) => return Err(super::AssetIoError::from(error)),
+            let file = match &mut self.file {
+                Some(file) => file,
+                None => {
+                    return Err(AssetIoError::from(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        "Path is not a file",
+                    )))
+                }
             };
+
             match file.read(buf).await {
                 Ok(len) => Ok(len),
                 Err(error) => return Err(super::AssetIoError::from(error)),
@@ -30,16 +39,18 @@ impl AssetReader for LocalFile {
         Box::pin(result)
     }
 
-    fn read_to_end<'a>(
-        &mut self,
-        path: &'a std::path::Path,
-        buf: &'a mut Vec<u8>,
-    ) -> super::AssetFuture<'a, usize> {
+    fn read_to_end<'a>(&'a mut self, buf: &'a mut Vec<u8>) -> super::AssetFuture<'a, usize> {
         let result = async move {
-            let mut file = match File::open(path).await {
-                Ok(file) => file,
-                Err(error) => return Err(super::AssetIoError::from(error)),
+            let file = match &mut self.file {
+                Some(file) => file,
+                None => {
+                    return Err(AssetIoError::from(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        "Path is not a file",
+                    )))
+                }
             };
+
             match file.read_to_end(buf).await {
                 Ok(len) => Ok(len),
                 Err(error) => return Err(super::AssetIoError::from(error)),
@@ -49,12 +60,9 @@ impl AssetReader for LocalFile {
         Box::pin(result)
     }
 
-    fn read_directory<'a>(
-        &'a mut self,
-        path: &'a std::path::Path,
-    ) -> super::AssetFuture<'a, Vec<PathBuf>> {
+    fn read_directory<'a>(&'a mut self) -> super::AssetFuture<'a, Vec<PathBuf>> {
         let result = async move {
-            let entries = match async_std::fs::read_dir(path).await {
+            let entries = match async_std::fs::read_dir(&self.path).await {
                 Ok(entries) => entries,
                 Err(error) => return Err(super::AssetIoError::from(error)),
             };
@@ -69,9 +77,9 @@ impl AssetReader for LocalFile {
         Box::pin(result)
     }
 
-    fn is_directory<'a>(&'a mut self, path: &'a std::path::Path) -> super::AssetFuture<'a, bool> {
+    fn is_directory<'a>(&'a mut self) -> super::AssetFuture<'a, bool> {
         let result = async move {
-            let metadata = match async_std::fs::metadata(path).await {
+            let metadata = match async_std::fs::metadata(&self.path).await {
                 Ok(metadata) => metadata,
                 Err(error) => return Err(super::AssetIoError::from(error)),
             };
@@ -82,14 +90,14 @@ impl AssetReader for LocalFile {
     }
 }
 
-impl AssetWriter for LocalFile {
-    fn write<'a>(
-        &'a mut self,
-        path: &'a std::path::Path,
-        data: &'a [u8],
-    ) -> super::AssetFuture<'a, usize> {
+impl AssetWriter for LocalEntry {
+    fn path(&self) -> &std::path::Path {
+        &self.path
+    }
+
+    fn write<'a>(&'a mut self, data: &'a [u8]) -> super::AssetFuture<'a, usize> {
         let result = async move {
-            let mut file = match File::create(path).await {
+            let mut file = match File::create(&self.path).await {
                 Ok(file) => file,
                 Err(error) => return Err(super::AssetIoError::from(error)),
             };
@@ -102,9 +110,9 @@ impl AssetWriter for LocalFile {
         Box::pin(result)
     }
 
-    fn create_directory<'a>(&'a mut self, path: &'a std::path::Path) -> super::AssetFuture<'a, ()> {
+    fn create_directory<'a>(&'a mut self) -> super::AssetFuture<'a, ()> {
         let result = async move {
-            match async_std::fs::create_dir(path).await {
+            match async_std::fs::create_dir(&self.path).await {
                 Ok(()) => Ok(()),
                 Err(error) => Err(super::AssetIoError::from(error)),
             }
@@ -113,9 +121,9 @@ impl AssetWriter for LocalFile {
         Box::pin(result)
     }
 
-    fn remove<'a>(&'a mut self, path: &'a std::path::Path) -> super::AssetFuture<'a, ()> {
+    fn remove<'a>(&'a mut self) -> super::AssetFuture<'a, ()> {
         let result = async move {
-            match async_std::fs::remove_file(path).await {
+            match async_std::fs::remove_file(&self.path).await {
                 Ok(()) => Ok(()),
                 Err(error) => Err(super::AssetIoError::from(error)),
             }
@@ -124,9 +132,9 @@ impl AssetWriter for LocalFile {
         Box::pin(result)
     }
 
-    fn remove_directory<'a>(&'a mut self, path: &'a std::path::Path) -> super::AssetFuture<'a, ()> {
+    fn remove_directory<'a>(&'a mut self) -> super::AssetFuture<'a, ()> {
         let result = async move {
-            match async_std::fs::remove_dir(path).await {
+            match async_std::fs::remove_dir(&self.path).await {
                 Ok(()) => Ok(()),
                 Err(error) => Err(super::AssetIoError::from(error)),
             }
@@ -135,13 +143,9 @@ impl AssetWriter for LocalFile {
         Box::pin(result)
     }
 
-    fn rename<'a>(
-        &'a mut self,
-        from: &'a std::path::Path,
-        to: &'a std::path::Path,
-    ) -> super::AssetFuture<'a, ()> {
+    fn rename<'a>(&'a mut self, to: &'a std::path::Path) -> super::AssetFuture<'a, ()> {
         let result = async move {
-            match async_std::fs::rename(from, to).await {
+            match async_std::fs::rename(&self.path, to).await {
                 Ok(()) => Ok(()),
                 Err(error) => Err(super::AssetIoError::from(error)),
             }

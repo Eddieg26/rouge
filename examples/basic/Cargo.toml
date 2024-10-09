@@ -10,4 +10,5 @@ ecs = { path = "../../crates/ecs" }
 game = { path = "../../crates/game" }
 asset = { path = "../../crates/asset" }
 vfs = { version = "0.12.0", features = ["embedded-fs"] }
+serde = { workspace = true, features = ["derive"] }
 pollster = "=0.2.4"

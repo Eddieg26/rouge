@@ -8,7 +8,9 @@ pub use indexmap::*;
 
 use std::{any::TypeId, fmt::Debug, hash::Hash};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub struct Type(u32);
 impl Type {
     pub fn of<R: 'static>() -> Self {

@@ -3,6 +3,7 @@ use std::{
     future::Future,
     path::{Path, PathBuf},
     pin::Pin,
+    string::FromUtf8Error,
     sync::Arc,
 };
 
@@ -22,6 +23,33 @@ impl From<std::io::Error> for AssetIoError {
     }
 }
 
+impl From<toml::ser::Error> for AssetIoError {
+    fn from(err: toml::ser::Error) -> Self {
+        Self::Io(Arc::new(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            err,
+        )))
+    }
+}
+
+impl From<toml::de::Error> for AssetIoError {
+    fn from(err: toml::de::Error) -> Self {
+        Self::Io(Arc::new(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            err,
+        )))
+    }
+}
+
+impl From<FromUtf8Error> for AssetIoError {
+    fn from(err: FromUtf8Error) -> Self {
+        Self::Io(Arc::new(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            err,
+        )))
+    }
+}
+
 impl std::fmt::Display for AssetIoError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -34,83 +62,122 @@ impl std::fmt::Display for AssetIoError {
 
 impl std::error::Error for AssetIoError {}
 
-pub type AssetFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, AssetIoError>> + 'a>>;
+pub type AssetFuture<'a, T, E = AssetIoError> = Pin<Box<dyn Future<Output = Result<T, E>> + 'a>>;
 
 pub trait AssetReader: Send + Sync + 'static {
-    fn read<'a>(&'a mut self, path: &'a Path, buf: &'a mut [u8]) -> AssetFuture<'a, usize>;
-    fn read_to_end<'a>(&mut self, path: &'a Path, buf: &'a mut Vec<u8>) -> AssetFuture<'a, usize>;
-    fn read_directory<'a>(&'a mut self, path: &'a Path) -> AssetFuture<'a, Vec<PathBuf>>;
-    fn is_directory<'a>(&'a mut self, path: &'a Path) -> AssetFuture<'a, bool>;
+    fn path(&self) -> &Path;
+    fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> AssetFuture<'a, usize>;
+    fn read_to_end<'a>(&'a mut self, buf: &'a mut Vec<u8>) -> AssetFuture<'a, usize>;
+    fn read_directory<'a>(&'a mut self) -> AssetFuture<'a, Vec<PathBuf>>;
+    fn is_directory<'a>(&'a mut self) -> AssetFuture<'a, bool>;
 }
 
 pub trait AssetWriter: Send + Sync + 'static {
-    fn write<'a>(&'a mut self, path: &'a Path, data: &'a [u8]) -> AssetFuture<'a, usize>;
-    fn create_directory<'a>(&'a mut self, path: &'a Path) -> AssetFuture<'a, ()>;
-    fn remove<'a>(&'a mut self, path: &'a Path) -> AssetFuture<'a, ()>;
-    fn remove_directory<'a>(&'a mut self, path: &'a Path) -> AssetFuture<'a, ()>;
-    fn rename<'a>(&'a mut self, from: &'a Path, to: &'a Path) -> AssetFuture<'a, ()>;
+    fn path(&self) -> &Path;
+    fn write<'a>(&'a mut self, data: &'a [u8]) -> AssetFuture<'a, usize>;
+    fn create_directory<'a>(&'a mut self) -> AssetFuture<'a, ()>;
+    fn remove<'a>(&'a mut self) -> AssetFuture<'a, ()>;
+    fn remove_directory<'a>(&'a mut self) -> AssetFuture<'a, ()>;
+    fn rename<'a>(&'a mut self, to: &'a Path) -> AssetFuture<'a, ()>;
 }
 
 pub trait AssetWatcher: Send + Sync + 'static {
     fn watch(&self, path: &Path) -> Result<(), AssetIoError>;
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct AssetSourceRoot(Box<str>);
-impl From<String> for AssetSourceRoot {
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum SourceId {
+    Default,
+    Root(Box<str>),
+}
+
+impl From<String> for SourceId {
     fn from(s: String) -> Self {
-        Self(s.into_boxed_str())
+        SourceId::Root(s.into_boxed_str())
     }
 }
 
-impl From<&str> for AssetSourceRoot {
+impl From<&str> for SourceId {
     fn from(s: &str) -> Self {
-        Self(s.to_string().into_boxed_str())
+        SourceId::Root(s.to_string().into_boxed_str())
     }
 }
 
-impl AsRef<str> for AssetSourceRoot {
-    fn as_ref(&self) -> &str {
-        &self.0
-    }
+pub trait AssetSourceConfig: downcast_rs::Downcast + Send + Sync + 'static {
+    fn reader(&self, path: &Path) -> Box<dyn AssetReader>;
+    fn writer(&self, path: &Path) -> Box<dyn AssetWriter>;
+    fn watcher(&self, path: &Path) -> Box<dyn AssetWatcher>;
 }
-
-pub trait AssetSourceConfig: Send + Sync + 'static {
-    fn reader(&self) -> Box<dyn AssetReader>;
-    fn writer(&self) -> Box<dyn AssetWriter>;
-    fn watcher(&self) -> Box<dyn AssetWatcher>;
-}
+downcast_rs::impl_downcast!(AssetSourceConfig);
 
 pub struct AssetSource {
-    root: AssetSourceRoot,
     config: Box<dyn AssetSourceConfig>,
 }
 
 impl AssetSource {
-    pub fn new<C: AssetSourceConfig>(root: AssetSourceRoot, config: C) -> Self {
+    pub fn new<C: AssetSourceConfig>(config: C) -> Self {
         Self {
-            root,
             config: Box::new(config),
         }
     }
 
-    pub fn root(&self) -> &str {
-        self.root.as_ref()
+    pub fn config(&self) -> &dyn AssetSourceConfig {
+        &*self.config
     }
 
-    pub fn reader(&self) -> Box<dyn AssetReader> {
-        self.config.reader()
+    pub fn config_as<C: AssetSourceConfig>(&self) -> Option<&C> {
+        self.config.downcast_ref()
     }
 
-    pub fn writer(&self) -> Box<dyn AssetWriter> {
-        self.config.writer()
+    pub fn reader(&self, path: &Path) -> Box<dyn AssetReader> {
+        self.config.reader(path)
     }
 
-    pub fn watcher(&self) -> Box<dyn AssetWatcher> {
-        self.config.watcher()
+    pub fn writer(&self, path: &Path) -> Box<dyn AssetWriter> {
+        self.config.writer(path)
+    }
+
+    pub fn watcher(&self, path: &Path) -> Box<dyn AssetWatcher> {
+        self.config.watcher(path)
+    }
+}
+
+pub trait PathExt {
+    fn ext(&self) -> Option<&str>;
+    fn append_ext(&self, ext: &str) -> PathBuf;
+    fn with_prefix(&self, prefix: impl AsRef<Path>) -> PathBuf;
+    fn without_prefix(&self, prefix: impl AsRef<Path>) -> &Path;
+}
+
+impl<T: AsRef<Path>> PathExt for T {
+    fn ext(&self) -> Option<&str> {
+        self.as_ref().extension().and_then(|ext| ext.to_str())
+    }
+
+    fn append_ext(&self, ext: &str) -> PathBuf {
+        let path = self.as_ref().to_path_buf();
+        format!("{}.{}", path.display(), ext).into()
+    }
+
+    fn with_prefix(&self, prefix: impl AsRef<Path>) -> PathBuf {
+        match self.as_ref().starts_with(prefix.as_ref()) {
+            true => self.as_ref().to_path_buf(),
+            false => prefix.as_ref().join(self.as_ref()),
+        }
+    }
+
+    fn without_prefix(&self, prefix: impl AsRef<Path>) -> &Path {
+        let path = self.as_ref();
+        let prefix = prefix.as_ref();
+
+        if path.starts_with(prefix) {
+            path.strip_prefix(prefix).unwrap()
+        } else {
+            path
+        }
     }
 }
 
 pub struct AssetSources {
-    sources: HashMap<AssetSourceRoot, Arc<AssetSource>>,
+    sources: HashMap<SourceId, Arc<AssetSource>>,
 }

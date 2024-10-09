@@ -13,7 +13,7 @@ pub struct SystemId(u32);
 impl SystemId {
     pub fn new() -> Self {
         let mut hasher = crc32fast::Hasher::new();
-        ulid::Ulid::new().hash(&mut hasher);
+        uuid::Uuid::new_v4().hash(&mut hasher);
         Self(hasher.finalize())
     }
 }

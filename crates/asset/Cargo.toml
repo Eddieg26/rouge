@@ -4,13 +4,17 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+vfs = { version = "0.12.0" }
 ecs = { path = "../ecs" }
 game = { path = "../game" }
 futures = { workspace = true }
-vfs = { version = "0.12.0", features = ["embedded-fs"] }
+toml = { workspace = true }
+downcast-rs = { workspace = true }
+hashbrown = { workspace = true, features = ["serde"] }
+bincode = { workspace = true }
+uuid = { workspace = true, features = ["v4"] }
+serde = { workspace = true, features = ["derive"] }
 futures-io = "0.3.31"
 async-std = "1.13.0"
 notify-debouncer-full = "0.3.1"
 stackfuture = "0.3.0"
-ulid.workspace = true
-serde.workspace = true

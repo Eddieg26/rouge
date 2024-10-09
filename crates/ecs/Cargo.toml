@@ -9,6 +9,7 @@ downcast-rs = { workspace = true }
 hashbrown = { workspace = true }
 indexmap = { workspace = true }
 rayon = { workspace = true }
-ulid = { workspace = true }
 threadpool = { workspace = true }
 futures = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+uuid = { workspace = true, features = ["v4", "serde"] }

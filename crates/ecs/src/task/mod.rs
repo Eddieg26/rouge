@@ -1,4 +1,4 @@
-use crate::core::resource::Resource;
+use crate::{core::resource::Resource, system::SystemArg};
 use std::{collections::VecDeque, pin::Pin, sync::Arc};
 
 pub type ScopedTask<'a> = Box<dyn FnOnce() + Send + 'a>;
@@ -105,5 +105,13 @@ impl<'a, Output> AsyncTaskPool<'a, Output> {
         }
 
         outputs
+    }
+}
+
+impl SystemArg for &TaskPool {
+    type Item<'a> = &'a TaskPool;
+
+    fn get<'a>(world: &'a crate::world::cell::WorldCell) -> Self::Item<'a> {
+        world.get().tasks()
     }
 }

@@ -13,6 +13,7 @@ use crate::{
         systems::{Global, RunMode, SystemConfigs, Systems},
         IntoSystemConfigs,
     },
+    task::TaskPool,
 };
 use access::WorldAccessTracker;
 use action::WorldActions;
@@ -45,6 +46,7 @@ pub struct World {
     configs: SystemConfigs,
     systems: Systems,
     observers: Observers,
+    tasks: TaskPool,
 }
 
 impl World {
@@ -62,6 +64,7 @@ impl World {
             configs: SystemConfigs::new(RunMode::Parallel),
             systems: Systems::new(),
             observers: Observers::new(),
+            tasks: TaskPool::default(),
         };
 
         world.register_builtin();
@@ -110,6 +113,10 @@ impl World {
 
     pub fn configs(&self) -> &SystemConfigs {
         &self.configs
+    }
+
+    pub fn tasks(&self) -> &TaskPool {
+        &self.tasks
     }
 
     pub fn mode(&self) -> RunMode {

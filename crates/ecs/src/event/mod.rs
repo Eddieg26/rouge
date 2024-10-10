@@ -51,6 +51,14 @@ impl<E: Event> Events<E> {
         self.events.iter()
     }
 
+    pub fn drain(&mut self) -> impl Iterator<Item = E> + '_ {
+        self.events.drain(..)
+    }
+
+    pub fn take(&mut self) -> Vec<E> {
+        std::mem::take(&mut self.events)
+    }
+
     pub fn clear(&mut self) {
         self.events.clear();
     }

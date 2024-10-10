@@ -17,4 +17,5 @@ serde = { workspace = true, features = ["derive"] }
 futures-io = "0.3.31"
 async-std = "1.13.0"
 notify-debouncer-full = "0.3.1"
+notify = "6.1.1"
 stackfuture = "0.3.0"

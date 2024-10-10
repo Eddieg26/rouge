@@ -5,7 +5,7 @@ use serde::ser::SerializeStruct;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
-pub trait Asset: serde::Serialize + for<'a> serde::Deserialize<'a> + 'static {}
+pub trait Asset: Send + Sync + serde::Serialize + for<'a> serde::Deserialize<'a> + 'static {}
 
 pub trait Settings: Default + serde::Serialize + for<'a> serde::Deserialize<'a> + 'static {}
 
@@ -70,7 +70,7 @@ impl Into<Type> for AssetType {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum AssetPath {
     Id { source: SourceId, id: AssetId },
     Path { source: SourceId, path: PathBuf },

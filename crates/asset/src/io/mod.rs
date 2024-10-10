@@ -69,7 +69,7 @@ pub trait AssetReader: Send + Sync + 'static {
     fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> AssetFuture<'a, usize>;
     fn read_to_end<'a>(&'a mut self, buf: &'a mut Vec<u8>) -> AssetFuture<'a, usize>;
     fn read_directory<'a>(&'a mut self) -> AssetFuture<'a, Vec<PathBuf>>;
-    fn is_directory<'a>(&'a mut self) -> AssetFuture<'a, bool>;
+    fn is_directory<'a>(&'a self) -> AssetFuture<'a, bool>;
 }
 
 pub trait AssetWriter: Send + Sync + 'static {
@@ -79,6 +79,7 @@ pub trait AssetWriter: Send + Sync + 'static {
     fn remove<'a>(&'a mut self) -> AssetFuture<'a, ()>;
     fn remove_directory<'a>(&'a mut self) -> AssetFuture<'a, ()>;
     fn rename<'a>(&'a mut self, to: &'a Path) -> AssetFuture<'a, ()>;
+    fn flush<'a>(&'a mut self) -> AssetFuture<'a, ()>;
 }
 
 pub trait AssetWatcher: Send + Sync + 'static {

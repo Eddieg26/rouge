@@ -68,7 +68,7 @@ impl AssetReader for EmbeddedEntry {
         Box::pin(async move { Err(super::AssetIoError::NotFound(self.path.clone())) })
     }
 
-    fn is_directory(&mut self) -> AssetFuture<bool> {
+    fn is_directory(& self) -> AssetFuture<bool> {
         Box::pin(async { Ok(false) })
     }
 }
@@ -126,6 +126,10 @@ impl AssetWriter for EmbeddedEntry {
                 Err(super::AssetIoError::NotFound(self.path.to_path_buf()))
             }
         })
+    }
+
+    fn flush<'a>(&'a mut self) -> AssetFuture<'a, ()> {
+        Box::pin(async { Ok(()) })
     }
 }
 

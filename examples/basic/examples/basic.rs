@@ -1,6 +1,6 @@
 use asset::{
     asset::{Asset, AssetId, AssetType},
-    io::{embed::EmbeddedFS, AssetSourceConfig},
+    io::{embed::EmbeddedFS, local::LocalFS, AssetSourceConfig},
 };
 use ecs::{
     core::{component::Component, entity::Entity, resource::Resource},
@@ -74,9 +74,4 @@ fn main() {
 
     // let text = std::str::from_utf8(&buffer).unwrap();
     // println!("{}", text);
-
-    let ty = AssetType::of::<TestAsset>();
-    let id = AssetId::new::<TestAsset>();
-
-    println!("{:?}, {:?}", ty, id.ty());
 }

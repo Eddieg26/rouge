@@ -1,14 +1,17 @@
 use crate::{
-    asset::{Asset, AssetId, AssetSettings, Settings},
+    asset::{Asset, AssetId, AssetSettings, ErasedAsset, Settings},
     io::{AssetFuture, AssetReader, AssetSource},
 };
-use hashbrown::HashSet;
+use hashbrown::{HashMap, HashSet};
 use std::error::Error;
+
+pub type SubAssets = HashMap<AssetId, ErasedAsset>;
 
 pub struct ImportContext<'a, S: Settings> {
     source: &'a AssetSource,
     settings: &'a AssetSettings<S>,
     dependencies: HashSet<AssetId>,
+    sub_assets: SubAssets,
 }
 
 impl<'a, S: Settings> ImportContext<'a, S> {
@@ -17,6 +20,7 @@ impl<'a, S: Settings> ImportContext<'a, S> {
             source,
             settings,
             dependencies: HashSet::new(),
+            sub_assets: SubAssets::new(),
         }
     }
 
@@ -40,14 +44,19 @@ impl<'a, S: Settings> ImportContext<'a, S> {
         self.dependencies.insert(id);
     }
 
-    pub fn finish(self) -> HashSet<AssetId> {
-        self.dependencies
+    pub fn add_sub_asset<A: Asset>(&mut self, id: AssetId, asset: A) {
+        self.sub_assets.insert(id, ErasedAsset::new(asset));
+    }
+
+    pub fn finish(self) -> (HashSet<AssetId>, SubAssets) {
+        (self.dependencies, self.sub_assets)
     }
 }
 
 pub trait AssetImporter {
     type Asset: Asset;
     type Settings: Settings;
+    type Processor: AssetProcessor<Asset = Self::Asset, Settings = Self::Settings>;
     type Error: Error + Send + Sync + 'static;
 
     fn import<'a>(
@@ -60,12 +69,21 @@ pub trait AssetImporter {
 
 pub struct ProcessContext<'a, S: Settings> {
     settings: &'a mut AssetSettings<S>,
+    sub_assets: &'a mut SubAssets,
+}
+
+impl<'a, S: Settings> ProcessContext<'a, S> {
+    pub fn new(settings: &'a mut AssetSettings<S>, sub_assets: &'a mut SubAssets) -> Self {
+        Self {
+            settings,
+            sub_assets,
+        }
+    }
 }
 
 pub trait AssetProcessor {
     type Asset: Asset;
     type Settings: Settings;
-    type Importer: AssetImporter<Asset = Self::Asset, Settings = Self::Settings>;
     type Error: Error + Send + Sync + 'static;
 
     fn process<'a>(
@@ -75,86 +93,155 @@ pub trait AssetProcessor {
 }
 
 pub mod registry {
+    use super::{AssetImporter, AssetProcessor, ProcessContext};
     use crate::{
-        asset::{Asset, AssetId, AssetSettings, AssetType, ErasedAsset, ErasedSettings, Settings},
+        asset::{Asset, AssetId, AssetSettings, AssetType, ErasedAsset},
         cache::AssetCache,
         import::ImportContext,
-        io::{AssetFuture, AssetIoError, AssetSource, PathExt},
+        io::{AssetFuture, AssetSource},
         library::{Artifact, ArtifactMeta},
     };
     use hashbrown::HashMap;
     use std::path::{Path, PathBuf};
 
-    use super::{AssetImporter, AssetProcessor, ProcessContext};
-
     pub struct ImportedAsset {
         pub asset: ErasedAsset,
-        pub settings: ErasedSettings,
         pub meta: ArtifactMeta,
-        save_settings: SaveSettings,
     }
 
     impl ImportedAsset {
-        pub fn new<A: Asset, S: Settings>(
-            asset: A,
-            settings: AssetSettings<S>,
-            meta: ArtifactMeta,
-        ) -> Self {
-            Self {
-                asset: ErasedAsset::new(asset),
-                settings: ErasedSettings::new(settings),
-                meta,
-                save_settings: |source, path, settings| {
-                    source.save_settings(path, settings.value::<S>())
-                },
-            }
+        pub fn new(asset: ErasedAsset, meta: ArtifactMeta) -> Self {
+            Self { asset, meta }
         }
+    }
 
-        pub fn save_settings<'a>(
-            &'a self,
-            source: &'a AssetSource,
-            path: &'a Path,
-        ) -> AssetFuture<'a, usize> {
-            (self.save_settings)(source, path, &self.settings)
-        }
+    pub struct ImportResult {
+        pub main: ImportedAsset,
+        pub sub: Vec<ImportedAsset>,
+        pub checksum: u32,
     }
 
     #[derive(Debug)]
-    pub struct ImportError(Box<dyn std::error::Error>);
+    pub struct ImportError {
+        path: PathBuf,
+        error: Box<dyn std::error::Error>,
+    }
+
+    impl ImportError {
+        pub fn from<E: std::error::Error + 'static>(path: impl AsRef<Path>, error: E) -> Self {
+            Self {
+                path: path.as_ref().to_path_buf(),
+                error: Box::new(error),
+            }
+        }
+
+        pub fn path(&self) -> &Path {
+            &self.path
+        }
+
+        pub fn error(&self) -> &(dyn std::error::Error + 'static) {
+            &*self.error
+        }
+
+        pub fn missing_extension(path: impl AsRef<Path>) -> Self {
+            Self {
+                path: path.as_ref().to_path_buf(),
+                error: Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "Missing extension",
+                )),
+            }
+        }
+
+        pub fn unsupported_extension(path: impl AsRef<Path>) -> Self {
+            Self {
+                path: path.as_ref().to_path_buf(),
+                error: Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "Unsupported extension",
+                )),
+            }
+        }
+    }
 
     impl std::fmt::Display for ImportError {
         fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-            std::fmt::Display::fmt(&self.0, f)
+            write!(
+                f,
+                "Import error for {}: {}",
+                self.path.display(),
+                self.error
+            )
         }
     }
 
-    impl<E: std::error::Error + 'static> From<E> for ImportError {
-        fn from(e: E) -> Self {
-            Self(Box::new(e))
+    impl<A: AsRef<Path>, E: std::error::Error + 'static> From<(A, E)> for ImportError {
+        fn from((path, error): (A, E)) -> Self {
+            Self {
+                path: path.as_ref().to_path_buf(),
+                error: Box::new(error),
+            }
         }
     }
+
+    impl std::error::Error for ImportError {}
+
+    #[derive(Debug)]
+    pub struct SaveError {
+        id: AssetId,
+        meta: Option<ArtifactMeta>,
+        error: Box<dyn std::error::Error>,
+    }
+
+    impl SaveError {
+        pub fn from<E: std::error::Error + 'static>(
+            id: AssetId,
+            error: E,
+            meta: Option<ArtifactMeta>,
+        ) -> Self {
+            Self {
+                id,
+                meta,
+                error: Box::new(error),
+            }
+        }
+
+        pub fn id(&self) -> &AssetId {
+            &self.id
+        }
+
+        pub fn meta(&self) -> Option<&ArtifactMeta> {
+            self.meta.as_ref()
+        }
+
+        pub fn error(&self) -> &(dyn std::error::Error + 'static) {
+            &*self.error
+        }
+    }
+
+    impl std::fmt::Display for SaveError {
+        fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+            write!(f, "Save error for {:?}: {}", self.id, self.error)
+        }
+    }
+
+    impl std::error::Error for SaveError {}
 
     pub type ImportAsset =
-        for<'a> fn(&'a AssetSource, &'a Path) -> AssetFuture<'a, ImportedAsset, ImportError>;
-
-    pub type ProcessAsset = for<'a> fn(&'a mut ImportedAsset) -> AssetFuture<'a, (), ImportError>;
+        for<'a> fn(&'a Path, &'a AssetSource) -> AssetFuture<'a, ImportResult, ImportError>;
 
     pub type SaveAsset = for<'a> fn(
-        &'a AssetSource,
-        &'a AssetCache,
-        &'a ImportedAsset,
+        ErasedAsset,
         ArtifactMeta,
-    ) -> AssetFuture<'a, Artifact>;
+        &'a AssetCache,
+    )
+        -> AssetFuture<'a, (Artifact, Option<ArtifactMeta>), SaveError>;
 
     pub type LoadAsset =
         for<'a> fn(&'a AssetCache, AssetId) -> AssetFuture<'a, (ErasedAsset, ArtifactMeta)>;
 
-    pub type SaveSettings =
-        for<'a> fn(&'a AssetSource, &'a Path, &'a ErasedSettings) -> AssetFuture<'a, usize>;
-
     pub struct AssetMetadata {
         importers: HashMap<&'static str, ImportAsset>,
-        processor: Option<ProcessAsset>,
         save: SaveAsset,
         load: LoadAsset,
     }
@@ -163,18 +250,18 @@ pub mod registry {
         pub fn new<A: Asset>() -> Self {
             Self {
                 importers: HashMap::new(),
-                processor: None,
-                save: |source, cache, asset, metadata| {
+                save: |asset, meta, cache| {
                     Box::pin(async move {
-                        let id = asset.meta.id;
-                        let path = cache.artifact_path(id);
-                        let settings_path = source.meta_path(&path);
-                        asset.save_settings(source, &settings_path).await?;
-
-                        let asset = bincode::serialize(asset.asset.value::<A>()).unwrap();
-                        let artifact = Artifact::new(asset, metadata);
-                        cache.save_artifact(id, &artifact).await?;
-                        Ok(artifact)
+                        let id = meta.id;
+                        let bytes = bincode::serialize(asset.value::<A>()).unwrap();
+                        let prev_meta = cache.load_artifact_meta(&id).await.ok();
+                        let artifact = Artifact::new(bytes, meta);
+                        let result = cache.save_artifact(&artifact).await;
+                        if let Err(e) = result {
+                            Err(SaveError::from(id, e, prev_meta))
+                        } else {
+                            Ok((artifact, prev_meta))
+                        }
                     })
                 },
                 load: |cache, id| {
@@ -189,27 +276,68 @@ pub mod registry {
         }
 
         pub fn add_importer<I: AssetImporter>(&mut self) {
-            let import: ImportAsset = |source, path| {
+            let import: ImportAsset = |path, source| {
                 Box::pin(async move {
-                    let settings = source
-                        .load_settings::<I::Settings>(&source.meta_path(path))
+                    let mut settings = match source
+                        .load_settings::<I::Settings>(&source.settings_path(path))
                         .await
-                        .map_err(|e| ImportError::from(e))?;
+                    {
+                        Ok(settings) => settings,
+                        Err(_) => AssetSettings::<I::Settings>::new(
+                            AssetId::new::<I::Asset>(),
+                            I::Settings::default(),
+                        ),
+                    };
 
-                    let (asset, mut dependencies) = {
-                        let mut reader = source.reader(path);
+                    let mut reader = source.reader(path);
+                    let (mut asset, mut dependencies, mut sub_assets) = {
                         let mut ctx = ImportContext::new(source, &settings);
                         let asset = I::import(&mut ctx, reader.as_mut())
                             .await
-                            .map_err(|e| ImportError::from(e))?;
-                        (asset, ctx.finish())
+                            .map_err(|e| ImportError::from(path, e))?;
+                        let (dependencies, sub_assets) = ctx.finish();
+                        (asset, dependencies, sub_assets)
                     };
 
-                    let ty = AssetType::of::<I::Asset>();
-                    let meta =
-                        ArtifactMeta::new(*settings.id(), ty, dependencies.drain().collect());
+                    let mut ctx = ProcessContext::new(&mut settings, &mut sub_assets);
+                    I::Processor::process(&mut ctx, &mut asset)
+                        .await
+                        .map_err(|e| ImportError::from(path, e))?;
 
-                    Ok(ImportedAsset::new(asset, settings, meta))
+                    source
+                        .save_settings(path, &mut settings)
+                        .await
+                        .map_err(|e| ImportError::from(path, e))?;
+
+                    let id = *settings.id();
+                    let mut meta = ArtifactMeta::new(id, dependencies.drain().collect());
+                    let mut sub = vec![];
+
+                    for (sub_id, sub_asset) in sub_assets {
+                        let sub_meta = ArtifactMeta::new(sub_id, vec![id]);
+                        meta.add_sub_asset(sub_id);
+                        sub.push(ImportedAsset::new(sub_asset, sub_meta));
+                    }
+
+                    let checksum = {
+                        let settings =
+                            toml::to_string(&settings).map_err(|e| ImportError::from(path, e))?;
+                        let settings = settings.as_bytes();
+                        let asset = reader
+                            .flush()
+                            .await
+                            .map_err(|e| ImportError::from(path, e))?;
+
+                        AssetSource::checksum(&asset, settings)
+                    };
+
+                    let result = ImportResult {
+                        main: ImportedAsset::new(ErasedAsset::new(asset), meta),
+                        sub,
+                        checksum,
+                    };
+
+                    Ok(result)
                 })
             };
 
@@ -218,52 +346,31 @@ pub mod registry {
             }
         }
 
-        pub fn set_processor<P: AssetProcessor>(&mut self) {
-            self.processor = Some(|asset| {
-                Box::pin(async move {
-                    let settings = asset.settings.value_mut::<P::Settings>();
-                    let asset = asset.asset.value_mut::<P::Asset>();
-                    let mut ctx = ProcessContext { settings };
-                    P::process(&mut ctx, asset)
-                        .await
-                        .map_err(|e| ImportError::from(e))
-                })
-            });
-        }
-
         pub fn import<'a>(
-            &self,
-            source: &'a AssetSource,
+            &'a self,
             path: &'a Path,
-        ) -> AssetFuture<'a, ImportedAsset, ImportError> {
+            source: &'a AssetSource,
+        ) -> AssetFuture<'a, ImportResult, ImportError> {
             let ext = path.extension().and_then(|ext| ext.to_str());
-            let import = self
-                .importers
-                .get(ext.unwrap_or_default())
-                .expect("No importer found for extension");
-
-            import(source, path)
-        }
-
-        pub fn process<'a>(
-            &self,
-            asset: &'a mut ImportedAsset,
-        ) -> AssetFuture<'a, (), ImportError> {
-            if let Some(processor) = self.processor {
-                processor(asset)
-            } else {
-                Box::pin(async { Ok(()) })
+            match self.importers.get(ext.unwrap_or_default()) {
+                Some(import) => import(path, source),
+                None => {
+                    let error = std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        "No Importer found for extension",
+                    );
+                    Box::pin(async move { Err(ImportError::from(path, error)) })
+                }
             }
         }
 
         pub fn save<'a>(
             &self,
-            source: &'a AssetSource,
-            cache: &'a AssetCache,
-            asset: &'a ImportedAsset,
+            asset: ErasedAsset,
             meta: ArtifactMeta,
-        ) -> AssetFuture<'a, Artifact> {
-            (self.save)(source, cache, asset, meta)
+            cache: &'a AssetCache,
+        ) -> AssetFuture<'a, (Artifact, Option<ArtifactMeta>), SaveError> {
+            (self.save)(asset, meta, cache)
         }
 
         pub fn load<'a>(
@@ -288,10 +395,12 @@ pub mod registry {
             }
         }
 
-        pub fn get(&self, ty: AssetType) -> &AssetMetadata {
-            self.metadatas
-                .get(&ty)
-                .expect(&format!("Asset type not registered: {:?}", ty))
+        pub fn get(&self, ty: &AssetType) -> Option<&AssetMetadata> {
+            self.metadatas.get(ty)
+        }
+
+        pub fn get_by_ext(&self, ext: &str) -> Option<&AssetMetadata> {
+            self.exts.get(&ext).and_then(|ty| self.metadatas.get(ty))
         }
 
         pub fn register<A: Asset>(&mut self) -> AssetType {
@@ -310,42 +419,6 @@ pub mod registry {
             for ext in I::extensions() {
                 self.exts.insert(ext, ty);
             }
-        }
-
-        pub fn set_processor<P: AssetProcessor>(&mut self) {
-            let ty = self.register::<P::Asset>();
-            self.metadatas.get_mut(&ty).unwrap().set_processor::<P>();
-        }
-    }
-
-    impl AssetSource {
-        pub fn meta_path(&self, path: &Path) -> PathBuf {
-            path.append_ext("meta")
-        }
-
-        pub fn save_settings<'a, S: Settings>(
-            &'a self,
-            path: &'a Path,
-            settings: &'a AssetSettings<S>,
-        ) -> AssetFuture<'a, usize> {
-            Box::pin(async move {
-                let mut writer = self.writer(&self.meta_path(&path));
-                let value = toml::to_string(settings).map_err(|e| AssetIoError::from(e))?;
-                writer.write(value.as_bytes()).await
-            })
-        }
-
-        pub fn load_settings<'a, S: Settings>(
-            &'a self,
-            path: &'a Path,
-        ) -> AssetFuture<'a, AssetSettings<S>> {
-            Box::pin(async move {
-                let mut reader = self.reader(&self.meta_path(&path));
-                let mut data = Vec::new();
-                reader.read_to_end(&mut data).await?;
-                let value = String::from_utf8(data).map_err(|e| AssetIoError::from(e))?;
-                toml::from_str(&value).map_err(|e| AssetIoError::from(e))
-            })
         }
     }
 }

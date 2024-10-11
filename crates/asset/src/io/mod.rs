@@ -1,11 +1,14 @@
 use std::{
     collections::HashMap,
     future::Future,
+    hash::Hash,
     path::{Path, PathBuf},
     pin::Pin,
     string::FromUtf8Error,
     sync::Arc,
 };
+
+use crate::asset::{AssetSettings, Settings};
 
 pub mod embed;
 pub mod local;
@@ -66,10 +69,12 @@ pub type AssetFuture<'a, T, E = AssetIoError> = Pin<Box<dyn Future<Output = Resu
 
 pub trait AssetReader: Send + Sync + 'static {
     fn path(&self) -> &Path;
-    fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> AssetFuture<'a, usize>;
-    fn read_to_end<'a>(&'a mut self, buf: &'a mut Vec<u8>) -> AssetFuture<'a, usize>;
+    fn read<'a>(&'a mut self, amount: usize) -> AssetFuture<'a, &'a [u8]>;
+    fn read_to_end<'a>(&'a mut self) -> AssetFuture<'a, &'a [u8]>;
     fn read_directory<'a>(&'a mut self) -> AssetFuture<'a, Vec<PathBuf>>;
     fn is_directory<'a>(&'a self) -> AssetFuture<'a, bool>;
+    fn exists<'a>(&'a self) -> AssetFuture<'a, bool>;
+    fn flush<'a>(&'a mut self) -> AssetFuture<'a, Vec<u8>>;
 }
 
 pub trait AssetWriter: Send + Sync + 'static {
@@ -86,21 +91,25 @@ pub trait AssetWatcher: Send + Sync + 'static {
     fn watch(&self, path: &Path) -> Result<(), AssetIoError>;
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum SourceId {
     Default,
-    Root(Box<str>),
+    Id(u32),
 }
 
 impl From<String> for SourceId {
     fn from(s: String) -> Self {
-        SourceId::Root(s.into_boxed_str())
+        let mut hasher = crc32fast::Hasher::new();
+        s.hash(&mut hasher);
+        SourceId::Id(hasher.finalize())
     }
 }
 
 impl From<&str> for SourceId {
     fn from(s: &str) -> Self {
-        SourceId::Root(s.to_string().into_boxed_str())
+        let mut hasher = crc32fast::Hasher::new();
+        s.hash(&mut hasher);
+        SourceId::Id(hasher.finalize())
     }
 }
 
@@ -112,14 +121,20 @@ pub trait AssetSourceConfig: downcast_rs::Downcast + Send + Sync + 'static {
 downcast_rs::impl_downcast!(AssetSourceConfig);
 
 pub struct AssetSource {
+    id: SourceId,
     config: Box<dyn AssetSourceConfig>,
 }
 
 impl AssetSource {
-    pub fn new<C: AssetSourceConfig>(config: C) -> Self {
+    pub fn new<C: AssetSourceConfig>(id: SourceId, config: C) -> Self {
         Self {
+            id,
             config: Box::new(config),
         }
+    }
+
+    pub fn id(&self) -> &SourceId {
+        &self.id
     }
 
     pub fn config(&self) -> &dyn AssetSourceConfig {
@@ -140,6 +155,79 @@ impl AssetSource {
 
     pub fn watcher(&self, path: &Path) -> Box<dyn AssetWatcher> {
         self.config.watcher(path)
+    }
+
+    pub fn settings_path(&self, path: &Path) -> PathBuf {
+        path.append_ext("meta")
+    }
+
+    pub fn save_settings<'a, S: Settings>(
+        &'a self,
+        path: &'a Path,
+        settings: &'a AssetSettings<S>,
+    ) -> AssetFuture<'a, usize> {
+        Box::pin(async move {
+            let mut writer = self.writer(&self.settings_path(&path));
+            let value = toml::to_string(settings).map_err(|e| AssetIoError::from(e))?;
+            writer.write(value.as_bytes()).await
+        })
+    }
+
+    pub fn load_settings<'a, S: Settings>(
+        &'a self,
+        path: &'a Path,
+    ) -> AssetFuture<'a, AssetSettings<S>> {
+        Box::pin(async move {
+            let mut reader = self.reader(&self.settings_path(&path));
+            reader.read_to_end().await?;
+            let data = reader.flush().await?;
+            let value = String::from_utf8(data).map_err(|e| AssetIoError::from(e))?;
+            toml::from_str(&value).map_err(|e| AssetIoError::from(e))
+        })
+    }
+
+    pub fn checksum(asset: &[u8], settings: &[u8]) -> u32 {
+        let mut hasher = crc32fast::Hasher::new();
+        settings.hash(&mut hasher);
+        asset.hash(&mut hasher);
+        hasher.finalize()
+    }
+}
+
+pub struct AssetSources {
+    sources: HashMap<SourceId, AssetSource>,
+}
+
+impl AssetSources {
+    pub fn new() -> Self {
+        Self {
+            sources: HashMap::new(),
+        }
+    }
+
+    pub fn add<C: AssetSourceConfig>(&mut self, id: SourceId, config: C) {
+        self.sources
+            .insert(id.clone(), AssetSource::new(id, config));
+    }
+
+    pub fn remove(&mut self, id: &SourceId) {
+        self.sources.remove(id);
+    }
+
+    pub fn get(&self, id: &SourceId) -> Option<&AssetSource> {
+        self.sources.get(id)
+    }
+
+    pub fn contains(&self, id: &SourceId) -> bool {
+        self.sources.contains_key(id)
+    }
+
+    pub fn len(&self) -> usize {
+        self.sources.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.sources.is_empty()
     }
 }
 
@@ -176,41 +264,5 @@ impl<T: AsRef<Path>> PathExt for T {
         } else {
             path
         }
-    }
-}
-
-pub struct AssetSources {
-    sources: HashMap<SourceId, AssetSource>,
-}
-
-impl AssetSources {
-    pub fn new() -> Self {
-        Self {
-            sources: HashMap::new(),
-        }
-    }
-
-    pub fn add(&mut self, id: SourceId, source: AssetSource) {
-        self.sources.insert(id, source);
-    }
-
-    pub fn remove(&mut self, id: &SourceId) {
-        self.sources.remove(id);
-    }
-
-    pub fn get(&self, id: &SourceId) -> Option<&AssetSource> {
-        self.sources.get(id)
-    }
-
-    pub fn contains(&self, id: &SourceId) -> bool {
-        self.sources.contains_key(id)
-    }
-
-    pub fn len(&self) -> usize {
-        self.sources.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.sources.is_empty()
     }
 }

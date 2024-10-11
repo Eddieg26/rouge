@@ -9,6 +9,7 @@ ecs = { path = "../ecs" }
 game = { path = "../game" }
 futures = { workspace = true }
 toml = { workspace = true }
+crc32fast = { workspace = true }
 downcast-rs = { workspace = true }
 hashbrown = { workspace = true, features = ["serde"] }
 bincode = { workspace = true }

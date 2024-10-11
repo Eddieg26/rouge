@@ -7,12 +7,17 @@ pub struct LocalFS;
 
 pub struct LocalEntry {
     pub path: PathBuf,
+    pub bytes: Vec<u8>,
     pub file: Option<File>,
 }
 
 impl LocalEntry {
     pub fn new(path: PathBuf) -> Self {
-        Self { path, file: None }
+        Self {
+            path,
+            bytes: vec![],
+            file: None,
+        }
     }
 }
 
@@ -21,7 +26,7 @@ impl AssetReader for LocalEntry {
         &self.path
     }
 
-    fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> super::AssetFuture<'a, usize> {
+    fn read<'a>(&'a mut self, amount: usize) -> super::AssetFuture<'a, &'a [u8]> {
         let result = async move {
             let mut file = match self.file.take() {
                 Some(file) => file,
@@ -31,10 +36,14 @@ impl AssetReader for LocalEntry {
                 },
             };
 
-            match file.read(buf).await {
+            let mut buf = vec![0; amount];
+
+            match file.read(&mut buf).await {
                 Ok(len) => {
                     self.file = Some(file);
-                    Ok(len)
+                    let offset = self.bytes.len();
+                    self.bytes.extend_from_slice(&buf[..len]);
+                    Ok(&self.bytes[offset..offset + len])
                 }
                 Err(error) => return Err(super::AssetIoError::from(error)),
             }
@@ -43,7 +52,7 @@ impl AssetReader for LocalEntry {
         Box::pin(result)
     }
 
-    fn read_to_end<'a>(&'a mut self, buf: &'a mut Vec<u8>) -> super::AssetFuture<'a, usize> {
+    fn read_to_end<'a>(&'a mut self) -> super::AssetFuture<'a, &'a [u8]> {
         let result = async move {
             let mut file = match self.file.take() {
                 Some(file) => file,
@@ -53,10 +62,13 @@ impl AssetReader for LocalEntry {
                 },
             };
 
-            match file.read_to_end(buf).await {
-                Ok(len) => {
+            let mut buf = vec![];
+
+            match file.read_to_end(&mut buf).await {
+                Ok(_) => {
                     self.file = Some(file);
-                    Ok(len)
+                    self.bytes.extend_from_slice(&buf);
+                    Ok(self.bytes.as_slice())
                 }
                 Err(error) => return Err(super::AssetIoError::from(error)),
             }
@@ -89,6 +101,28 @@ impl AssetReader for LocalEntry {
                 Err(error) => return Err(super::AssetIoError::from(error)),
             };
             Ok(metadata.is_dir())
+        };
+
+        Box::pin(result)
+    }
+
+    fn exists<'a>(&'a self) -> super::AssetFuture<'a, bool> {
+        Box::pin(async {
+            match async_std::fs::metadata(&self.path).await {
+                Ok(_) => Ok(true),
+                Err(e) => match e.kind() {
+                    std::io::ErrorKind::NotFound => Ok(false),
+                    _ => return Err(AssetIoError::from(e)),
+                },
+            }
+        })
+    }
+
+    fn flush<'a>(&'a mut self) -> super::AssetFuture<'a, Vec<u8>> {
+        let result = async move {
+            let bytes = self.bytes.clone();
+            self.bytes.clear();
+            Ok(bytes)
         };
 
         Box::pin(result)
@@ -185,7 +219,7 @@ impl LocalWatcher {
 }
 
 impl AssetWatcher for LocalWatcher {
-    fn watch(&self, path: &std::path::Path) -> Result<(), AssetIoError> {
+    fn watch(&self, _path: &std::path::Path) -> Result<(), AssetIoError> {
         Ok(())
     }
 }
@@ -199,7 +233,7 @@ impl AssetSourceConfig for LocalFS {
         Box::new(LocalEntry::new(path.to_path_buf()))
     }
 
-    fn watcher(&self, path: &std::path::Path) -> Box<dyn super::AssetWatcher> {
+    fn watcher(&self, _path: &std::path::Path) -> Box<dyn super::AssetWatcher> {
         Box::new(LocalWatcher::new())
     }
 }

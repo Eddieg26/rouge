@@ -43,6 +43,12 @@ impl AssetId {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum AssetKind {
+    Main,
+    Sub,
+}
+
 impl ToString for AssetId {
     fn to_string(&self) -> String {
         self.0.to_string()

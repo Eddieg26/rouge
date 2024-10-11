@@ -39,6 +39,11 @@ impl WorldActions {
         self.actions.lock().unwrap().is_empty()
     }
 
+    pub fn extend(&self, mut actions: Vec<impl Into<WorldActionFn>>) {
+        let mut list = self.actions.lock().unwrap();
+        list.extend(actions.drain(..).map(|a| a.into()));
+    }
+
     pub fn drain(&self) -> Vec<WorldActionFn> {
         self.actions.lock().unwrap().drain(..).collect()
     }

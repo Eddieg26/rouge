@@ -14,6 +14,8 @@ pub enum EmbeddedFileData {
 pub struct EmbeddedEntry {
     path: PathBuf,
     fs: EmbeddedFS,
+    file: Option<EmbeddedFileData>,
+    offset: usize,
 }
 
 impl AssetReader for EmbeddedEntry {
@@ -21,21 +23,20 @@ impl AssetReader for EmbeddedEntry {
         &self.path
     }
 
-    fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> AssetFuture<'a, usize> {
-        let files = self.fs.files.clone();
+    fn read<'a>(&'a mut self, amount: usize) -> AssetFuture<'a, &'a [u8]> {
         let result = async move {
-            let files = files.lock().unwrap();
-            match files.get(&self.path) {
+            match &self.file {
                 Some(EmbeddedFileData::Static(data)) => {
-                    let len = data.len().min(buf.len());
-                    println!("Copying {} bytes", len);
-                    buf[..len].copy_from_slice(&data[..len]);
-                    Ok(len)
+                    let end = (self.offset + amount).min(data.len());
+                    let slice = &data[self.offset..end];
+                    self.offset += slice.len();
+                    Ok(slice)
                 }
                 Some(EmbeddedFileData::Dynamic(data)) => {
-                    let len = data.len().min(buf.len());
-                    buf[..len].copy_from_slice(&data[..len]);
-                    Ok(len)
+                    let end = (self.offset + amount).min(data.len());
+                    let slice = &data[self.offset..end];
+                    self.offset += slice.len();
+                    Ok(slice)
                 }
                 None => Err(super::AssetIoError::NotFound(self.path.clone())),
             }
@@ -44,19 +45,11 @@ impl AssetReader for EmbeddedEntry {
         Box::pin(result)
     }
 
-    fn read_to_end<'a>(&'a mut self, buf: &'a mut Vec<u8>) -> AssetFuture<'a, usize> {
-        let files = self.fs.files.clone();
+    fn read_to_end<'a>(&'a mut self) -> AssetFuture<'a, &'a [u8]> {
         let result = async move {
-            let files = files.lock().unwrap();
-            match files.get(&self.path) {
-                Some(EmbeddedFileData::Static(data)) => {
-                    buf.extend_from_slice(data);
-                    Ok(data.len())
-                }
-                Some(EmbeddedFileData::Dynamic(data)) => {
-                    buf.extend_from_slice(data);
-                    Ok(data.len())
-                }
+            match &self.file {
+                Some(EmbeddedFileData::Static(data)) => Ok(*data),
+                Some(EmbeddedFileData::Dynamic(data)) => Ok(data.as_slice()),
                 None => Err(super::AssetIoError::NotFound(self.path.clone())),
             }
         };
@@ -68,8 +61,33 @@ impl AssetReader for EmbeddedEntry {
         Box::pin(async move { Err(super::AssetIoError::NotFound(self.path.clone())) })
     }
 
-    fn is_directory(& self) -> AssetFuture<bool> {
+    fn is_directory(&self) -> AssetFuture<bool> {
         Box::pin(async { Ok(false) })
+    }
+
+    fn exists<'a>(&'a self) -> AssetFuture<'a, bool> {
+        let files = self.fs.files.lock().unwrap();
+        Box::pin(async move { Ok(files.contains_key(&self.path)) })
+    }
+
+    fn flush<'a>(&'a mut self) -> AssetFuture<'a, Vec<u8>> {
+        let result = async move {
+            match self.file.take() {
+                Some(EmbeddedFileData::Static(data)) => {
+                    let mut files = self.fs.files.lock().unwrap();
+                    files.insert(self.path.clone(), EmbeddedFileData::Static(&data));
+                    Ok(Vec::from(data))
+                }
+                Some(EmbeddedFileData::Dynamic(data)) => {
+                    let mut files = self.fs.files.lock().unwrap();
+                    files.insert(self.path.clone(), EmbeddedFileData::Dynamic(data.clone()));
+                    Ok(data)
+                }
+                None => Err(super::AssetIoError::NotFound(self.path.clone())),
+            }
+        };
+
+        Box::pin(result)
     }
 }
 
@@ -80,12 +98,17 @@ impl AssetWriter for EmbeddedEntry {
 
     fn write<'a>(&'a mut self, data: &'a [u8]) -> AssetFuture<'a, usize> {
         let result = async move {
-            let files = self.fs.files.clone();
-            let mut files = files.lock().unwrap();
-            files.insert(
-                self.path.to_path_buf(),
-                EmbeddedFileData::Dynamic(data.to_vec()),
-            );
+            match &mut self.file {
+                Some(EmbeddedFileData::Static(_)) => {
+                    self.file = Some(EmbeddedFileData::Dynamic(Vec::from(data)));
+                }
+                Some(EmbeddedFileData::Dynamic(vec)) => {
+                    vec.extend_from_slice(data);
+                }
+                None => {
+                    self.file = Some(EmbeddedFileData::Dynamic(Vec::from(data)));
+                }
+            }
 
             Ok(data.len())
         };
@@ -159,26 +182,41 @@ impl EmbeddedFS {
 
 impl AssetSourceConfig for EmbeddedFS {
     fn reader(&self, path: &Path) -> Box<dyn AssetReader> {
+        let mut files = self.files.lock().unwrap();
+        let file = files.remove(path);
         let entry = EmbeddedEntry {
             path: path.to_path_buf(),
             fs: self.clone(),
+            file,
+            offset: 0,
         };
+
         Box::new(entry)
     }
 
     fn writer(&self, path: &Path) -> Box<dyn AssetWriter> {
+        let mut files = self.files.lock().unwrap();
+        let file = files.remove(path);
         let entry = EmbeddedEntry {
             path: path.to_path_buf(),
             fs: self.clone(),
+            file,
+            offset: 0,
         };
+
         Box::new(entry)
     }
 
     fn watcher(&self, path: &Path) -> Box<dyn AssetWatcher> {
+        let mut files = self.files.lock().unwrap();
+        let file = files.remove(path);
         let entry = EmbeddedEntry {
             path: path.to_path_buf(),
             fs: self.clone(),
+            file,
+            offset: 0,
         };
+
         Box::new(entry)
     }
 }

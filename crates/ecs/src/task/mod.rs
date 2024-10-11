@@ -1,5 +1,5 @@
 use crate::{core::resource::Resource, system::SystemArg};
-use std::{collections::VecDeque, pin::Pin, sync::Arc};
+use std::{collections::VecDeque, future::Future, pin::Pin, sync::Arc};
 
 pub type ScopedTask<'a> = Box<dyn FnOnce() + Send + 'a>;
 
@@ -73,38 +73,27 @@ impl Default for TaskPool {
     }
 }
 
-pub struct AsyncTaskPool<'a, Output> {
-    size: usize,
+pub struct AsyncTaskPool<'a, Output: 'static> {
     pool: Vec<Pin<Box<dyn futures::Future<Output = Output> + 'a>>>,
 }
 
-impl<'a, Output> AsyncTaskPool<'a, Output> {
-    pub fn new(size: usize) -> Self {
-        AsyncTaskPool {
-            size,
-            pool: Vec::new(),
-        }
+impl<'a, Output: 'static> AsyncTaskPool<'a, Output> {
+    pub fn new() -> Self {
+        AsyncTaskPool { pool: Vec::new() }
     }
 
     pub fn spawn(&mut self, future: impl futures::Future<Output = Output> + 'a) {
         self.pool.push(Box::pin(future));
     }
 
-    pub fn run(&mut self) -> Vec<Output> {
-        let mut outputs = Vec::new();
-        while !self.pool.is_empty() {
-            let len = self.pool.len().min(self.size);
-            let futures = self
-                .pool
-                .drain(..len)
-                .map(|a| async { a.await })
-                .collect::<Vec<_>>();
-            let output =
-                futures::executor::block_on(async { futures::future::join_all(futures).await });
-            outputs.extend(output);
-        }
+    pub fn run(&mut self) -> impl Future<Output = Vec<Output>> + 'a {
+        let futures = self
+            .pool
+            .drain(..)
+            .map(|a| async { a.await })
+            .collect::<Vec<_>>();
 
-        outputs
+        futures::future::join_all(futures)
     }
 }
 

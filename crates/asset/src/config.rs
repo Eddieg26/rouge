@@ -1,12 +1,16 @@
+use std::path::{Path, PathBuf};
+
 use crate::{
     asset::Asset,
+    cache::AssetCache,
     import::registry::AssetRegistry,
-    io::{AssetSource, AssetSourceConfig, AssetSources, SourceId},
+    io::{local::LocalFS, AssetSource, AssetSourceConfig, AssetSources, SourceId},
 };
 
 pub struct AssetConfig {
     registry: AssetRegistry,
     sources: AssetSources,
+    cache: AssetCache,
 }
 
 impl AssetConfig {
@@ -14,6 +18,7 @@ impl AssetConfig {
         Self {
             registry: AssetRegistry::new(),
             sources: AssetSources::new(),
+            cache: AssetCache::new(PathBuf::new(), LocalFS),
         }
     }
 
@@ -29,11 +34,19 @@ impl AssetConfig {
         self.sources.get(id)
     }
 
+    pub fn cache(&self) -> &AssetCache {
+        &self.cache
+    }
+
     pub fn register_asset<A: Asset>(&mut self) {
         self.registry.register::<A>();
     }
 
-    pub fn add_source<C: AssetSourceConfig>(&mut self, id: SourceId, config: C) {
-        self.sources.add(id, AssetSource::new(config));
+    pub fn add_source<C: AssetSourceConfig>(&mut self, id: impl Into<SourceId>, config: C) {
+        self.sources.add(id.into(), config);
+    }
+
+    pub fn set_cache<C: AssetSourceConfig>(&mut self, path: impl AsRef<Path>, config: C) {
+        self.cache = AssetCache::new(path.as_ref().to_path_buf(), config);
     }
 }

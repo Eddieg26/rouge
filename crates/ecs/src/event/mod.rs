@@ -47,6 +47,11 @@ impl<E: Event> Events<E> {
         self.invoked.lock().unwrap().insert(EventId::of::<E>());
     }
 
+    pub fn extend(&mut self, events: impl IntoIterator<Item = E>) {
+        self.events.extend(events);
+        self.invoked.lock().unwrap().insert(EventId::of::<E>());
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = &E> {
         self.events.iter()
     }

@@ -97,9 +97,13 @@ pub mod registry {
     use crate::{
         asset::{Asset, AssetId, AssetSettings, AssetType, ErasedAsset},
         cache::AssetCache,
-        import::ImportContext,
+        importer::ImportContext,
         io::{AssetFuture, AssetSource},
         library::{Artifact, ArtifactMeta},
+    };
+    use ecs::{
+        event::{Event, Events},
+        world::action::WorldAction,
     };
     use hashbrown::HashMap;
     use std::path::{Path, PathBuf};
@@ -124,11 +128,14 @@ pub mod registry {
     #[derive(Debug)]
     pub struct ImportError {
         path: PathBuf,
-        error: Box<dyn std::error::Error>,
+        error: Box<dyn std::error::Error + Send + Sync + 'static>,
     }
 
     impl ImportError {
-        pub fn from<E: std::error::Error + 'static>(path: impl AsRef<Path>, error: E) -> Self {
+        pub fn from<E: std::error::Error + Send + Sync + 'static>(
+            path: impl AsRef<Path>,
+            error: E,
+        ) -> Self {
             Self {
                 path: path.as_ref().to_path_buf(),
                 error: Box::new(error),
@@ -139,7 +146,7 @@ pub mod registry {
             &self.path
         }
 
-        pub fn error(&self) -> &(dyn std::error::Error + 'static) {
+        pub fn error(&self) -> &(dyn std::error::Error + Send + Sync + 'static) {
             &*self.error
         }
 
@@ -175,7 +182,7 @@ pub mod registry {
         }
     }
 
-    impl<A: AsRef<Path>, E: std::error::Error + 'static> From<(A, E)> for ImportError {
+    impl<A: AsRef<Path>, E: std::error::Error + Send + Sync + 'static> From<(A, E)> for ImportError {
         fn from((path, error): (A, E)) -> Self {
             Self {
                 path: path.as_ref().to_path_buf(),
@@ -185,16 +192,17 @@ pub mod registry {
     }
 
     impl std::error::Error for ImportError {}
+    impl Event for ImportError {}
 
     #[derive(Debug)]
     pub struct SaveError {
         id: AssetId,
         meta: Option<ArtifactMeta>,
-        error: Box<dyn std::error::Error>,
+        error: Box<dyn std::error::Error + Send + Sync + 'static>,
     }
 
     impl SaveError {
-        pub fn from<E: std::error::Error + 'static>(
+        pub fn from<E: std::error::Error + Send + Sync + 'static>(
             id: AssetId,
             error: E,
             meta: Option<ArtifactMeta>,
@@ -214,7 +222,7 @@ pub mod registry {
             self.meta.as_ref()
         }
 
-        pub fn error(&self) -> &(dyn std::error::Error + 'static) {
+        pub fn error(&self) -> &(dyn std::error::Error + Send + Sync + 'static) {
             &*self.error
         }
     }
@@ -310,12 +318,12 @@ pub mod registry {
                         .map_err(|e| ImportError::from(path, e))?;
 
                     let id = *settings.id();
-                    let mut meta = ArtifactMeta::new(id, dependencies.drain().collect());
+                    let mut main_meta = ArtifactMeta::main(id, dependencies.drain().collect());
                     let mut sub = vec![];
 
                     for (sub_id, sub_asset) in sub_assets {
-                        let sub_meta = ArtifactMeta::new(sub_id, vec![id]);
-                        meta.add_sub_asset(sub_id);
+                        let sub_meta = ArtifactMeta::sub(sub_id, id);
+                        main_meta.add_sub_asset(sub_id);
                         sub.push(ImportedAsset::new(sub_asset, sub_meta));
                     }
 
@@ -332,7 +340,7 @@ pub mod registry {
                     };
 
                     let result = ImportResult {
-                        main: ImportedAsset::new(ErasedAsset::new(asset), meta),
+                        main: ImportedAsset::new(ErasedAsset::new(asset), main_meta),
                         sub,
                         checksum,
                     };

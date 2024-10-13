@@ -1,7 +1,7 @@
 use super::{AssetIoError, AssetReader, AssetSourceConfig, AssetWatcher, AssetWriter};
 use async_std::{fs::File, stream::StreamExt};
 use futures::{AsyncReadExt, AsyncWriteExt};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub struct LocalFS;
 
@@ -94,9 +94,9 @@ impl AssetReader for LocalEntry {
         Box::pin(result)
     }
 
-    fn is_directory<'a>(&'a self) -> super::AssetFuture<'a, bool> {
+    fn is_directory<'a>(&'a self, path: &'a Path) -> super::AssetFuture<'a, bool> {
         let result = async move {
-            let metadata = match async_std::fs::metadata(&self.path).await {
+            let metadata = match async_std::fs::metadata(path).await {
                 Ok(metadata) => metadata,
                 Err(error) => return Err(super::AssetIoError::from(error)),
             };

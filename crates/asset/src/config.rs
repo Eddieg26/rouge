@@ -1,11 +1,10 @@
-use std::path::{Path, PathBuf};
-
 use crate::{
     asset::Asset,
     cache::AssetCache,
-    import::registry::AssetRegistry,
+    importer::registry::AssetRegistry,
     io::{local::LocalFS, AssetSource, AssetSourceConfig, AssetSources, SourceId},
 };
+use std::path::{Path, PathBuf};
 
 pub struct AssetConfig {
     registry: AssetRegistry,

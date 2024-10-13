@@ -72,7 +72,7 @@ pub trait AssetReader: Send + Sync + 'static {
     fn read<'a>(&'a mut self, amount: usize) -> AssetFuture<'a, &'a [u8]>;
     fn read_to_end<'a>(&'a mut self) -> AssetFuture<'a, &'a [u8]>;
     fn read_directory<'a>(&'a mut self) -> AssetFuture<'a, Vec<PathBuf>>;
-    fn is_directory<'a>(&'a self) -> AssetFuture<'a, bool>;
+    fn is_directory<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, bool>;
     fn exists<'a>(&'a self) -> AssetFuture<'a, bool>;
     fn flush<'a>(&'a mut self) -> AssetFuture<'a, Vec<u8>>;
 }

@@ -55,6 +55,16 @@ impl AssetCache {
         })
     }
 
+    pub fn remove_artifact<'a>(&'a self, id: AssetId) -> AssetFuture<'a, Artifact> {
+        Box::pin(async move {
+            let artifact = self.load_artifact(id).await?;
+            let path = self.path.join(id.to_string());
+            let mut writer = self.config.writer(&path);
+            writer.remove().await?;
+            Ok(artifact)
+        })
+    }
+
     pub fn load_artifact_header<'a>(&'a self, id: AssetId) -> AssetFuture<'a, ArtifactHeader> {
         Box::pin(async move {
             let path = self.path.join(id.to_string());

@@ -61,7 +61,7 @@ impl AssetReader for EmbeddedEntry {
         Box::pin(async move { Err(super::AssetIoError::NotFound(self.path.clone())) })
     }
 
-    fn is_directory(&self) -> AssetFuture<bool> {
+    fn is_directory(&self, _: &Path) -> AssetFuture<bool> {
         Box::pin(async { Ok(false) })
     }
 

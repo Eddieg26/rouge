@@ -1,4 +1,7 @@
-use crate::{asset::{AssetId, AssetKind}, io::SourceId};
+use crate::{
+    asset::{AssetId, AssetKind},
+    io::SourceId,
+};
 use hashbrown::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -7,14 +10,25 @@ pub struct ArtifactMeta {
     pub id: AssetId,
     pub sub_assets: Vec<AssetId>,
     pub dependencies: Vec<AssetId>,
+    pub kind: AssetKind,
 }
 
 impl ArtifactMeta {
-    pub fn new(id: AssetId, dependencies: Vec<AssetId>) -> Self {
+    pub fn main(id: AssetId, dependencies: Vec<AssetId>) -> Self {
         Self {
             id,
             sub_assets: vec![],
             dependencies,
+            kind: AssetKind::Main,
+        }
+    }
+
+    pub fn sub(sub: AssetId, main: AssetId) -> Self {
+        Self {
+            id: sub,
+            sub_assets: vec![],
+            dependencies: vec![main],
+            kind: AssetKind::Sub,
         }
     }
 
@@ -61,66 +75,77 @@ impl Artifact {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SourceAsset {
     pub checksum: u32,
-    pub path: PathBuf,
-    pub kind: AssetKind,
+    pub id: AssetId,
 }
 
 impl SourceAsset {
-    pub fn new(checksum: u32, path: PathBuf, kind: AssetKind) -> Self {
-        Self {
-            checksum,
-            path,
-            kind,
-        }
+    pub fn new(checksum: u32, id: AssetId) -> Self {
+        Self { checksum, id }
     }
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct SourceAssets {
-    assets: HashMap<AssetId, SourceAsset>,
-    paths: HashMap<PathBuf, AssetId>,
+    assets: HashMap<PathBuf, SourceAsset>,
+    ids: HashMap<AssetId, PathBuf>,
 }
 
 impl SourceAssets {
     pub fn new() -> Self {
         Self {
             assets: HashMap::new(),
-            paths: HashMap::new(),
+            ids: HashMap::new(),
         }
     }
 
-    pub fn add(&mut self, id: AssetId, asset: SourceAsset) {
-        self.paths.insert(asset.path.clone(), id);
-        self.assets.insert(id, asset);
+    pub fn add_main(&mut self, path: PathBuf, asset: SourceAsset) {
+        self.ids.insert(asset.id, path.clone());
+        self.assets.insert(path, asset);
+    }
+
+    pub fn add_sub(&mut self, id: AssetId, path: PathBuf) {
+        self.ids.insert(id, path);
     }
 
     pub fn remove(&mut self, id: &AssetId) -> Option<SourceAsset> {
-        if let Some(asset) = self.assets.remove(id) {
-            self.paths.remove(&asset.path);
-            Some(asset)
-        } else {
-            None
+        let path = self.ids.remove(id)?;
+        match self.assets.get(&path).map(|s| &s.id == id) {
+            Some(true) => self.assets.remove(&path),
+            _ => None,
         }
     }
 
-    pub fn get(&self, id: &AssetId) -> Option<&SourceAsset> {
-        self.assets.get(id)
+    pub fn remove_main(&mut self, path: &Path) -> Option<SourceAsset> {
+        let source = self.assets.remove(path);
+        if let Some(source) = &source {
+            self.ids.remove(&source.id);
+        }
+
+        source
     }
 
-    pub fn get_mut(&mut self, id: &AssetId) -> Option<&mut SourceAsset> {
-        self.assets.get_mut(id)
+    pub fn remove_sub(&mut self, id: &AssetId) -> Option<PathBuf> {
+        self.ids.remove(id)
     }
 
-    pub fn path_id(&self, path: &Path) -> Option<&AssetId> {
-        self.paths.get(path)
+    pub fn get(&self, path: &Path) -> Option<&SourceAsset> {
+        self.assets.get(path)
     }
 
-    pub fn contains(&self, id: &AssetId) -> bool {
-        self.assets.contains_key(id)
+    pub fn get_mut(&mut self, path: &Path) -> Option<&mut SourceAsset> {
+        self.assets.get_mut(path)
     }
 
-    pub fn contains_path(&self, path: &Path) -> bool {
-        self.paths.contains_key(path)
+    pub fn id_to_path(&self, id: &AssetId) -> Option<&PathBuf> {
+        self.ids.get(id)
+    }
+
+    pub fn contains(&self, path: &Path) -> bool {
+        self.assets.contains_key(path)
+    }
+
+    pub fn contains_id(&self, id: &AssetId) -> bool {
+        self.ids.contains_key(id)
     }
 
     pub fn len(&self) -> usize {
@@ -131,15 +156,15 @@ impl SourceAssets {
         self.assets.is_empty()
     }
 
-    pub fn ids(&self) -> impl Iterator<Item = &AssetId> + '_ {
+    pub fn paths(&self) -> impl Iterator<Item = &PathBuf> + '_ {
         self.assets.keys()
     }
 
-    pub fn paths(&self) -> impl Iterator<Item = (&PathBuf, &AssetId)> + '_ {
-        self.paths.iter()
+    pub fn ids(&self) -> impl Iterator<Item = (&AssetId, &PathBuf)> + '_ {
+        self.ids.iter()
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (&AssetId, &SourceAsset)> + '_ {
+    pub fn iter(&self) -> impl Iterator<Item = (&PathBuf, &SourceAsset)> + '_ {
         self.assets.iter()
     }
 }

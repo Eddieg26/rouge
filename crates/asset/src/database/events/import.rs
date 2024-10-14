@@ -1,17 +1,17 @@
-use super::{AssetDatabase, AssetEvent, StartAssetEvent};
+use super::{AssetEvent, StartAssetEvent};
 use crate::{
     asset::{Asset, AssetId, AssetSettings, Settings},
     cache::AssetCache,
-    importer::registry::ImportError,
+    database::{registry::AssetRegistry, AssetDatabase},
+    importer::ImportError,
     io::{AssetIoError, AssetSource, PathExt, SourceId},
-    library::{ArtifactMeta, SourceAsset},
 };
 use ecs::{
     event::{Event, Events},
     task::AsyncTaskPool,
-    world::action::{WorldAction, WorldActions},
+    world::action::{BulkEvents, WorldAction},
 };
-use futures::{executor::block_on, future::join_all, TryFutureExt};
+use futures::executor::block_on;
 use hashbrown::{hash_set::Difference, DefaultHashBuilder, HashSet};
 use std::path::{Path, PathBuf};
 
@@ -151,19 +151,22 @@ impl ImportFolder {
         source: &'a AssetSource,
         database: &'a AssetDatabase,
     ) -> Option<ImportScan> {
-        let source_checksum = {
+        let id = {
             let library = database.library();
             let assets = match library.get_sources(source.id()) {
                 Some(assets) => assets,
                 None => return Some(ImportScan::Added(path.to_path_buf())),
             };
 
-            let source_asset = match assets.get(path) {
-                Some(asset) => asset,
+            match assets.get(path) {
+                Some(id) => id,
                 None => return Some(ImportScan::Added(path.to_path_buf())),
-            };
+            }
+        };
 
-            source_asset.checksum
+        let header = match database.config().cache().load_artifact_header(id).await {
+            Ok(header) => header,
+            Err(_) => return Some(ImportScan::Added(path.to_path_buf())),
         };
 
         let mut reader = source.reader(&source.settings_path(path));
@@ -184,9 +187,7 @@ impl ImportFolder {
             Err(error) => return Some(ImportScan::error((path, error))),
         };
 
-        let checksum = AssetSource::checksum(asset, settings);
-
-        if checksum != source_checksum {
+        if AssetSource::checksum(asset, settings) != header.checksum {
             return Some(ImportScan::modified(path));
         }
 
@@ -225,20 +226,16 @@ pub struct ImportAssets {
 }
 
 impl ImportAssets {
-    pub fn new(source: impl Into<SourceId>, paths: Vec<PathBuf>) -> Self {
-        Self {
-            source: source.into(),
-            paths,
-        }
+    pub fn new(source: SourceId, paths: Vec<PathBuf>) -> Self {
+        Self { source, paths }
     }
 
-    async fn import_and_save<'a>(
-        path: &Path,
-        source: &AssetSource,
-        database: &AssetDatabase,
-    ) -> Result<(ArtifactMeta, Vec<AssetId>), ImportError> {
-        let registry = database.config().registry();
-        let cache = database.config().cache();
+    pub async fn import_and_save<'a>(
+        path: &'a Path,
+        registry: &'a AssetRegistry,
+        source: &'a AssetSource,
+        cache: &'a AssetCache,
+    ) -> Result<(Vec<AssetId>, Vec<AssetId>), ImportError> {
         let ext = match path.ext() {
             Some(ext) => ext,
             None => return Err(ImportError::missing_extension(path)),
@@ -249,50 +246,33 @@ impl ImportAssets {
             None => return Err(ImportError::unsupported_extension(path)),
         };
 
-        let import = metadata.import(path, source).await?;
-        let (artifact, prev_meta) = metadata
-            .save(import.main.asset, import.main.meta, cache)
-            .map_err(|e| ImportError::from(path, e))
-            .await?;
+        let artifacts = metadata.import(path, source).await?;
+        let prev_meta = cache.load_artifact_meta(&artifacts.main.meta.id).await.ok();
 
-        let mut library = database.library_mut();
-        let sources = library.get_sources_mut(source.id());
-        let source = SourceAsset::new(import.checksum, artifact.meta.id);
-        sources.add_main(path.to_path_buf(), source);
-
-        let mut futures = vec![];
-        for sub_asset in import.sub {
-            let metadata = match registry.get(&sub_asset.meta.id.ty()) {
-                Some(metadata) => metadata,
-                None => continue,
-            };
-
-            futures.push(metadata.save(sub_asset.asset, sub_asset.meta, cache));
+        if let Err(e) = cache.save_artifact(&artifacts.main).await {
+            return Err(ImportError::from(path, e));
         }
 
-        for artifact in join_all(futures).await {
-            match artifact {
-                Ok((artifact, _)) => sources.add_sub(artifact.meta.id, path.to_path_buf()),
-                Err(error) => return Err(ImportError::from(path, error)),
+        for artifact in artifacts.sub {
+            if let Err(e) = cache.save_artifact(&artifact).await {
+                return Err(ImportError::from(path, e));
             }
         }
 
         let mut removed = vec![];
-        if let Some(meta) = prev_meta {
-            for dep in meta.dependencies {
-                if !artifact.meta.dependencies.contains(&dep) {
-                    removed.push(dep);
-                }
-            }
-
-            for sub in meta.sub_assets {
-                if !artifact.meta.sub_assets.contains(&sub) {
+        let mut reload = vec![artifacts.main.meta.id];
+        reload.extend(artifacts.main.meta.dependencies);
+        if let Some(prev) = prev_meta {
+            for sub in prev.sub_assets {
+                if !artifacts.main.meta.sub_assets.contains(&sub) {
                     removed.push(sub);
                 }
             }
+
+            reload.extend(prev.dependencies);
         }
 
-        Ok((artifact.meta, removed))
+        Ok((reload, removed))
     }
 }
 
@@ -304,193 +284,42 @@ impl WorldAction for ImportAssets {
 }
 
 impl AssetEvent for ImportAssets {
-    fn execute(&mut self, database: &AssetDatabase, _: &WorldActions) {
+    fn execute(&mut self, database: &AssetDatabase, _: &ecs::world::action::WorldActions) {
         if let Some(source) = database.config().source(&self.source) {
-            const POOL_SIZE: usize = 100;
+            let cache = database.config().cache();
+            let registry = database.config().registry();
             let mut pool = AsyncTaskPool::new();
-            let mut removed_assets = vec![];
-            let mut reload_assets = vec![];
+            let mut reload = vec![];
+            let mut remove = vec![];
             let mut errors = vec![];
-            for paths in self.paths.chunks(POOL_SIZE) {
+
+            for paths in self.paths.chunks(100) {
                 for path in paths {
-                    pool.spawn(Self::import_and_save(path, source, database));
+                    pool.spawn(Self::import_and_save(path, registry, source, cache));
                 }
 
                 for result in block_on(pool.run()) {
                     match result {
-                        Ok((meta, removed)) => {
-                            reload_assets.push(meta.id);
-                            reload_assets.extend(meta.sub_assets);
-                            reload_assets.extend(meta.dependencies);
-                            removed_assets.extend(removed);
+                        Ok((reloaded, removed)) => {
+                            reload.extend(reloaded);
+                            remove.extend(removed);
                         }
                         Err(error) => errors.push(error),
                     }
                 }
             }
 
-            database
-                .events()
-                .push_front(RemoveAssets::new(self.source, removed_assets));
-            database
-                .events()
-                .push_front(ImportErrors::new(self.source, errors));
-        }
-    }
-}
-
-pub struct ImportAsset {
-    source: SourceId,
-    path: PathBuf,
-}
-
-impl ImportAsset {
-    pub fn new(path: PathBuf) -> Self {
-        Self {
-            source: SourceId::Default,
-            path,
-        }
-    }
-
-    pub fn from_source(source: impl Into<SourceId>, path: PathBuf) -> Self {
-        Self {
-            source: source.into(),
-            path,
-        }
-    }
-}
-
-impl WorldAction for ImportAsset {
-    fn execute(self, world: &mut ecs::world::World) -> Option<()> {
-        let events = world.resource_mut::<Events<StartAssetEvent>>();
-        Some(events.add(StartAssetEvent::new(ImportAssets::new(
-            self.source,
-            vec![self.path],
-        ))))
-    }
-}
-
-#[derive(Debug)]
-pub struct RemoveAssetError {
-    id: AssetId,
-    error: AssetIoError,
-}
-
-impl RemoveAssetError {
-    pub fn new(id: AssetId, error: AssetIoError) -> Self {
-        Self { id, error }
-    }
-
-    pub fn id(&self) -> &AssetId {
-        &self.id
-    }
-
-    pub fn error(&self) -> &AssetIoError {
-        &self.error
-    }
-}
-
-impl std::fmt::Display for RemoveAssetError {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "Failed to remove asset: {:?}", self.id)
-    }
-}
-impl std::error::Error for RemoveAssetError {}
-impl Event for RemoveAssetError {}
-impl WorldAction for RemoveAssetError {
-    fn execute(self, world: &mut ecs::world::World) -> Option<()> {
-        let events = world.resource_mut::<Events<RemoveAssetError>>();
-        events.add(self);
-        Some(())
-    }
-}
-
-pub struct RemoveAssets {
-    source: SourceId,
-    ids: Vec<AssetId>,
-}
-
-impl RemoveAssets {
-    pub fn new(source: impl Into<SourceId>, ids: Vec<AssetId>) -> Self {
-        Self {
-            source: source.into(),
-            ids,
-        }
-    }
-
-    async fn remove_asset<'a>(
-        &'a self,
-        id: &'a AssetId,
-        database: &'a AssetDatabase,
-        cache: &'a AssetCache,
-    ) -> Result<Vec<AssetId>, RemoveAssetError> {
-        let is_sub = {
-            let mut library = database.library_mut();
-            let sources = library.get_sources_mut(&self.source);
-            sources.remove(id).is_none()
-        };
-
-        let artifact = cache
-            .remove_artifact(*id)
-            .await
-            .map_err(|e| RemoveAssetError::new(*id, e))?;
-
-        if is_sub {
-            return Ok(vec![*id]);
-        }
-
-        let futures = {
-            let mut futures = vec![];
-            let mut library = database.library_mut();
-            let sources = library.get_sources_mut(&self.source);
-            for id in artifact.meta.sub_assets {
-                sources.remove_sub(&id);
-                futures.push(cache.remove_artifact(id));
+            let mut events = database.events();
+            if !errors.is_empty() {
+                events.push_front(ImportErrors::new(self.source, errors));
             }
 
-            futures
-        };
-        let mut unloads = vec![*id];
-        for result in join_all(futures).await {
-            if let Ok(artifact) = result {
-                unloads.push(artifact.meta.id);
+            if !remove.is_empty() {
+                events.push_front(RemoveAssets::new(self.source, remove));
             }
+
+            // TODO: Reload assets
         }
-
-        unloads.push(artifact.meta.id);
-
-        Ok(unloads)
-    }
-}
-
-impl WorldAction for RemoveAssets {
-    fn execute(self, world: &mut ecs::world::World) -> Option<()> {
-        let events = world.resource_mut::<Events<StartAssetEvent>>();
-        Some(events.add(StartAssetEvent::new(self)))
-    }
-}
-
-impl AssetEvent for RemoveAssets {
-    fn execute(&mut self, database: &AssetDatabase, actions: &ecs::world::action::WorldActions) {
-        let cache = database.config().cache();
-        const POOL_SIZE: usize = 100;
-        let mut pool = AsyncTaskPool::new();
-        let mut unload_assets = vec![];
-        let mut errors = vec![];
-        for ids in self.ids.chunks(POOL_SIZE) {
-            for id in ids {
-                pool.spawn(self.remove_asset(id, database, cache));
-            }
-
-            for result in block_on(pool.run()) {
-                match result {
-                    Ok(ids) => unload_assets.extend(ids),
-                    Err(error) => errors.push(error),
-                }
-            }
-        }
-
-        actions.extend(errors);
     }
 }
 
@@ -500,68 +329,127 @@ pub struct ImportErrors {
 }
 
 impl ImportErrors {
-    pub fn new(source: impl Into<SourceId>, errors: Vec<ImportError>) -> Self {
-        Self {
-            source: source.into(),
-            errors,
-        }
-    }
-
-    pub fn source(&self) -> &SourceId {
-        &self.source
-    }
-
-    pub fn errors(&self) -> &[ImportError] {
-        &self.errors
+    pub fn new(source: SourceId, errors: Vec<ImportError>) -> Self {
+        Self { source, errors }
     }
 }
 
 impl WorldAction for ImportErrors {
     fn execute(self, world: &mut ecs::world::World) -> Option<()> {
         let events = world.resource_mut::<Events<StartAssetEvent>>();
-        Some(events.add(self.into()))
+        Some(events.add(StartAssetEvent::new(self)))
     }
 }
 
 impl AssetEvent for ImportErrors {
     fn execute(&mut self, database: &AssetDatabase, actions: &ecs::world::action::WorldActions) {
-        let mut library = database.library_mut();
-        let sources = library.get_sources_mut(&self.source);
-        let mut remove = vec![];
-        for error in &self.errors {
-            let source = match sources.get(error.path()) {
-                Some(source) => source,
-                None => continue,
-            };
+        let library = database.library_mut();
+        if let Some(source) = library.get_sources(&self.source) {
+            let mut remove = vec![];
+            for error in &self.errors {
+                if let Some(id) = source.get(error.path()) {
+                    remove.push(id);
+                }
+            }
 
-            remove.push(source.id);
+            database
+                .events()
+                .push_front(RemoveAssets::new(self.source, remove));
         }
 
-        let notify = NotifyImportErrors::new(std::mem::take(&mut self.errors));
-        database
-            .events()
-            .push_front(RemoveAssets::new(self.source, remove));
-        actions.add(notify);
+        actions.add(BulkEvents::new(std::mem::take(&mut self.errors)));
     }
 }
 
-pub struct NotifyImportErrors {
-    errors: Vec<ImportError>,
+#[derive(Debug)]
+pub struct RemoveError {
+    id: AssetId,
+    error: AssetIoError,
 }
 
-impl NotifyImportErrors {
-    pub fn new(errors: Vec<ImportError>) -> Self {
-        Self { errors }
+impl RemoveError {
+    pub fn new(id: AssetId, error: AssetIoError) -> Self {
+        Self { id, error }
     }
 
-    pub fn errors(&self) -> &[ImportError] {
-        &self.errors
+    pub fn id(&self) -> AssetId {
+        self.id
+    }
+
+    pub fn error(&self) -> &AssetIoError {
+        &self.error
     }
 }
 
-impl WorldAction for NotifyImportErrors {
-    fn execute(self, world: &mut ecs::world::World) -> Option<()> {
-        let events = world.resource_mut::<Events<ImportError>>();
-        Some(events.extend(self.errors))
+impl std::fmt::Display for RemoveError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "Failed to remove asset: {:?}", self.id)
+    }
+}
+
+impl Event for RemoveError {}
+
+pub struct RemoveAssets {
+    source: SourceId,
+    assets: Vec<AssetId>,
+}
+
+impl RemoveAssets {
+    pub fn new(source: SourceId, assets: Vec<AssetId>) -> Self {
+        Self { source, assets }
+    }
+
+    pub async fn remove<'a>(
+        &'a self,
+        id: &'a AssetId,
+        database: &'a AssetDatabase,
+    ) -> (Vec<AssetId>, Vec<RemoveError>) {
+        let mut removed = vec![];
+        let mut errors = vec![];
+        let cache = database.config().cache();
+        let artifact = match cache.remove_artifact(*id).await {
+            Ok(artifact) => artifact,
+            Err(error) => {
+                errors.push(RemoveError::new(*id, error));
+                return (vec![*id], errors);
+            }
+        };
+
+        let mut library = database.library_mut();
+        let sources = library.get_sources_mut(&self.source);
+        sources.remove(&artifact.meta.path);
+        std::mem::drop(library);
+
+        removed.push(artifact.meta.id);
+        for sub in artifact.meta.sub_assets {
+            removed.push(sub);
+            if let Err(error) = cache.remove_artifact(sub).await {
+                errors.push(RemoveError::new(sub, error));
+            }
+        }
+
+        (removed, errors)
+    }
+}
+
+impl AssetEvent for RemoveAssets {
+    fn execute(&mut self, database: &AssetDatabase, actions: &ecs::world::action::WorldActions) {
+        let mut pool = AsyncTaskPool::new();
+        let mut unload = vec![];
+        let mut errors = vec![];
+        for ids in self.assets.chunks(100) {
+            for id in ids {
+                pool.spawn(self.remove(id, database));
+            }
+
+            for (removed, errs) in block_on(pool.run()) {
+                unload.extend(removed);
+                errors.extend(errs);
+            }
+        }
+
+        actions.add(BulkEvents::new(errors));
+
+        // TODO: Unload assets
     }
 }

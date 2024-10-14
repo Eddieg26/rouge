@@ -1,5 +1,5 @@
 use super::{cell::WorldCell, World};
-use crate::system::SystemArg;
+use crate::{event::{Event, Events}, system::SystemArg};
 use std::sync::{Arc, Mutex};
 
 pub trait WorldAction: Send + Sync + 'static {
@@ -54,5 +54,26 @@ impl SystemArg for WorldActions {
 
     fn get<'a>(world: &'a WorldCell) -> Self::Item<'a> {
         &world.get().actions
+    }
+}
+
+pub struct BulkEvents<E: Event> {
+    events: Vec<E>,
+}
+
+impl<E: Event> BulkEvents<E> {
+    pub fn new(events: Vec<E>) -> Self {
+        Self { events }
+    }
+
+    pub fn into_inner(self) -> Vec<E> {
+        self.events
+    }
+}
+
+impl<E: Event> WorldAction for BulkEvents<E> {
+    fn execute(self, world: &mut World) -> Option<()> {
+        let events = world.resource_mut::<Events<E>>();
+        Some(events.extend(self.events))
     }
 }

@@ -8,7 +8,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-pub trait Event: Send + 'static {}
+pub trait Event: Send + Sync + 'static {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct EventId(Type);

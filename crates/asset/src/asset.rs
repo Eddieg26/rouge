@@ -78,25 +78,19 @@ impl Into<Type> for AssetType {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum AssetPath {
-    Id { source: SourceId, id: AssetId },
+    Id { id: AssetId },
     Path { source: SourceId, path: PathBuf },
 }
 
 impl From<AssetId> for AssetPath {
     fn from(id: AssetId) -> Self {
-        AssetPath::Id {
-            source: SourceId::Default,
-            id,
-        }
+        AssetPath::Id { id }
     }
 }
 
 impl From<&AssetId> for AssetPath {
     fn from(value: &AssetId) -> Self {
-        AssetPath::Id {
-            source: SourceId::Default,
-            id: *value,
-        }
+        AssetPath::Id { id: *value }
     }
 }
 
@@ -117,6 +111,13 @@ pub struct AssetSettings<S: Settings> {
 impl<S: Settings> AssetSettings<S> {
     pub fn new(id: AssetId, settings: S) -> Self {
         Self { id, settings }
+    }
+
+    pub fn default<A: Asset>() -> Self {
+        Self {
+            id: AssetId::new::<A>(),
+            settings: S::default(),
+        }
     }
 
     pub fn id(&self) -> &AssetId {
@@ -324,38 +325,5 @@ impl ErasedAsset {
     pub fn into<A: Asset>(self) -> A {
         assert_eq!(self.ty, AssetType::of::<A>());
         self.asset.into()
-    }
-}
-
-pub struct ErasedSettings {
-    ty: Type,
-    settings: BlobCell,
-}
-
-impl ErasedSettings {
-    pub fn new<S: Settings>(settings: AssetSettings<S>) -> Self {
-        Self {
-            ty: Type::of::<S>(),
-            settings: BlobCell::new(settings),
-        }
-    }
-
-    pub fn ty(&self) -> Type {
-        self.ty
-    }
-
-    pub fn value<S: Settings>(&self) -> &AssetSettings<S> {
-        assert_eq!(self.ty, Type::of::<S>());
-        self.settings.value()
-    }
-
-    pub fn value_mut<S: Settings>(&mut self) -> &mut AssetSettings<S> {
-        assert_eq!(self.ty, Type::of::<S>());
-        self.settings.value_mut()
-    }
-
-    pub fn into<S: Settings>(self) -> AssetSettings<S> {
-        assert_eq!(self.ty, Type::of::<S>());
-        self.settings.into()
     }
 }

@@ -1,7 +1,6 @@
 use crate::{
-    asset::AssetId,
+    asset::{Asset, AssetId, AssetKind},
     io::{AssetFuture, AssetIoError, AssetReader, AssetSourceConfig, AssetWriter},
-    library::{Artifact, ArtifactHeader, ArtifactMeta},
 };
 use std::{path::PathBuf, sync::Arc};
 
@@ -90,5 +89,89 @@ impl AssetCache {
             bincode::deserialize::<ArtifactMeta>(&bytes)
                 .map_err(|e| AssetIoError::from(std::io::Error::new(std::io::ErrorKind::Other, e)))
         })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ArtifactMeta {
+    pub id: AssetId,
+    pub path: PathBuf,
+    pub sub_assets: Vec<AssetId>,
+    pub dependencies: Vec<AssetId>,
+    pub kind: AssetKind,
+}
+
+impl ArtifactMeta {
+    pub fn main(
+        id: AssetId,
+        path: PathBuf,
+        dependencies: Vec<AssetId>,
+        sub_assets: Vec<AssetId>,
+    ) -> Self {
+        Self {
+            id,
+            path,
+            sub_assets,
+            dependencies,
+            kind: AssetKind::Main,
+        }
+    }
+
+    pub fn sub(sub: AssetId, main: AssetId, path: PathBuf) -> Self {
+        Self {
+            id: sub,
+            path,
+            sub_assets: vec![],
+            dependencies: vec![main],
+            kind: AssetKind::Sub,
+        }
+    }
+
+    pub fn add_sub_asset(&mut self, sub_asset: AssetId) {
+        self.sub_assets.push(sub_asset);
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ArtifactHeader {
+    pub meta_size: u32,
+    pub checksum: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Artifact {
+    pub header: ArtifactHeader,
+    pub meta: ArtifactMeta,
+    asset: Vec<u8>,
+}
+
+impl Artifact {
+    pub fn new(asset: Vec<u8>, meta: ArtifactMeta, checksum: u32) -> Self {
+        let meta_size = bincode::serialized_size(&meta).unwrap() as u32;
+        Self {
+            header: ArtifactHeader {
+                meta_size,
+                checksum,
+            },
+            meta,
+            asset,
+        }
+    }
+
+    pub fn from_asset<A: Asset>(asset: A, meta: ArtifactMeta, checksum: u32) -> Self {
+        let asset = bincode::serialize(&asset).unwrap();
+        Self::new(asset, meta, checksum)
+    }
+
+    pub fn header(&self) -> &ArtifactHeader {
+        &self.header
+    }
+
+    pub fn meta(&self) -> &ArtifactMeta {
+        &self.meta
+    }
+
+    pub fn asset(&self) -> &[u8] {
+        &self.asset
     }
 }

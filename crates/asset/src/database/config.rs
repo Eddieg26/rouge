@@ -1,7 +1,7 @@
+use super::registry::AssetRegistry;
 use crate::{
     asset::Asset,
     cache::AssetCache,
-    importer::registry::AssetRegistry,
     io::{local::LocalFS, AssetSource, AssetSourceConfig, AssetSources, SourceId},
 };
 use std::path::{Path, PathBuf};

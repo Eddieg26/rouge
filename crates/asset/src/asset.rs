@@ -19,23 +19,20 @@ impl AssetId {
 
     pub fn new<A: Asset>() -> Self {
         let ty = Type::of::<A>();
-        let id = Uuid::new_v4();
+        let mut id = Uuid::new_v4();
 
         unsafe {
-            let bytes = id.as_bytes() as *const [u8; 16] as *mut [u8; 16];
-            let bytes = bytes.as_mut().unwrap();
-            let bytes = &mut bytes[0..4];
-
-            bytes.copy_from_slice(&ty.value().to_ne_bytes());
+            let addr = std::ptr::addr_of_mut!(id) as *mut u32;
+            std::ptr::write(addr, ty.value().to_be());
         }
 
         Self(id)
     }
 
     pub fn ty(&self) -> AssetType {
-        let mut bytes = [0u8; 4];
-        bytes.copy_from_slice(&self.0.as_bytes()[0..4]);
-        AssetType::dynamic(Type::dynamic(u32::from_ne_bytes(bytes)))
+        let bytes: [u8; 4] = self.0.as_bytes()[0..4].try_into().unwrap();
+        let ty = u32::from_be_bytes(bytes);
+        AssetType::dynamic(ty)
     }
 
     pub fn raw(id: Uuid) -> Self {
@@ -65,8 +62,8 @@ impl AssetType {
         Self(Type::of::<A>())
     }
 
-    pub fn dynamic(ty: Type) -> Self {
-        Self(ty)
+    pub fn dynamic(ty: u32) -> Self {
+        Self(Type::dynamic(ty))
     }
 }
 

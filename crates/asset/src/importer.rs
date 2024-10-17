@@ -1,7 +1,10 @@
 use crate::{
     asset::{Asset, AssetId, AssetSettings, Settings},
-    cache::{Artifact, ArtifactMeta},
-    io::{AssetFuture, AssetReader, AssetSource},
+    io::{
+        cache::{Artifact, ArtifactMeta},
+        source::AssetSource,
+        AssetFuture, AssetReader,
+    },
 };
 use ecs::event::Event;
 use hashbrown::HashSet;
@@ -29,6 +32,10 @@ impl<'a, S: Settings> ImportContext<'a, S> {
         }
     }
 
+    pub fn path(&self) -> &Path {
+        self.path
+    }
+
     pub fn id(&self) -> &AssetId {
         self.settings.id()
     }
@@ -49,10 +56,11 @@ impl<'a, S: Settings> ImportContext<'a, S> {
         self.dependencies.insert(id);
     }
 
-    pub fn add_sub_asset<A: Asset>(&mut self, id: AssetId, asset: A) {
-        let meta = ArtifactMeta::sub(id, *self.settings.id(), self.path.to_path_buf());
-        let asset = Artifact::from_asset::<A>(asset, meta, 0);
-        self.sub_assets.push(asset);
+    pub fn add_sub_asset<A: Asset>(&mut self, id: AssetId, asset: A) -> Result<(), bincode::Error> {
+        let mut meta = ArtifactMeta::new(id);
+        meta.parent = Some(*self.id());
+        let asset = Artifact::from_asset::<A>(&asset, meta)?;
+        Ok(self.sub_assets.push(asset))
     }
 
     pub fn finish(self) -> (HashSet<AssetId>, Vec<Artifact>) {
@@ -72,6 +80,13 @@ pub trait AssetImporter {
     ) -> AssetFuture<'a, Self::Asset, Self::Error>;
 
     fn extensions() -> &'static [&'static str];
+}
+
+
+pub struct ProcessContext<'a, S: Settings> {
+    settings: &'a AssetSettings<S>,
+    sub_assets: Vec<Artifact>,
+    
 }
 
 pub trait AssetProcessor {

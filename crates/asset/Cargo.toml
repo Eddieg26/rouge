@@ -13,6 +13,7 @@ crc32fast = { workspace = true }
 downcast-rs = { workspace = true }
 hashbrown = { workspace = true, features = ["serde"] }
 bincode = { workspace = true }
+thiserror = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 serde = { workspace = true, features = ["derive"] }
 futures-io = "0.3.31"

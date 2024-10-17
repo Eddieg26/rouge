@@ -1,7 +1,7 @@
-use asset::{
-    asset::{Asset, AssetId, AssetType},
-    io::{embed::EmbeddedFS, local::LocalFS, AssetSourceConfig},
-};
+// use asset::{
+//     asset::{Asset, AssetId, AssetType},
+//     io::{embed::EmbeddedFS, local::LocalFS, AssetSourceConfig},
+// };
 use ecs::{
     core::{component::Component, entity::Entity, resource::Resource},
     event::Event,
@@ -38,7 +38,7 @@ impl Resource for ResA {}
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct TestAsset;
-impl Asset for TestAsset {}
+// impl Asset for TestAsset {}
 
 fn main() {
     // let mut world = world::World::new();

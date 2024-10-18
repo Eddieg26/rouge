@@ -1,4 +1,4 @@
-use super::{AssetIo, AssetReader, AssetWriter};
+use super::{AssetIo, AssetIoError, AssetReader, AssetWriter};
 use async_std::sync::RwLock;
 use futures::{AsyncRead, AsyncWrite};
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
@@ -166,6 +166,14 @@ impl AssetIo for EmbeddedFs {
 
     fn is_dir<'a>(&'a self, _: &'a std::path::Path) -> super::AssetFuture<'a, bool> {
         Box::pin(async { Ok(false) })
+    }
+
+    fn create_dir<'a>(&'a self, _: &'a std::path::Path) -> super::AssetFuture<'a, ()> {
+        Box::pin(async move { Err(AssetIoError::from(std::io::ErrorKind::Unsupported)) })
+    }
+
+    fn create_dir_all<'a>(&'a self, _: &'a std::path::Path) -> super::AssetFuture<'a, ()> {
+        Box::pin(async move { Err(AssetIoError::from(std::io::ErrorKind::Unsupported)) })
     }
 
     fn writer<'a>(

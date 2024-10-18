@@ -101,6 +101,22 @@ impl AssetIo for LocalAssets {
         })
     }
 
+    fn create_dir<'a>(&'a self, path: &'a Path) -> super::AssetFuture<'a, ()> {
+        Box::pin(async move {
+            async_std::fs::create_dir(path)
+                .await
+                .map_err(AssetIoError::from)
+        })
+    }
+
+    fn create_dir_all<'a>(&'a self, path: &'a Path) -> super::AssetFuture<'a, ()> {
+        Box::pin(async move {
+            async_std::fs::create_dir_all(path)
+                .await
+                .map_err(AssetIoError::from)
+        })
+    }
+
     fn rename<'a>(
         &'a self,
         from: &'a std::path::Path,

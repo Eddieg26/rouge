@@ -1,4 +1,4 @@
-use super::{local::LocalAssets, AssetIo, AssetIoError};
+use super::{local::LocalAssets, source::AssetPath, AssetIo, AssetIoError};
 use crate::asset::{Asset, AssetId};
 use futures::{AsyncReadExt, AsyncWriteExt};
 use std::path::{Path, PathBuf};
@@ -15,7 +15,7 @@ impl AssetCache {
         }
     }
 
-    pub fn artifact_path(&self, id: AssetId) -> PathBuf {
+    pub fn artifact_path(&self, id: &AssetId) -> PathBuf {
         self.fs
             .root()
             .join("artifacts")
@@ -23,7 +23,7 @@ impl AssetCache {
             .join("artifact")
     }
 
-    pub fn prev_artifact_path(&self, id: AssetId) -> PathBuf {
+    pub fn prev_artifact_path(&self, id: &AssetId) -> PathBuf {
         self.fs
             .root()
             .join("artifacts")
@@ -31,12 +31,18 @@ impl AssetCache {
             .join("prev")
     }
 
+    pub async fn load_asset<A: Asset>(&self, id: &AssetId) -> Result<LoadedAsset<A>, AssetIoError> {
+        let artifact = self.load_artifact(id).await?;
+        let asset = bincode::deserialize::<A>(&artifact.data).map_err(AssetIoError::from)?;
+        Ok(LoadedAsset::new(asset, artifact.meta))
+    }
+
     pub async fn save_artifact(
         &self,
         artifact: Artifact,
         checksum: u32,
     ) -> Result<usize, AssetIoError> {
-        let path = self.artifact_path(artifact.meta.id);
+        let path = self.artifact_path(&artifact.meta.id);
         let mut file = self.fs.writer(&path).await?;
         let meta = bincode::serialize(&artifact.meta).map_err(AssetIoError::from)?;
         let header = ArtifactHeader {
@@ -49,7 +55,7 @@ impl AssetCache {
         file.write(&data).await.map_err(AssetIoError::from)
     }
 
-    pub async fn load_artifact(&self, id: AssetId) -> Result<Artifact, AssetIoError> {
+    pub async fn load_artifact(&self, id: &AssetId) -> Result<Artifact, AssetIoError> {
         let path = self.artifact_path(id);
         let mut file = self.fs.reader(&path).await?;
         let mut header_data = [0; std::mem::size_of::<ArtifactHeader>()];
@@ -64,7 +70,7 @@ impl AssetCache {
         Ok(Artifact { meta, data })
     }
 
-    pub async fn load_artifact_header(&self, id: AssetId) -> Result<ArtifactHeader, AssetIoError> {
+    pub async fn load_artifact_header(&self, id: &AssetId) -> Result<ArtifactHeader, AssetIoError> {
         let path = self.artifact_path(id);
         let mut file = self.fs.reader(&path).await?;
         let mut data = [0; std::mem::size_of::<ArtifactHeader>()];
@@ -72,7 +78,7 @@ impl AssetCache {
         bincode::deserialize(&data).map_err(AssetIoError::from)
     }
 
-    pub async fn load_artifact_meta(&self, id: AssetId) -> Result<ArtifactMeta, AssetIoError> {
+    pub async fn load_artifact_meta(&self, id: &AssetId) -> Result<ArtifactMeta, AssetIoError> {
         let path = self.artifact_path(id);
         let mut file = self.fs.reader(&path).await?;
         let mut data = Vec::new();
@@ -80,7 +86,7 @@ impl AssetCache {
         bincode::deserialize(&data).map_err(AssetIoError::from)
     }
 
-    pub async fn save_prev_artifact(&self, id: AssetId) -> Result<usize, AssetIoError> {
+    pub async fn save_prev_artifact(&self, id: &AssetId) -> Result<usize, AssetIoError> {
         let artifact = self.load_artifact(id).await?;
         let path = self.prev_artifact_path(id);
         let mut file = self.fs.writer(&path).await?;
@@ -95,7 +101,10 @@ impl AssetCache {
         file.write(&data).await.map_err(AssetIoError::from)
     }
 
-    pub async fn load_prev_artifact_meta(&self, id: AssetId) -> Result<ArtifactMeta, AssetIoError> {
+    pub async fn load_prev_artifact_meta(
+        &self,
+        id: &AssetId,
+    ) -> Result<ArtifactMeta, AssetIoError> {
         let path = self.prev_artifact_path(id);
         let mut file = self.fs.reader(&path).await?;
         let mut data = Vec::new();
@@ -103,13 +112,52 @@ impl AssetCache {
         bincode::deserialize(&data).map_err(AssetIoError::from)
     }
 
-    pub fn artifact_exists(&self, id: AssetId) -> bool {
+    pub fn artifact_exists(&self, id: &AssetId) -> bool {
         self.artifact_path(id).exists()
     }
 
-    pub async fn remove_artifact(&self, id: AssetId) -> Result<(), AssetIoError> {
+    pub async fn remove_artifact(&self, id: &AssetId) -> Result<(), AssetIoError> {
         let path = self.artifact_path(id);
         self.fs.remove(&path).await
+    }
+
+    pub async fn save_temp_artifact(&self, artifact: &Artifact) -> Result<usize, AssetIoError> {
+        let path = self.artifact_path(&artifact.meta.id);
+        let mut file = self.fs.writer(&path).await?;
+        let data = bincode::serialize(&artifact).map_err(AssetIoError::from)?;
+        file.write(&data).await.map_err(AssetIoError::from)
+    }
+
+    pub async fn load_temp_artifact(&self, id: &AssetId) -> Result<Artifact, AssetIoError> {
+        let path = self.artifact_path(id);
+        let mut file = self.fs.reader(&path).await?;
+        let mut data = Vec::new();
+        file.read_to_end(&mut data).await?;
+        bincode::deserialize(&data).map_err(AssetIoError::from)
+    }
+
+    pub async fn remove_temp_artifact(&self, id: &AssetId) -> Result<(), AssetIoError> {
+        let path = self.artifact_path(id);
+        self.fs.remove(&path).await
+    }
+}
+
+pub struct LoadedAsset<A: Asset> {
+    asset: A,
+    meta: ArtifactMeta,
+}
+
+impl<A: Asset> LoadedAsset<A> {
+    pub fn new(asset: A, meta: ArtifactMeta) -> Self {
+        Self { asset, meta }
+    }
+
+    pub fn asset(&self) -> &A {
+        &self.asset
+    }
+
+    pub fn meta(&self) -> &ArtifactMeta {
+        &self.meta
     }
 }
 
@@ -123,6 +171,7 @@ pub struct ArtifactHeader {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ArtifactMeta {
     pub id: AssetId,
+    pub path: AssetPath,
     pub parent: Option<AssetId>,
     pub children: Vec<AssetId>,
     pub dependencies: Vec<AssetId>,
@@ -130,14 +179,30 @@ pub struct ArtifactMeta {
 }
 
 impl ArtifactMeta {
-    pub fn new(id: AssetId) -> Self {
+    pub fn new(id: AssetId, path: impl Into<AssetPath>) -> Self {
         Self {
             id,
+            path: path.into(),
             parent: None,
             children: Vec::new(),
             dependencies: Vec::new(),
             dependents: Vec::new(),
         }
+    }
+
+    pub fn with_dependencies(mut self, dependencies: Vec<AssetId>) -> Self {
+        self.dependencies = dependencies;
+        self
+    }
+
+    pub fn with_parent(mut self, parent: AssetId) -> Self {
+        self.parent = Some(parent);
+        self
+    }
+
+    pub fn with_children(mut self, children: Vec<AssetId>) -> Self {
+        self.children = children;
+        self
     }
 }
 

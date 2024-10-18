@@ -1,38 +1,38 @@
 use crate::{
-    asset::{Asset, AssetId, AssetSettings, Settings},
+    asset::{Asset, AssetId, AssetMetadata, Settings},
     io::{
-        cache::{Artifact, ArtifactMeta},
-        source::AssetSource,
-        AssetFuture, AssetReader,
+        cache::{Artifact, ArtifactMeta, AssetCache, LoadedAsset},
+        source::{AssetPath, AssetSource},
+        AssetFuture, AssetIoError, AssetReader,
     },
 };
 use ecs::event::Event;
-use hashbrown::HashSet;
-use std::{
-    error::Error,
-    path::{Path, PathBuf},
-};
+use std::error::Error;
 
-pub struct ImportContext<'a, S: Settings> {
-    path: &'a Path,
+pub struct ImportContext<'a, A: Asset, S: Settings> {
+    path: &'a AssetPath,
     source: &'a AssetSource,
-    settings: &'a AssetSettings<S>,
-    dependencies: HashSet<AssetId>,
+    settings: &'a AssetMetadata<A, S>,
+    dependencies: Vec<AssetId>,
     sub_assets: Vec<Artifact>,
 }
 
-impl<'a, S: Settings> ImportContext<'a, S> {
-    pub fn new(path: &'a Path, source: &'a AssetSource, settings: &'a AssetSettings<S>) -> Self {
+impl<'a, A: Asset, S: Settings> ImportContext<'a, A, S> {
+    pub fn new(
+        path: &'a AssetPath,
+        source: &'a AssetSource,
+        settings: &'a AssetMetadata<A, S>,
+    ) -> Self {
         Self {
             path,
             source,
             settings,
-            dependencies: HashSet::new(),
+            dependencies: vec![],
             sub_assets: vec![],
         }
     }
 
-    pub fn path(&self) -> &Path {
+    pub fn path(&self) -> &AssetPath {
         self.path
     }
 
@@ -48,22 +48,27 @@ impl<'a, S: Settings> ImportContext<'a, S> {
         &self.source
     }
 
-    pub fn dependencies(&self) -> &HashSet<AssetId> {
+    pub fn dependencies(&self) -> &[AssetId] {
         &self.dependencies
     }
 
     pub fn add_dependency(&mut self, id: AssetId) {
-        self.dependencies.insert(id);
+        self.dependencies.push(id);
     }
 
-    pub fn add_sub_asset<A: Asset>(&mut self, id: AssetId, asset: A) -> Result<(), bincode::Error> {
-        let mut meta = ArtifactMeta::new(id);
-        meta.parent = Some(*self.id());
-        let asset = Artifact::from_asset::<A>(&asset, meta)?;
+    pub fn add_sub_asset<Sub: Asset>(
+        &mut self,
+        id: AssetId,
+        name: impl ToString,
+        asset: Sub,
+    ) -> Result<(), bincode::Error> {
+        let meta =
+            ArtifactMeta::new(id, self.path.with_name(name.to_string())).with_parent(*self.id());
+        let asset = Artifact::from_asset(&asset, meta)?;
         Ok(self.sub_assets.push(asset))
     }
 
-    pub fn finish(self) -> (HashSet<AssetId>, Vec<Artifact>) {
+    pub fn finish(self) -> (Vec<AssetId>, Vec<Artifact>) {
         (self.dependencies, self.sub_assets)
     }
 }
@@ -75,18 +80,30 @@ pub trait AssetImporter {
     type Error: Error + Send + Sync + 'static;
 
     fn import<'a>(
-        ctx: &'a mut ImportContext<Self::Settings>,
+        ctx: &'a mut ImportContext<Self::Asset, Self::Settings>,
         reader: &'a mut dyn AssetReader,
     ) -> AssetFuture<'a, Self::Asset, Self::Error>;
 
     fn extensions() -> &'static [&'static str];
 }
 
+pub struct ProcessContext<'a, A: Asset, S: Settings> {
+    cache: &'a AssetCache,
+    metadata: &'a AssetMetadata<A, S>,
+}
 
-pub struct ProcessContext<'a, S: Settings> {
-    settings: &'a AssetSettings<S>,
-    sub_assets: Vec<Artifact>,
-    
+impl<'a, A: Asset, S: Settings> ProcessContext<'a, A, S> {
+    pub fn new(cache: &'a AssetCache, metadata: &'a AssetMetadata<A, S>) -> Self {
+        Self { cache, metadata }
+    }
+
+    pub async fn load_asset<O: Asset>(&self, id: &AssetId) -> Result<LoadedAsset<O>, AssetIoError> {
+        self.cache.load_asset(id).await
+    }
+
+    pub fn metadata(&self) -> &AssetMetadata<A, S> {
+        self.metadata
+    }
 }
 
 pub trait AssetProcessor {
@@ -95,29 +112,43 @@ pub trait AssetProcessor {
     type Error: Error + Send + Sync + 'static;
 
     fn process<'a>(
-        ctx: &'a mut ImportContext<Self::Settings>,
         asset: &'a mut Self::Asset,
+        ctx: &'a ProcessContext<Self::Asset, Self::Settings>,
     ) -> AssetFuture<'a, (), Self::Error>;
+}
+
+pub struct DefaultProcessor<A: Asset, S: Settings>(std::marker::PhantomData<(A, S)>);
+impl<A: Asset, S: Settings> AssetProcessor for DefaultProcessor<A, S> {
+    type Asset = A;
+    type Settings = S;
+    type Error = std::convert::Infallible;
+
+    fn process<'a>(
+        _: &'a mut Self::Asset,
+        _: &'a ProcessContext<Self::Asset, Self::Settings>,
+    ) -> AssetFuture<'a, (), Self::Error> {
+        Box::pin(async { Ok(()) })
+    }
 }
 
 #[derive(Debug)]
 pub struct ImportError {
-    path: PathBuf,
+    path: AssetPath,
     error: Box<dyn std::error::Error + Send + Sync + 'static>,
 }
 
 impl ImportError {
     pub fn from<E: std::error::Error + Send + Sync + 'static>(
-        path: impl AsRef<Path>,
+        path: impl Into<AssetPath>,
         error: E,
     ) -> Self {
         Self {
-            path: path.as_ref().to_path_buf(),
+            path: path.into(),
             error: Box::new(error),
         }
     }
 
-    pub fn path(&self) -> &Path {
+    pub fn path(&self) -> &AssetPath {
         &self.path
     }
 
@@ -125,9 +156,9 @@ impl ImportError {
         &*self.error
     }
 
-    pub fn missing_extension(path: impl AsRef<Path>) -> Self {
+    pub fn missing_extension(path: impl Into<AssetPath>) -> Self {
         Self {
-            path: path.as_ref().to_path_buf(),
+            path: path.into(),
             error: Box::new(std::io::Error::new(
                 std::io::ErrorKind::Other,
                 "Missing extension",
@@ -135,9 +166,9 @@ impl ImportError {
         }
     }
 
-    pub fn unsupported_extension(path: impl AsRef<Path>) -> Self {
+    pub fn unsupported_extension(path: impl Into<AssetPath>) -> Self {
         Self {
-            path: path.as_ref().to_path_buf(),
+            path: path.into(),
             error: Box::new(std::io::Error::new(
                 std::io::ErrorKind::Other,
                 "Unsupported extension",
@@ -145,9 +176,9 @@ impl ImportError {
         }
     }
 
-    pub fn missing_main(path: impl AsRef<Path>) -> Self {
+    pub fn missing_main(path: impl Into<AssetPath>) -> Self {
         Self {
-            path: path.as_ref().to_path_buf(),
+            path: path.into(),
             error: Box::new(std::io::Error::new(
                 std::io::ErrorKind::Other,
                 "Missing main asset",
@@ -158,19 +189,16 @@ impl ImportError {
 
 impl std::fmt::Display for ImportError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(
-            f,
-            "Import error for {}: {}",
-            self.path.display(),
-            self.error
-        )
+        write!(f, "Import error for {:?}: {}", self.path, self.error)
     }
 }
 
-impl<A: AsRef<Path>, E: std::error::Error + Send + Sync + 'static> From<(A, E)> for ImportError {
+impl<A: Into<AssetPath>, E: std::error::Error + Send + Sync + 'static> From<(A, E)>
+    for ImportError
+{
     fn from((path, error): (A, E)) -> Self {
         Self {
-            path: path.as_ref().to_path_buf(),
+            path: path.into(),
             error: Box::new(error),
         }
     }
@@ -178,3 +206,37 @@ impl<A: AsRef<Path>, E: std::error::Error + Send + Sync + 'static> From<(A, E)> 
 
 impl std::error::Error for ImportError {}
 impl Event for ImportError {}
+
+#[derive(Debug)]
+pub struct ProcessError {
+    id: AssetId,
+    error: Box<dyn std::error::Error + Send + Sync + 'static>,
+}
+
+impl ProcessError {
+    pub fn new(
+        id: AssetId,
+        error: impl Into<Box<dyn std::error::Error + Send + Sync + 'static>>,
+    ) -> Self {
+        Self {
+            id,
+            error: error.into(),
+        }
+    }
+
+    pub fn id(&self) -> AssetId {
+        self.id
+    }
+
+    pub fn error(&self) -> &(dyn std::error::Error + Send + Sync + 'static) {
+        &*self.error
+    }
+}
+
+impl std::fmt::Display for ProcessError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "Failed to process asset: {:?}", self.id)
+    }
+}
+
+impl std::error::Error for ProcessError {}

@@ -1,6 +1,6 @@
 use ecs::core::Type;
 use serde::ser::SerializeStruct;
-use std::hash::Hash;
+use std::{hash::Hash, marker::PhantomData};
 use uuid::Uuid;
 
 pub trait Asset: Send + Sync + serde::Serialize + for<'a> serde::Deserialize<'a> + 'static {}
@@ -69,20 +69,18 @@ impl AssetType {
     }
 }
 
-pub struct AssetSettings<S: Settings> {
+pub struct AssetMetadata<A: Asset, S: Settings> {
     id: AssetId,
     settings: S,
+    _marker: PhantomData<A>,
 }
 
-impl<S: Settings> AssetSettings<S> {
+impl<A: Asset, S: Settings> AssetMetadata<A, S> {
     pub fn new(id: AssetId, settings: S) -> Self {
-        Self { id, settings }
-    }
-
-    pub fn default<A: Asset>() -> Self {
         Self {
-            id: AssetId::new::<A>(),
-            settings: S::default(),
+            id,
+            settings,
+            _marker: PhantomData::default(),
         }
     }
 
@@ -95,7 +93,17 @@ impl<S: Settings> AssetSettings<S> {
     }
 }
 
-impl<S: Settings> std::ops::Deref for AssetSettings<S> {
+impl<A: Asset, S: Settings> Default for AssetMetadata<A, S> {
+    fn default() -> Self {
+        Self {
+            id: AssetId::new::<A>(),
+            settings: Default::default(),
+            _marker: Default::default(),
+        }
+    }
+}
+
+impl<A: Asset, S: Settings> std::ops::Deref for AssetMetadata<A, S> {
     type Target = S;
 
     fn deref(&self) -> &Self::Target {
@@ -103,13 +111,13 @@ impl<S: Settings> std::ops::Deref for AssetSettings<S> {
     }
 }
 
-impl<S: Settings> std::ops::DerefMut for AssetSettings<S> {
+impl<A: Asset, S: Settings> std::ops::DerefMut for AssetMetadata<A, S> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.settings
     }
 }
 
-impl<S: Settings> serde::Serialize for AssetSettings<S> {
+impl<A: Asset, S: Settings> serde::Serialize for AssetMetadata<A, S> {
     fn serialize<Ser>(&self, ser: Ser) -> Result<Ser::Ok, Ser::Error>
     where
         Ser: serde::Serializer,
@@ -121,8 +129,8 @@ impl<S: Settings> serde::Serialize for AssetSettings<S> {
     }
 }
 
-impl<'de, S: Settings> serde::Deserialize<'de> for AssetSettings<S> {
-    fn deserialize<D>(de: D) -> Result<AssetSettings<S>, D::Error>
+impl<'de, A: Asset, S: Settings> serde::Deserialize<'de> for AssetMetadata<A, S> {
+    fn deserialize<D>(de: D) -> Result<AssetMetadata<A, S>, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
@@ -133,10 +141,10 @@ impl<'de, S: Settings> serde::Deserialize<'de> for AssetSettings<S> {
             Settings,
         }
 
-        struct Visitor<S: Settings>(std::marker::PhantomData<S>);
+        struct Visitor<A: Asset, S: Settings>(std::marker::PhantomData<(A, S)>);
 
-        impl<'de, S: Settings> serde::de::Visitor<'de> for Visitor<S> {
-            type Value = AssetSettings<S>;
+        impl<'de, A: Asset, S: Settings> serde::de::Visitor<'de> for Visitor<A, S> {
+            type Value = AssetMetadata<A, S>;
 
             fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
                 formatter.write_str("struct AssetSettings")
@@ -170,7 +178,11 @@ impl<'de, S: Settings> serde::Deserialize<'de> for AssetSettings<S> {
                 let settings =
                     settings.ok_or_else(|| serde::de::Error::missing_field("settings"))?;
 
-                Ok(AssetSettings { id, settings })
+                Ok(AssetMetadata {
+                    id,
+                    settings,
+                    _marker: PhantomData::default(),
+                })
             }
         }
 

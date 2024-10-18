@@ -1,5 +1,6 @@
-use super::{AssetFuture, AssetIo, AssetReader, AssetWriter};
-use futures::Stream;
+use super::{AssetFuture, AssetIo, AssetIoError, AssetReader, AssetWriter, PathExt};
+use crate::asset::{Asset, AssetMetadata, Settings};
+use futures::{AsyncReadExt, AsyncWriteExt, Stream};
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
@@ -15,7 +16,7 @@ pub struct AssetPath {
 
 impl std::fmt::Display for AssetPath {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}://{}", self.source, self.path.display())?;
+        write!(f, "{:?}://{}", self.source, self.path.display())?;
         if let Some(name) = &self.name {
             write!(f, "@{}", name)?;
         }
@@ -23,14 +24,19 @@ impl std::fmt::Display for AssetPath {
     }
 }
 
-pub enum AssetPathParseError {}
-
 impl AssetPath {
     pub fn new(source: AssetSourceName, path: impl AsRef<Path>) -> Self {
         Self {
             source,
             path: path.as_ref().to_path_buf().into_boxed_path(),
             name: None,
+        }
+    }
+
+    pub fn with_name(&self, name: impl Into<Box<str>>) -> Self {
+        Self {
+            name: Some(name.into()),
+            ..self.clone()
         }
     }
 
@@ -76,6 +82,39 @@ impl AssetPath {
     }
 }
 
+impl From<String> for AssetPath {
+    fn from(path: String) -> Self {
+        Self::from_str(path)
+    }
+}
+
+impl From<&str> for AssetPath {
+    fn from(path: &str) -> Self {
+        Self::from_str(path)
+    }
+}
+
+impl From<&Path> for AssetPath {
+    fn from(path: &Path) -> Self {
+        match path.as_os_str().to_str() {
+            Some(path) => Self::from_str(path),
+            None => Self::new(AssetSourceName::Default, path),
+        }
+    }
+}
+
+impl From<PathBuf> for AssetPath {
+    fn from(path: PathBuf) -> Self {
+        Self::from(path.as_path())
+    }
+}
+
+impl From<&AssetPath> for AssetPath {
+    fn from(value: &AssetPath) -> Self {
+        value.clone()
+    }
+}
+
 #[derive(Clone, Default, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, Hash)]
 pub enum AssetSourceName {
     #[default]
@@ -83,31 +122,14 @@ pub enum AssetSourceName {
     Name(String),
 }
 
-impl std::fmt::Display for AssetSourceName {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            AssetSourceName::Default => write!(f, "default"),
-            AssetSourceName::Name(name) => write!(f, "{}", name),
-        }
-    }
-}
-
 #[derive(Clone)]
 pub struct AssetSource {
-    path: PathBuf,
     io: Arc<dyn AssetIo>,
 }
 
 impl AssetSource {
-    pub fn new<I: AssetIo>(path: impl AsRef<Path>, io: I) -> Self {
-        Self {
-            path: path.as_ref().to_path_buf(),
-            io: Arc::new(io),
-        }
-    }
-
-    pub fn path(&self) -> &Path {
-        &self.path
+    pub fn new<I: AssetIo>(io: I) -> Self {
+        Self { io: Arc::new(io) }
     }
 
     pub fn reader<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, Box<dyn AssetReader>> {
@@ -137,6 +159,48 @@ impl AssetSource {
     pub fn remove_dir<'a>(&'a self, path: &'a Path) -> AssetFuture<()> {
         self.io.remove_dir(path)
     }
+
+    pub fn settings_path(path: &Path) -> PathBuf {
+        path.append_ext("meta")
+    }
+
+    pub async fn read_asset_bytes(&self, path: &Path) -> Result<Vec<u8>, AssetIoError> {
+        let mut reader = self.reader(path).await?;
+        let mut bytes = vec![];
+        reader.read_to_end(&mut bytes).await?;
+        Ok(bytes)
+    }
+
+    pub async fn read_metadata_bytes(&self, path: &Path) -> Result<Vec<u8>, AssetIoError> {
+        let mut reader = self.reader(&Self::settings_path(path)).await?;
+        let mut bytes = vec![];
+        reader.read_to_end(&mut bytes).await?;
+        Ok(bytes)
+    }
+
+    pub async fn load_metadata<A: Asset, S: Settings>(
+        &self,
+        path: &Path,
+    ) -> Result<AssetMetadata<A, S>, AssetIoError> {
+        let mut reader = self.reader(&Self::settings_path(path)).await?;
+        let mut buffer = String::new();
+        reader.read_to_string(&mut buffer).await?;
+
+        ron::from_str::<AssetMetadata<A, S>>(&buffer).map_err(AssetIoError::from)
+    }
+
+    pub async fn save_metadata<A: Asset, S: Settings>(
+        &self,
+        path: &Path,
+        settings: &AssetMetadata<A, S>,
+    ) -> Result<String, AssetIoError> {
+        let mut writer = self.writer(&Self::settings_path(path)).await?;
+        let content = ron::to_string(settings).map_err(AssetIoError::from)?;
+
+        writer.write(content.as_bytes()).await?;
+
+        Ok(content)
+    }
 }
 
 pub struct AssetSources {
@@ -150,8 +214,8 @@ impl AssetSources {
         }
     }
 
-    pub fn add<I: AssetIo>(&mut self, name: AssetSourceName, path: impl AsRef<Path>, io: I) {
-        self.sources.insert(name, AssetSource::new(path, io));
+    pub fn add<I: AssetIo>(&mut self, name: AssetSourceName, io: I) {
+        self.sources.insert(name, AssetSource::new(io));
     }
 
     pub fn get(&self, name: &AssetSourceName) -> Option<&AssetSource> {

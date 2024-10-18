@@ -1,5 +1,4 @@
 use super::{AssetFuture, AssetIo, AssetReader, AssetWriter};
-use crate::asset::AssetId;
 use futures::Stream;
 use std::{
     collections::HashMap,
@@ -8,33 +7,71 @@ use std::{
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub enum AssetPath {
-    Id {
-        id: AssetId,
-    },
-    Path {
-        source: AssetSourceName,
-        path: PathBuf,
-    },
+pub struct AssetPath {
+    source: AssetSourceName,
+    path: Box<Path>,
+    name: Option<Box<str>>,
 }
 
-impl From<AssetId> for AssetPath {
-    fn from(id: AssetId) -> Self {
-        AssetPath::Id { id }
+impl std::fmt::Display for AssetPath {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}://{}", self.source, self.path.display())?;
+        if let Some(name) = &self.name {
+            write!(f, "@{}", name)?;
+        }
+        Ok(())
     }
 }
 
-impl From<&AssetId> for AssetPath {
-    fn from(value: &AssetId) -> Self {
-        AssetPath::Id { id: *value }
-    }
-}
+pub enum AssetPathParseError {}
 
-impl<A: AsRef<Path>> From<A> for AssetPath {
-    fn from(value: A) -> Self {
-        AssetPath::Path {
-            source: AssetSourceName::Default,
-            path: value.as_ref().to_path_buf(),
+impl AssetPath {
+    pub fn new(source: AssetSourceName, path: impl AsRef<Path>) -> Self {
+        Self {
+            source,
+            path: path.as_ref().to_path_buf().into_boxed_path(),
+            name: None,
+        }
+    }
+
+    pub fn source(&self) -> &AssetSourceName {
+        &self.source
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub fn name(&self) -> Option<&str> {
+        self.name.as_deref()
+    }
+
+    /// remote://assets/texture.png@main
+    pub fn from_str<A: AsRef<str>>(path: A) -> Self {
+        let path = path.as_ref();
+        let (source, src_index) = match path.find("://") {
+            Some(position) => {
+                let source = &path[..position];
+                (AssetSourceName::Name(source.to_string()), position + 3)
+            }
+            None => (AssetSourceName::Default, 0),
+        };
+
+        let (name, name_index) = match path[src_index..].find('@') {
+            Some(position) => {
+                let name = &path[src_index + position + 1..];
+                (Some(name.to_string()), src_index + position)
+            }
+            None => (None, path.len()),
+        };
+
+        let path = &path[src_index..name_index];
+        let path = Path::new(path);
+
+        Self {
+            source,
+            path: path.to_path_buf().into_boxed_path(),
+            name: name.map(|name| name.into_boxed_str()),
         }
     }
 }
@@ -44,6 +81,15 @@ pub enum AssetSourceName {
     #[default]
     Default,
     Name(String),
+}
+
+impl std::fmt::Display for AssetSourceName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AssetSourceName::Default => write!(f, "default"),
+            AssetSourceName::Name(name) => write!(f, "{}", name),
+        }
+    }
 }
 
 #[derive(Clone)]

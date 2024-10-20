@@ -133,110 +133,78 @@ impl<A: Asset, S: Settings> AssetProcessor for DefaultProcessor<A, S> {
 
 #[derive(Debug)]
 pub struct ImportError {
-    path: AssetPath,
-    error: Box<dyn std::error::Error + Send + Sync + 'static>,
+    path: Option<AssetPath>,
+    kind: ImportErrorKind,
 }
 
 impl ImportError {
-    pub fn from<E: std::error::Error + Send + Sync + 'static>(
+    pub fn from<E: Into<ImportErrorKind>>(path: impl Into<AssetPath>, error: E) -> Self {
+        Self {
+            path: Some(path.into()),
+            kind: error.into(),
+        }
+    }
+
+    pub fn import(
         path: impl Into<AssetPath>,
-        error: E,
+        error: impl Into<Box<dyn std::error::Error + Send + Sync + 'static>>,
     ) -> Self {
         Self {
-            path: path.into(),
-            error: Box::new(error),
+            path: Some(path.into()),
+            kind: ImportErrorKind::Import(error.into()),
         }
     }
 
-    pub fn path(&self) -> &AssetPath {
-        &self.path
-    }
-
-    pub fn error(&self) -> &(dyn std::error::Error + Send + Sync + 'static) {
-        &*self.error
-    }
-
-    pub fn missing_extension(path: impl Into<AssetPath>) -> Self {
+    pub fn proccess(
+        id: AssetId,
+        path: Option<AssetPath>,
+        error: impl Into<Box<dyn std::error::Error + Send + Sync + 'static>>,
+    ) -> Self {
         Self {
-            path: path.into(),
-            error: Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "Missing extension",
-            )),
+            path: path,
+            kind: ImportErrorKind::Process {
+                id,
+                error: error.into(),
+            },
         }
     }
 
-    pub fn unsupported_extension(path: impl Into<AssetPath>) -> Self {
-        Self {
-            path: path.into(),
-            error: Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "Unsupported extension",
-            )),
-        }
+    pub fn path(&self) -> Option<&AssetPath> {
+        self.path.as_ref()
     }
 
-    pub fn missing_main(path: impl Into<AssetPath>) -> Self {
-        Self {
-            path: path.into(),
-            error: Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "Missing main asset",
-            )),
-        }
+    pub fn kind(&self) -> &ImportErrorKind {
+        &self.kind
     }
 }
 
 impl std::fmt::Display for ImportError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "Import error for {:?}: {}", self.path, self.error)
+        write!(f, "Import error for {:?}: {:?}", self.path, self.kind)
     }
 }
 
-impl<A: Into<AssetPath>, E: std::error::Error + Send + Sync + 'static> From<(A, E)>
-    for ImportError
-{
-    fn from((path, error): (A, E)) -> Self {
+impl<A: Into<AssetPath>, E: Into<ImportErrorKind>> From<(A, E)> for ImportError {
+    fn from((path, kind): (A, E)) -> Self {
         Self {
-            path: path.into(),
-            error: Box::new(error),
+            path: Some(path.into()),
+            kind: kind.into(),
         }
     }
+}
+
+#[derive(Debug)]
+pub enum ImportErrorKind {
+    MissingExtension,
+    UnsupportedExtension,
+    MissingMainAsset,
+    NoProcessor,
+    Import(Box<dyn std::error::Error + Send + Sync + 'static>),
+    Process {
+        id: AssetId,
+        error: Box<dyn std::error::Error + Send + Sync + 'static>,
+    },
 }
 
 impl std::error::Error for ImportError {}
 impl Event for ImportError {}
-
-#[derive(Debug)]
-pub struct ProcessError {
-    id: AssetId,
-    error: Box<dyn std::error::Error + Send + Sync + 'static>,
-}
-
-impl ProcessError {
-    pub fn new(
-        id: AssetId,
-        error: impl Into<Box<dyn std::error::Error + Send + Sync + 'static>>,
-    ) -> Self {
-        Self {
-            id,
-            error: error.into(),
-        }
-    }
-
-    pub fn id(&self) -> AssetId {
-        self.id
-    }
-
-    pub fn error(&self) -> &(dyn std::error::Error + Send + Sync + 'static) {
-        &*self.error
-    }
-}
-
-impl std::fmt::Display for ProcessError {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "Failed to process asset: {:?}", self.id)
-    }
-}
-
-impl std::error::Error for ProcessError {}

@@ -1,2 +1,9 @@
+use std::sync::Arc;
+use config::AssetConfig;
+
 pub mod config;
-pub mod registry;
+
+
+pub struct AssetDatabase {
+    config: Arc<AssetConfig>,
+}

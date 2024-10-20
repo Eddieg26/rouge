@@ -57,11 +57,11 @@ impl SystemArg for WorldActions {
     }
 }
 
-pub struct BulkEvents<E: Event> {
+pub struct BatchEvents<E: Event> {
     events: Vec<E>,
 }
 
-impl<E: Event> BulkEvents<E> {
+impl<E: Event> BatchEvents<E> {
     pub fn new(events: Vec<E>) -> Self {
         Self { events }
     }
@@ -71,7 +71,7 @@ impl<E: Event> BulkEvents<E> {
     }
 }
 
-impl<E: Event> WorldAction for BulkEvents<E> {
+impl<E: Event> WorldAction for BatchEvents<E> {
     fn execute(self, world: &mut World) -> Option<()> {
         let events = world.resource_mut::<Events<E>>();
         Some(events.extend(self.events))

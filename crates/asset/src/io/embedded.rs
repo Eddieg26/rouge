@@ -1,4 +1,4 @@
-use super::{AssetIo, AssetIoError, AssetReader, AssetWriter};
+use super::{AssetIo, AssetIoError, AssetReader, AssetWriter, PathStream};
 use async_std::sync::RwLock;
 use futures::{AsyncRead, AsyncWrite};
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
@@ -144,72 +144,63 @@ impl EmbeddedFs {
 }
 
 impl AssetIo for EmbeddedFs {
-    fn reader<'a>(
-        &'a self,
-        path: &'a std::path::Path,
-    ) -> super::AssetFuture<'a, Box<dyn AssetReader>> {
-        Box::pin(async move {
-            let reader = EmbeddedReader::new(path.to_path_buf(), self.clone());
-            Ok(Box::new(reader) as Box<dyn AssetReader>)
-        })
+    type Reader = EmbeddedReader;
+    type Writer = EmbeddedWriter;
+
+    async fn reader<'a>(&'a self, path: &'a std::path::Path) -> Result<Self::Reader, AssetIoError> {
+        let reader = EmbeddedReader::new(path.to_path_buf(), self.clone());
+        Ok(reader)
     }
 
-    fn read_dir<'a>(
+    async fn read_dir<'a>(
         &'a self,
         _: &'a std::path::Path,
-    ) -> super::AssetFuture<Box<dyn futures::prelude::Stream<Item = PathBuf>>> {
-        Box::pin(async move {
-            let stream = futures::stream::empty();
-            Ok(Box::new(stream) as Box<dyn futures::prelude::Stream<Item = PathBuf>>)
-        })
+    ) -> Result<Box<dyn PathStream>, AssetIoError> {
+        Err(AssetIoError::from(std::io::ErrorKind::Unsupported))
     }
 
-    fn is_dir<'a>(&'a self, _: &'a std::path::Path) -> super::AssetFuture<'a, bool> {
-        Box::pin(async { Ok(false) })
+    async fn is_dir<'a>(&'a self, _: &'a std::path::Path) -> Result<bool, AssetIoError> {
+        Ok(false)
     }
 
-    fn create_dir<'a>(&'a self, _: &'a std::path::Path) -> super::AssetFuture<'a, ()> {
-        Box::pin(async move { Err(AssetIoError::from(std::io::ErrorKind::Unsupported)) })
+    async fn create_dir<'a>(&'a self, _: &'a std::path::Path) -> Result<(), AssetIoError> {
+        Err(AssetIoError::from(std::io::ErrorKind::Unsupported))
     }
 
-    fn create_dir_all<'a>(&'a self, _: &'a std::path::Path) -> super::AssetFuture<'a, ()> {
-        Box::pin(async move { Err(AssetIoError::from(std::io::ErrorKind::Unsupported)) })
+    async fn create_dir_all<'a>(&'a self, _: &'a std::path::Path) -> Result<(), AssetIoError> {
+        Err(AssetIoError::from(std::io::ErrorKind::Unsupported))
     }
 
-    fn writer<'a>(
-        &'a self,
-        path: &'a std::path::Path,
-    ) -> super::AssetFuture<'a, Box<dyn AssetWriter>> {
-        Box::pin(async move {
-            let writer = EmbeddedWriter::new(path.to_path_buf(), self.clone());
-            Ok(Box::new(writer) as Box<dyn AssetWriter>)
-        })
+    async fn writer<'a>(&'a self, path: &'a std::path::Path) -> Result<Self::Writer, AssetIoError> {
+        let writer = EmbeddedWriter::new(path.to_path_buf(), self.clone());
+        Ok(writer)
     }
 
-    fn rename<'a>(
+    async fn rename<'a>(
         &'a self,
         from: &'a std::path::Path,
         to: &'a std::path::Path,
-    ) -> super::AssetFuture<'a, ()> {
-        Box::pin(async move {
-            let mut assets = self.assets.write_blocking();
-            if let Some(bytes) = assets.remove(from) {
-                assets.insert(to.to_path_buf(), bytes);
-            }
+    ) -> Result<(), AssetIoError> {
+        let mut assets = self.assets.write_blocking();
+        if let Some(bytes) = assets.remove(from) {
+            assets.insert(to.to_path_buf(), bytes);
+        }
 
-            Ok(())
-        })
+        Ok(())
     }
 
-    fn remove<'a>(&'a self, path: &'a std::path::Path) -> super::AssetFuture<'a, ()> {
-        Box::pin(async move {
-            let mut assets = self.assets.write_blocking();
-            assets.remove(path);
-            Ok(())
-        })
+    async fn remove<'a>(&'a self, path: &'a std::path::Path) -> Result<(), AssetIoError> {
+        let mut assets = self.assets.write_blocking();
+        assets.remove(path);
+        Ok(())
     }
 
-    fn remove_dir<'a>(&'a self, _: &'a std::path::Path) -> super::AssetFuture<'a, ()> {
-        Box::pin(async { Ok(()) })
+    async fn remove_dir<'a>(&'a self, _: &'a std::path::Path) -> Result<(), AssetIoError> {
+        Ok(())
+    }
+
+    async fn exists<'a>(&'a self, path: &'a std::path::Path) -> Result<bool, AssetIoError> {
+        let assets = self.assets.read().await;
+        Ok(assets.contains_key(path))
     }
 }

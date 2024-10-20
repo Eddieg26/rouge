@@ -1,6 +1,9 @@
-use super::{AssetFuture, AssetIo, AssetIoError, AssetReader, AssetWriter, PathExt};
+use super::{
+    AssetFuture, AssetIo, AssetIoError, AssetReader, AssetWriter, ErasedAssetIo, PathExt,
+    PathStream,
+};
 use crate::asset::{Asset, AssetMetadata, Settings};
-use futures::{AsyncReadExt, AsyncWriteExt, Stream};
+use futures::{AsyncReadExt, AsyncWriteExt};
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
@@ -124,7 +127,7 @@ pub enum AssetSourceName {
 
 #[derive(Clone)]
 pub struct AssetSource {
-    io: Arc<dyn AssetIo>,
+    io: Arc<dyn ErasedAssetIo>,
 }
 
 impl AssetSource {
@@ -136,8 +139,11 @@ impl AssetSource {
         self.io.reader(path)
     }
 
-    pub fn read_dir<'a>(&'a self, path: &'a Path) -> AssetFuture<Box<dyn Stream<Item = PathBuf>>> {
-        self.io.read_dir(path)
+    pub async fn read_dir(
+        &self,
+        path: impl AsRef<Path>,
+    ) -> Result<Box<dyn PathStream>, AssetIoError> {
+        self.io.read_dir(path.as_ref()).await
     }
 
     pub fn is_dir<'a>(&'a self, path: &'a Path) -> AssetFuture<bool> {
@@ -160,7 +166,11 @@ impl AssetSource {
         self.io.remove_dir(path)
     }
 
-    pub fn settings_path(path: &Path) -> PathBuf {
+    pub fn exists<'a>(&'a self, path: &'a Path) -> AssetFuture<bool> {
+        self.io.exists(path)
+    }
+
+    pub fn metadata_path(path: &Path) -> PathBuf {
         path.append_ext("meta")
     }
 
@@ -172,7 +182,7 @@ impl AssetSource {
     }
 
     pub async fn read_metadata_bytes(&self, path: &Path) -> Result<Vec<u8>, AssetIoError> {
-        let mut reader = self.reader(&Self::settings_path(path)).await?;
+        let mut reader = self.reader(&Self::metadata_path(path)).await?;
         let mut bytes = vec![];
         reader.read_to_end(&mut bytes).await?;
         Ok(bytes)
@@ -182,7 +192,7 @@ impl AssetSource {
         &self,
         path: &Path,
     ) -> Result<AssetMetadata<A, S>, AssetIoError> {
-        let mut reader = self.reader(&Self::settings_path(path)).await?;
+        let mut reader = self.reader(&Self::metadata_path(path)).await?;
         let mut buffer = String::new();
         reader.read_to_string(&mut buffer).await?;
 
@@ -194,7 +204,7 @@ impl AssetSource {
         path: &Path,
         settings: &AssetMetadata<A, S>,
     ) -> Result<String, AssetIoError> {
-        let mut writer = self.writer(&Self::settings_path(path)).await?;
+        let mut writer = self.writer(&Self::metadata_path(path)).await?;
         let content = ron::to_string(settings).map_err(AssetIoError::from)?;
 
         writer.write(content.as_bytes()).await?;
@@ -224,5 +234,9 @@ impl AssetSources {
 
     pub fn contains(&self, name: &AssetSourceName) -> bool {
         self.sources.contains_key(name)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&AssetSourceName, &AssetSource)> {
+        self.sources.iter()
     }
 }

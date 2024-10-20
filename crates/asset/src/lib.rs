@@ -1,3 +1,4 @@
+pub mod actions;
 pub mod asset;
 pub mod database;
 pub mod importer;

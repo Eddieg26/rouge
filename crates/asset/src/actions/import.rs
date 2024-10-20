@@ -149,6 +149,10 @@ impl ImportFolder {
         config: &'a AssetConfig,
     ) -> Option<ImportScan> {
         let path = asset_path.path();
+        if let Some("meta") = path.ext() {
+            return None;
+        }
+
         let id = {
             let map = map.read().await;
             match map.get(&asset_path) {
@@ -159,7 +163,7 @@ impl ImportFolder {
 
         match source.exists(&AssetSource::metadata_path(path)).await {
             Ok(false) => return Some(ImportScan::Added(asset_path)),
-            Err(_) => return None,
+            Err(_) => return Some(ImportScan::Added(asset_path)),
             _ => (),
         }
 
@@ -649,6 +653,10 @@ impl RefreshAssets {
         cache: &AssetCache,
         map: &Arc<RwLock<SourceMap>>,
     ) -> Option<AssetPath> {
+        if let Some("meta") = asset_path.path().ext() {
+            return None;
+        }
+
         let id = match map.read().await.get(&asset_path) {
             Some(id) => id,
             None => return Some(asset_path),

@@ -5,15 +5,17 @@ use asset::io::source::AssetPath;
 // };
 use ecs::{
     core::{component::Component, entity::Entity, resource::Resource},
-    event::Event,
+    event::{Event, Events},
     system::systems::Root,
     world::{
         self,
         action::WorldAction,
         cell::WorldCell,
         query::{Not, Query},
+        World,
     },
 };
+use game::Game;
 
 pub struct TestEvent;
 impl Event for TestEvent {}

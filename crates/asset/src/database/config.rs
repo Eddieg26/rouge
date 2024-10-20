@@ -7,6 +7,7 @@ use crate::{
         AssetFuture, AssetIo, AssetIoError,
     },
 };
+use ecs::core::resource::Resource;
 use hashbrown::HashMap;
 use std::path::Path;
 
@@ -53,6 +54,8 @@ impl AssetConfig {
         self.cache = AssetCache::new(path);
     }
 }
+
+impl Resource for AssetConfig {}
 
 pub type ImportFn =
     for<'a> fn(&'a AssetPath, &'a AssetSource) -> AssetFuture<'a, Vec<Artifact>, ImportError>;

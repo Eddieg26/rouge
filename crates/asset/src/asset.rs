@@ -1,4 +1,5 @@
 use ecs::core::Type;
+use hashbrown::HashMap;
 use serde::ser::SerializeStruct;
 use std::{hash::Hash, marker::PhantomData};
 use uuid::Uuid;
@@ -188,5 +189,57 @@ impl<'de, A: Asset, S: Settings> serde::Deserialize<'de> for AssetMetadata<A, S>
 
         const FIELDS: &[&str] = &["id", "settings"];
         de.deserialize_struct("Metadata", FIELDS, Visitor(std::marker::PhantomData))
+    }
+}
+
+pub struct Assets<A: Asset> {
+    assets: HashMap<AssetId, A>,
+}
+
+impl<A: Asset> Assets<A> {
+    pub fn new() -> Self {
+        Self {
+            assets: HashMap::new(),
+        }
+    }
+
+    pub fn add(&mut self, id: AssetId, asset: A) -> Option<A> {
+        self.assets.insert(id, asset)
+    }
+
+    pub fn get(&self, id: &AssetId) -> Option<&A> {
+        self.assets.get(id)
+    }
+
+    pub fn get_mut(&mut self, id: &AssetId) -> Option<&mut A> {
+        self.assets.get_mut(id)
+    }
+
+    pub fn remove(&mut self, id: &AssetId) -> Option<A> {
+        self.assets.remove(id)
+    }
+
+    pub fn contains(&self, id: &AssetId) -> bool {
+        self.assets.contains_key(id)
+    }
+
+    pub fn len(&self) -> usize {
+        self.assets.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.assets.is_empty()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&AssetId, &A)> {
+        self.assets.iter()
+    }
+
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = (&AssetId, &mut A)> {
+        self.assets.iter_mut()
+    }
+
+    pub fn clear(&mut self) {
+        self.assets.clear()
     }
 }

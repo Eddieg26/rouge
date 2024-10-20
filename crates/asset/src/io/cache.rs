@@ -24,14 +24,6 @@ impl AssetCache {
             .join("artifact")
     }
 
-    pub fn prev_artifact_path(&self, id: &AssetId) -> PathBuf {
-        self.fs
-            .root()
-            .join("artifacts")
-            .join(id.to_string())
-            .join("prev")
-    }
-
     pub fn temp_artifact_path(&self, id: &AssetId) -> PathBuf {
         self.fs
             .root()
@@ -72,14 +64,6 @@ impl AssetCache {
         data.extend_from_slice(&meta);
         data.extend_from_slice(&artifact.data);
         file.write_all(&data).await.map_err(AssetIoError::from)
-    }
-
-    pub async fn move_artifact(&self, id: &AssetId) -> Result<(), AssetIoError> {
-        let artifact_path = self.artifact_path(id);
-        let prev_path = self.prev_artifact_path(id);
-
-        self.fs.create_dir_all(prev_path.parent().unwrap()).await?;
-        self.fs.rename(&artifact_path, &prev_path).await
     }
 
     pub async fn load_artifact_meta(&self, id: &AssetId) -> Result<ArtifactMeta, AssetIoError> {

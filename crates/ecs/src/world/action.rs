@@ -1,5 +1,8 @@
 use super::{cell::WorldCell, World};
-use crate::{event::{Event, Events}, system::SystemArg};
+use crate::{
+    event::{Event, Events},
+    system::SystemArg,
+};
 use std::sync::{Arc, Mutex};
 
 pub trait WorldAction: Send + Sync + 'static {
@@ -24,11 +27,11 @@ pub struct WorldActions {
 }
 
 impl WorldActions {
-    pub fn add(&self, action: impl WorldAction) {
+    pub fn add(&self, action: impl Into<WorldActionFn>) {
         self.actions
             .lock()
             .unwrap()
-            .push(WorldActionFn::from(action));
+            .push(WorldActionFn::from(action.into()));
     }
 
     pub fn len(&self) -> usize {

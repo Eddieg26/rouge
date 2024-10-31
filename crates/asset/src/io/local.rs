@@ -35,10 +35,17 @@ impl LocalAssets {
         &self.root
     }
 
-    fn with_prefix<'a>(&self, path: &'a Path) -> Cow<'a, Path> {
-        match path.strip_prefix(&self.root) {
-            Ok(p) => Cow::Owned(self.root.join(p)),
-            Err(_) => Cow::Borrowed(path),
+    pub fn with_prefix<'a>(&self, path: &'a Path) -> Cow<'a, Path> {
+        match path.starts_with(&self.root) {
+            false => Cow::Owned(self.root.join(path)),
+            true => Cow::Borrowed(path),
+        }
+    }
+
+    pub fn strip_prefix(prefix: PathBuf, path: &Path) -> PathBuf {
+        match path.strip_prefix(&prefix) {
+            Ok(p) => p.to_path_buf(),
+            Err(_) => path.to_path_buf(),
         }
     }
 }
@@ -61,11 +68,15 @@ impl AssetIo for LocalAssets {
         path: &'a std::path::Path,
     ) -> Result<Box<dyn PathStream>, AssetIoError> {
         let path = self.with_prefix(path);
+        let root = self.root.to_path_buf();
         let stream = async_std::fs::read_dir(path.as_ref())
             .await
             .map_err(|e| AssetIoError::from(e))?
             .filter_map(move |entry| match entry {
-                Ok(e) => Some(PathBuf::from(e.path().as_os_str())),
+                Ok(e) => Some(PathBuf::from(Self::strip_prefix(
+                    root.clone(),
+                    e.path().as_ref(),
+                ))),
                 Err(_) => None,
             });
 
@@ -89,13 +100,15 @@ impl AssetIo for LocalAssets {
     }
 
     async fn create_dir<'a>(&'a self, path: &'a Path) -> Result<(), AssetIoError> {
-        async_std::fs::create_dir(path)
+        let path = self.with_prefix(path);
+        async_std::fs::create_dir(path.as_ref())
             .await
             .map_err(AssetIoError::from)
     }
 
     async fn create_dir_all<'a>(&'a self, path: &'a Path) -> Result<(), AssetIoError> {
-        async_std::fs::create_dir_all(path)
+        let path = self.with_prefix(path);
+        async_std::fs::create_dir_all(path.as_ref())
             .await
             .map_err(AssetIoError::from)
     }

@@ -1,13 +1,14 @@
+use super::events::{AssetDepsLoaded, AssetFailed, AssetImported, AssetLoaded, AssetUnloaded};
 use crate::{
-    asset::{Asset, AssetId, AssetMetadata, AssetType},
-    importer::{AssetImporter, AssetProcessor, ImportContext, ImportError, ProcessContext},
+    asset::{Asset, AssetId, AssetMetadata, AssetType, ErasedAsset},
+    importer::{ImportContext, ImportError, Importer, LoadError, ProcessContext, Processor},
     io::{
-        cache::{Artifact, ArtifactMeta, AssetCache},
+        cache::{Artifact, ArtifactMeta, AssetCache, ErasedLoadedAsset, ProcessedInfo},
         source::{AssetPath, AssetSource, AssetSourceName, AssetSources},
         AssetFuture, AssetIo, AssetIoError,
     },
 };
-use ecs::core::resource::Resource;
+use ecs::{core::resource::Resource, world::action::WorldActionFn};
 use hashbrown::HashMap;
 use std::path::Path;
 
@@ -30,6 +31,10 @@ impl AssetConfig {
         &self.registry
     }
 
+    pub fn registry_mut(&mut self) -> &mut AssetRegistry {
+        &mut self.registry
+    }
+
     pub fn sources(&self) -> &AssetSources {
         &self.sources
     }
@@ -42,7 +47,7 @@ impl AssetConfig {
         &self.cache
     }
 
-    pub fn add_importer<I: AssetImporter>(&mut self) {
+    pub fn add_importer<I: Importer>(&mut self) {
         self.registry.add_importer::<I>();
     }
 
@@ -60,12 +65,23 @@ impl Resource for AssetConfig {}
 pub type ImportFn =
     for<'a> fn(&'a AssetPath, &'a AssetSource) -> AssetFuture<'a, Vec<Artifact>, ImportError>;
 
-pub type ProcessFn =
-    for<'a> fn(&'a AssetId, &'a AssetSource, &'a AssetCache) -> AssetFuture<'a, Artifact>;
+pub type ProcessFn = for<'a> fn(
+    &'a AssetId,
+    &'a AssetPath,
+    &'a AssetSource,
+    &'a AssetCache,
+) -> AssetFuture<'a, Artifact>;
 
 pub struct AssetMeta {
     importers: Vec<ImportFn>,
     processor: Option<ProcessFn>,
+    serialize: fn(&ErasedAsset) -> Result<Vec<u8>, bincode::Error>,
+    deserialize: fn(Artifact) -> Result<ErasedLoadedAsset, bincode::Error>,
+    imported: fn(AssetPath, AssetId) -> WorldActionFn,
+    loaded: fn(AssetId, ErasedAsset, Option<Vec<AssetId>>) -> WorldActionFn,
+    deps_loaded: fn(AssetId) -> WorldActionFn,
+    unloaded: fn(AssetId) -> WorldActionFn,
+    failed: fn(AssetId, LoadError) -> WorldActionFn,
 }
 
 impl AssetMeta {
@@ -73,10 +89,34 @@ impl AssetMeta {
         Self {
             importers: vec![],
             processor: None,
+            serialize: |asset| match asset.asset::<A>() {
+                Some(asset) => bincode::serialize(asset),
+                None => Err(bincode::Error::from(bincode::ErrorKind::Custom(format!(
+                    "Invalid asset type: Expected {}, Found {:?}",
+                    std::any::type_name::<A>(),
+                    asset.ty(),
+                )))),
+            },
+            deserialize: |artifact| {
+                let asset = artifact.deserialize::<A>()?;
+                Ok(ErasedLoadedAsset::new(asset, artifact.meta))
+            },
+            imported: |path, id| AssetImported::<A>::new(path, id).into(),
+            loaded: |id, asset, deps| {
+                let loaded = AssetLoaded::<A>::new(id, asset.take());
+                if let Some(deps) = deps {
+                    loaded.with_dependencies(deps).into()
+                } else {
+                    loaded.into()
+                }
+            },
+            deps_loaded: |id| AssetDepsLoaded::<A>::new(id).into(),
+            unloaded: |id| AssetUnloaded::<A>::new(id).into(),
+            failed: |id, error| AssetFailed::<A>::new(id, error).into(),
         }
     }
 
-    pub fn add_importer<I: AssetImporter>(&mut self) -> usize {
+    pub fn add_importer<I: Importer>(&mut self) -> usize {
         let importer: ImportFn = |asset_path, source| {
             Box::pin(async move {
                 let path = asset_path.path();
@@ -87,7 +127,7 @@ impl AssetMeta {
                         source
                             .save_metadata(path, &settings)
                             .await
-                            .map_err(|e| ImportError::import(asset_path, e))?;
+                            .map_err(|e| ImportError::import(asset_path.clone(), e))?;
                         settings
                     }
                 };
@@ -96,18 +136,31 @@ impl AssetMeta {
                 let mut reader = source
                     .reader(path)
                     .await
-                    .map_err(|e| ImportError::import(asset_path, e))?;
+                    .map_err(|e| ImportError::import(asset_path.clone(), e))?;
                 let asset = I::import(&mut ctx, reader.as_mut())
                     .await
-                    .map_err(|e| ImportError::import(asset_path, e))?;
+                    .map_err(|e| ImportError::import(asset_path.clone(), e))?;
+
+                let checksum = {
+                    let asset = source
+                        .read_asset_bytes(path)
+                        .await
+                        .map_err(|e| ImportError::import(asset_path.clone(), e))?;
+                    let metadata = source
+                        .read_metadata_bytes(path)
+                        .await
+                        .map_err(|e| ImportError::import(asset_path.clone(), e))?;
+
+                    ArtifactMeta::calculate_checksum(&asset, &metadata)
+                };
 
                 let (dependencies, mut artifacts) = ctx.finish();
-                let meta = ArtifactMeta::new(*settings.id(), asset_path.clone())
+                let meta = ArtifactMeta::new(*settings.id(), asset_path.clone(), checksum)
                     .with_dependencies(dependencies)
                     .with_children(artifacts.iter().map(|a| a.meta.id).collect());
 
                 let artifact = Artifact::from_asset(&asset, meta)
-                    .map_err(|e| ImportError::import(asset_path, *e))?;
+                    .map_err(|e| ImportError::import(asset_path.clone(), *e))?;
 
                 artifacts.push(artifact);
 
@@ -121,18 +174,20 @@ impl AssetMeta {
         index
     }
 
-    pub fn set_processor<P: AssetProcessor>(&mut self) {
-        let processor: ProcessFn = |id, source, cache| {
+    pub fn set_processor<P: Processor>(&mut self) {
+        let processor: ProcessFn = |id, path, source, cache| {
             Box::pin(async move {
-                let mut artifact = cache.load_artifact(&cache.temp_artifact_path(id)).await?;
+                let temp_path = cache.unprocessed_artifact_path(id);
+                let mut artifact = cache.load_artifact(&temp_path).await?;
+                cache.remove_artifact(&temp_path).await?;
 
                 let metadata = match source
-                    .load_metadata::<P::Asset, P::Settings>(artifact.meta.path.path())
+                    .load_metadata::<P::Asset, P::Settings>(path.path())
                     .await
                 {
                     Ok(metadata) => metadata,
                     Err(error) => match artifact.meta.parent.is_some() {
-                        true => AssetMetadata::new(*id, P::Settings::default()),
+                        true => AssetMetadata::new(artifact.meta.id, P::Settings::default()),
                         false => return Err(error),
                     },
                 };
@@ -145,6 +200,8 @@ impl AssetMeta {
                     AssetIoError::from(std::io::Error::new(std::io::ErrorKind::Other, e))
                 })?;
 
+                let info = ProcessedInfo::new().with_dependencies(ctx.finish());
+                artifact.meta.processed = Some(info);
                 artifact.data = bincode::serialize(&asset).map_err(AssetIoError::from)?;
                 Ok(artifact)
             })
@@ -156,13 +213,47 @@ impl AssetMeta {
     pub fn process<'a>(
         &self,
         id: &'a AssetId,
+        path: &'a AssetPath,
         source: &'a AssetSource,
         cache: &'a AssetCache,
     ) -> Option<AssetFuture<'a, Artifact>> {
         match &self.processor {
-            Some(processor) => Some(processor(id, source, cache)),
+            Some(processor) => Some(processor(id, path, source, cache)),
             None => None,
         }
+    }
+
+    pub fn serialize(&self, asset: &ErasedAsset) -> Result<Vec<u8>, bincode::Error> {
+        (self.serialize)(asset)
+    }
+
+    pub fn deserialize(&self, artifact: Artifact) -> Result<ErasedLoadedAsset, bincode::Error> {
+        (self.deserialize)(artifact)
+    }
+
+    pub fn imported(&self, path: AssetPath, id: AssetId) -> WorldActionFn {
+        (self.imported)(path, id)
+    }
+
+    pub fn loaded(
+        &self,
+        id: AssetId,
+        asset: ErasedAsset,
+        deps: Option<Vec<AssetId>>,
+    ) -> WorldActionFn {
+        (self.loaded)(id, asset, deps)
+    }
+
+    pub fn deps_loaded(&self, id: AssetId) -> WorldActionFn {
+        (self.deps_loaded)(id)
+    }
+
+    pub fn unloaded(&self, id: AssetId) -> WorldActionFn {
+        (self.unloaded)(id)
+    }
+
+    pub fn failed(&self, id: AssetId, error: LoadError) -> WorldActionFn {
+        (self.failed)(id, error)
     }
 }
 
@@ -207,10 +298,11 @@ impl<'a> AssetMetaHandle<'a> {
     pub fn process(
         &'a self,
         id: &'a AssetId,
+        path: &'a AssetPath,
         source: &'a AssetSource,
         cache: &'a AssetCache,
     ) -> Option<AssetFuture<Artifact>> {
-        self.meta.process(id, source, cache)
+        self.meta.process(id, path, source, cache)
     }
 }
 
@@ -227,6 +319,10 @@ impl AssetRegistry {
         }
     }
 
+    pub fn contains(&self, ty: AssetType) -> bool {
+        self.metas.contains_key(&ty)
+    }
+
     pub fn get(&self, ty: AssetType) -> Option<&AssetMeta> {
         self.metas.get(&ty)
     }
@@ -237,13 +333,6 @@ impl AssetRegistry {
             .map(|index| AssetMetaHandle::new(self.metas.get(&index.ty).unwrap(), index.index))
     }
 
-    pub fn has_processor(&self, ty: AssetType) -> bool {
-        self.metas
-            .get(&ty)
-            .and_then(|meta| Some(meta.processor.is_some()))
-            .unwrap_or(false)
-    }
-
     pub fn register<A: Asset>(&mut self) -> AssetType {
         let ty = AssetType::of::<A>();
         self.metas.entry(ty).or_insert(AssetMeta::new::<A>());
@@ -251,13 +340,20 @@ impl AssetRegistry {
         ty
     }
 
-    pub fn add_importer<I: AssetImporter>(&mut self) {
+    pub fn add_importer<I: Importer>(&mut self) {
         let ty = self.register::<I::Asset>();
-        let meta = self.metas.get_mut(&AssetType::of::<I::Asset>()).unwrap();
+        let meta = self.metas.get_mut(&ty).unwrap();
         let index = meta.add_importer::<I>();
 
         for ext in I::extensions() {
             self.exts.insert(ext, MetaIndex::new(ty, index));
         }
+    }
+
+    pub fn set_processor<P: Processor>(&mut self) {
+        let ty = self.register::<P::Asset>();
+        let meta = self.metas.get_mut(&ty).unwrap();
+
+        meta.set_processor::<P>();
     }
 }

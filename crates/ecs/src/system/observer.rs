@@ -129,7 +129,7 @@ impl Observers {
     pub fn build(&mut self, mode: RunMode) {
         if !self.configs.is_empty() {
             self.observers.extend(self.configs.into_observers(mode));
-            let ext = std::mem::take(&mut self.extensions);
+            let ext = std::mem::take(&mut self.configs.extensions);
             self.extensions.extend(ext);
         }
     }

@@ -1,8 +1,12 @@
 use super::{local::LocalAssets, source::AssetPath, AssetIo, AssetIoError};
-use crate::asset::{Asset, AssetId};
+use crate::asset::{Asset, AssetId, AssetType, ErasedAsset};
+use async_std::sync::RwLock;
 use futures::{AsyncReadExt, AsyncWriteExt};
 use hashbrown::HashMap;
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 #[derive(Clone)]
 pub struct AssetCache {
@@ -16,20 +20,42 @@ impl AssetCache {
         }
     }
 
-    pub fn artifact_path(&self, id: &AssetId) -> PathBuf {
-        self.fs
-            .root()
-            .join("artifacts")
-            .join(id.to_string())
-            .join("artifact")
+    pub async fn init(&self) -> Result<AssetLibrary, AssetIoError> {
+        let root = self.fs.root();
+        if !root.exists() {
+            self.fs.create_dir_all(&root).await?;
+        }
+        let artifacts = root.join("artifacts");
+        if !artifacts.exists() {
+            self.fs.create_dir_all(&artifacts).await?;
+        }
+
+        let library = match self.load_library().await {
+            Ok(library) => library,
+            Err(_) => {
+                let library = AssetLibrary::new();
+                self.save_library(&library).await?;
+                library
+            }
+        };
+
+        Ok(library)
     }
 
-    pub fn temp_artifact_path(&self, id: &AssetId) -> PathBuf {
-        self.fs
-            .root()
-            .join("artifacts")
-            .join(id.to_string())
-            .join("temp")
+    pub fn artifact_path(&self, id: &AssetId) -> PathBuf {
+        self.fs.root().join("artifacts").join(id.to_string())
+    }
+
+    pub fn unprocessed_artifact_path(&self, id: &AssetId) -> PathBuf {
+        self.fs.root().join("temp").join(id.to_string())
+    }
+
+    pub async fn create_unprocessed_path(&self) -> Result<(), AssetIoError> {
+        self.fs.create_dir_all(&self.fs.root().join("temp")).await
+    }
+
+    pub async fn remove_unprocessed_path(&self) -> Result<(), AssetIoError> {
+        self.fs.remove_dir(&self.fs.root().join("temp")).await
     }
 
     pub async fn load_asset<A: Asset>(&self, id: &AssetId) -> Result<LoadedAsset<A>, AssetIoError> {
@@ -88,10 +114,10 @@ impl AssetCache {
         self.fs.remove(path)
     }
 
-    pub async fn load_source_map(&self) -> Result<SourceMap, AssetIoError> {
-        let path = self.fs.root().join("sources.map");
+    pub async fn load_library(&self) -> Result<AssetLibrary, AssetIoError> {
+        let path = self.fs.root().join("assets.lib");
         if !path.exists() {
-            return Ok(SourceMap::new());
+            return Ok(AssetLibrary::new());
         }
 
         let mut file = self.fs.reader(&path).await?;
@@ -100,8 +126,8 @@ impl AssetCache {
         bincode::deserialize(&data).map_err(AssetIoError::from)
     }
 
-    pub async fn save_source_map(&self, map: &SourceMap) -> Result<(), AssetIoError> {
-        let path = self.fs.root().join("sources.map");
+    pub async fn save_library(&self, map: &AssetLibrary) -> Result<(), AssetIoError> {
+        let path = self.fs.root().join("assets.lib");
         let mut file = self.fs.writer(&path).await?;
         let data = bincode::serialize(map).map_err(AssetIoError::from)?;
         file.write_all(&data).await.map_err(AssetIoError::from)
@@ -127,6 +153,20 @@ impl<A: Asset> LoadedAsset<A> {
     }
 }
 
+pub struct ErasedLoadedAsset {
+    pub asset: ErasedAsset,
+    pub meta: ArtifactMeta,
+}
+
+impl ErasedLoadedAsset {
+    pub fn new<A: Asset>(asset: A, meta: ArtifactMeta) -> ErasedLoadedAsset {
+        Self {
+            asset: ErasedAsset::new(asset),
+            meta,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct ArtifactHeader {
     /// The size of the artifact metadata in bytes.
@@ -142,6 +182,7 @@ impl ArtifactHeader {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ArtifactMeta {
     pub id: AssetId,
+    pub checksum: u32,
     pub path: AssetPath,
     pub parent: Option<AssetId>,
     pub children: Vec<AssetId>,
@@ -150,10 +191,11 @@ pub struct ArtifactMeta {
 }
 
 impl ArtifactMeta {
-    pub fn new(id: AssetId, path: impl Into<AssetPath>) -> Self {
+    pub fn new(id: AssetId, path: AssetPath, checksum: u32) -> Self {
         Self {
             id,
-            path: path.into(),
+            checksum,
+            path,
             parent: None,
             children: Vec::new(),
             dependencies: Vec::new(),
@@ -180,6 +222,13 @@ impl ArtifactMeta {
         self.processed = Some(processed);
         self
     }
+
+    pub fn calculate_checksum(asset: &[u8], metadata: &[u8]) -> u32 {
+        let mut hasher = crc32fast::Hasher::new();
+        hasher.update(asset);
+        hasher.update(metadata);
+        hasher.finalize()
+    }
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -195,66 +244,132 @@ impl Artifact {
             data: bincode::serialize(asset)?,
         })
     }
+
+    pub fn id(&self) -> AssetId {
+        self.meta.id
+    }
+
+    pub fn ty(&self) -> AssetType {
+        self.id().ty()
+    }
+
+    pub fn path(&self) -> &AssetPath {
+        &self.meta.path
+    }
+
+    pub fn deserialize<A: Asset>(&self) -> Result<A, bincode::Error> {
+        bincode::deserialize(&self.data)
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProcessedInfo {
-    pub checksum: u32,
-    pub dependencies: Vec<AssetDependency>,
+    pub dependencies: Vec<AssetInfo>,
 }
 
 impl ProcessedInfo {
-    pub fn new(checksum: u32) -> Self {
+    pub fn new() -> Self {
         Self {
-            checksum,
             dependencies: Vec::new(),
         }
     }
 
-    pub fn checksum(asset: &[u8], metadata: &[u8]) -> u32 {
-        let mut hasher = crc32fast::Hasher::new();
-        hasher.update(asset);
-        hasher.update(metadata);
-        hasher.finalize()
-    }
-
-    pub fn with_dependencies(mut self, dependencies: Vec<AssetDependency>) -> Self {
+    pub fn with_dependencies(mut self, dependencies: Vec<AssetInfo>) -> Self {
         self.dependencies = dependencies;
         self
     }
 
     pub fn add_dependency(&mut self, id: AssetId, checksum: u32) {
-        self.dependencies.push(AssetDependency { id, checksum });
+        self.dependencies.push(AssetInfo { id, checksum });
     }
 }
 
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
-pub struct AssetDependency {
+pub struct AssetInfo {
     pub id: AssetId,
     pub checksum: u32,
 }
 
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
-pub struct SourceMap {
-    map: HashMap<AssetPath, AssetId>,
+impl AssetInfo {
+    pub fn new(id: AssetId, checksum: u32) -> Self {
+        Self { id, checksum }
+    }
 }
 
-impl SourceMap {
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct AssetLibrary {
+    assets: HashMap<AssetPath, AssetInfo>,
+    paths: HashMap<AssetId, AssetPath>,
+}
+
+impl AssetLibrary {
     pub fn new() -> Self {
         Self {
-            map: HashMap::new(),
+            assets: HashMap::new(),
+            paths: HashMap::new(),
         }
     }
 
-    pub fn insert(&mut self, path: AssetPath, id: AssetId) {
-        self.map.insert(path, id);
+    pub fn add(&mut self, path: AssetPath, info: AssetInfo) {
+        self.paths.insert(info.id, path.clone());
+        self.assets.insert(path, info);
     }
 
-    pub fn get(&self, path: &AssetPath) -> Option<AssetId> {
-        self.map.get(path).copied()
+    pub fn remove(&mut self, path: &AssetPath) -> Option<AssetInfo> {
+        let info = self.assets.remove(path)?;
+        self.paths.remove(&info.id);
+        Some(info)
     }
 
-    pub fn remove(&mut self, path: &AssetPath) -> Option<AssetId> {
-        self.map.remove(path)
+    pub fn get(&self, path: &AssetPath) -> Option<AssetInfo> {
+        self.assets.get(path).copied()
+    }
+
+    pub fn get_id(&self, path: &AssetPath) -> Option<AssetId> {
+        self.assets.get(path).map(|info| info.id)
+    }
+
+    pub fn get_path(&self, id: &AssetId) -> Option<&AssetPath> {
+        self.paths.get(id)
+    }
+
+    pub fn contains(&self, path: &AssetPath) -> bool {
+        self.assets.contains_key(path)
+    }
+
+    pub fn len(&self) -> usize {
+        self.assets.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.assets.is_empty()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&AssetPath, &AssetInfo)> {
+        self.assets.iter()
+    }
+
+    pub fn clear(&mut self) {
+        self.assets.clear();
+    }
+}
+
+pub type SharedLibrary = Arc<RwLock<AssetLibrary>>;
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum AssetLoadPath {
+    Id(AssetId),
+    Path(AssetPath),
+}
+
+impl From<AssetId> for AssetLoadPath {
+    fn from(id: AssetId) -> Self {
+        AssetLoadPath::Id(id)
+    }
+}
+
+impl<I: Into<AssetPath>> From<I> for AssetLoadPath {
+    fn from(path: I) -> Self {
+        AssetLoadPath::Path(path.into())
     }
 }

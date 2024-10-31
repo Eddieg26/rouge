@@ -1,4 +1,4 @@
-use ecs::core::Type;
+use ecs::core::{internal::blob::BlobCell, resource::Resource, Type};
 use hashbrown::HashMap;
 use serde::ser::SerializeStruct;
 use std::{hash::Hash, marker::PhantomData};
@@ -7,6 +7,9 @@ use uuid::Uuid;
 pub trait Asset: Send + Sync + serde::Serialize + for<'a> serde::Deserialize<'a> + 'static {}
 
 pub trait Settings: Default + serde::Serialize + for<'a> serde::Deserialize<'a> + 'static {}
+
+impl Asset for () {}
+impl Settings for () {}
 
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
@@ -34,7 +37,15 @@ impl AssetId {
         AssetType::dynamic(ty)
     }
 
-    pub fn raw(id: Uuid) -> Self {
+    pub fn raw<A: Asset>(id: Uuid) -> Self {
+        let ty = AssetType::of::<A>();
+        let mut id = id;
+
+        unsafe {
+            let addr = std::ptr::addr_of_mut!(id) as *mut u32;
+            std::ptr::write(addr, ty.value().to_be());
+        }
+
         Self(id)
     }
 }
@@ -67,6 +78,86 @@ impl AssetType {
 
     pub fn dynamic(ty: u32) -> Self {
         Self(ty)
+    }
+}
+
+pub struct AssetRef<A: Asset> {
+    id: AssetId,
+    _marker: PhantomData<A>,
+}
+
+impl<A: Asset> AssetRef<A> {
+    pub fn new(id: AssetId) -> Self {
+        Self {
+            id,
+            _marker: PhantomData::default(),
+        }
+    }
+
+    pub fn id(&self) -> &AssetId {
+        &self.id
+    }
+}
+
+impl<A: Asset> Default for AssetRef<A> {
+    fn default() -> Self {
+        Self {
+            id: AssetId::new::<A>(),
+            _marker: PhantomData::default(),
+        }
+    }
+}
+
+impl<A: Asset> std::ops::Deref for AssetRef<A> {
+    type Target = AssetId;
+
+    fn deref(&self) -> &Self::Target {
+        &self.id
+    }
+}
+
+impl<A: Asset> Copy for AssetRef<A> {}
+impl<A: Asset> Clone for AssetRef<A> {
+    fn clone(&self) -> Self {
+        Self {
+            id: self.id,
+            _marker: PhantomData::default(),
+        }
+    }
+}
+
+impl<A: Asset> PartialEq for AssetRef<A> {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+
+impl<A: Asset> Eq for AssetRef<A> {}
+
+impl<A: Asset> Hash for AssetRef<A> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.id.hash(state)
+    }
+}
+
+impl<A: Asset> serde::Serialize for AssetRef<A> {
+    fn serialize<Ser>(&self, ser: Ser) -> Result<Ser::Ok, Ser::Error>
+    where
+        Ser: serde::Serializer,
+    {
+        self.id.serialize(ser)
+    }
+}
+
+impl<'de, A: Asset> serde::Deserialize<'de> for AssetRef<A> {
+    fn deserialize<D>(de: D) -> Result<AssetRef<A>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Ok(AssetRef {
+            id: AssetId::deserialize(de)?,
+            _marker: PhantomData::default(),
+        })
     }
 }
 
@@ -241,5 +332,46 @@ impl<A: Asset> Assets<A> {
 
     pub fn clear(&mut self) {
         self.assets.clear()
+    }
+}
+
+impl<A: Asset> Resource for Assets<A> {}
+
+pub struct ErasedAsset {
+    asset: BlobCell,
+    ty: AssetType,
+}
+
+impl ErasedAsset {
+    pub fn new<A: Asset>(asset: A) -> Self {
+        Self {
+            asset: BlobCell::new(asset),
+            ty: AssetType::of::<A>(),
+        }
+    }
+
+    pub fn asset<A: Asset>(&self) -> Option<&A> {
+        if self.ty == AssetType::of::<A>() {
+            Some(self.asset.value::<A>())
+        } else {
+            None
+        }
+    }
+
+    pub fn asset_mut<A: Asset>(&mut self) -> Option<&mut A> {
+        if self.ty == AssetType::of::<A>() {
+            Some(self.asset.value_mut::<A>())
+        } else {
+            None
+        }
+    }
+
+    pub fn ty(&self) -> AssetType {
+        self.ty
+    }
+
+    pub fn take<A: Asset>(self) -> A {
+        assert!(self.ty == AssetType::of::<A>());
+        self.asset.into()
     }
 }

@@ -1,15 +1,15 @@
 use crate::{
-    actions::StartAssetAction,
-    database::{config::AssetConfig, AssetDatabase},
-    importer::ImportError,
+    asset::{Asset, AssetType, Assets},
+    database::{
+        config::AssetConfig, events::AssetEvent, update::RefreshMode, AssetDatabase,
+        DatabaseInitError,
+    },
+    importer::{ImportError, Importer, LoadError, Processor},
+    io::{local::LocalAssets, source::AssetSourceName, AssetIo},
 };
-use ecs::{
-    core::resource::{Res, ResMut},
-    event::Events,
-    task::TaskPool,
-    world::action::WorldActions,
-};
-use game::{GameBuilder, Plugin};
+use ecs::{core::resource::ResMut, event::Events};
+use futures::executor::block_on;
+use game::{GameBuilder, Init, Plugin};
 
 pub struct AssetPlugin;
 
@@ -20,41 +20,97 @@ impl Plugin for AssetPlugin {
 
     fn start(&mut self, game: &mut GameBuilder) {
         game.add_resource(AssetConfig::new());
-        game.register_event::<StartAssetAction>();
         game.register_event::<ImportError>();
-        game.observe::<StartAssetAction, _>(on_start_asset_action);
+        game.register_event::<LoadError>();
+        game.register_event::<DatabaseInitError>();
+        game.add_systems(Init, init_asset_database);
     }
 
     fn finish(&mut self, game: &mut GameBuilder) {
-        let config = match game.remove_resource::<AssetConfig>() {
+        let mut config = match game.remove_resource::<AssetConfig>() {
             Some(config) => config,
             None => AssetConfig::new(),
         };
 
-        let database = AssetDatabase::new(config);
-        game.add_resource(database);
+        if config.source(&AssetSourceName::Default).is_none() {
+            config.add_source::<LocalAssets>(AssetSourceName::Default, LocalAssets::new("assets"));
+        }
+
+        let tasks = game.tasks().clone();
+        let actions = game.actions().clone();
+        game.add_resource(AssetDatabase::new(config, tasks, actions));
     }
 }
 
-fn on_start_asset_action(
-    mut events: ResMut<Events<StartAssetAction>>,
-    database: Res<AssetDatabase>,
-    world_actions: &WorldActions,
-    tasks: &TaskPool,
-) {
-    let mut actions = database.actions_lock();
-    actions.extend(events.drain().map(|a| a.take()));
-    if !actions.is_running() {
-        actions.start();
-        let database = database.clone();
-        let actions = world_actions.clone();
+pub trait AssetExt: 'static {
+    fn add_asset_source<I: AssetIo>(
+        &mut self,
+        name: impl Into<AssetSourceName>,
+        io: I,
+    ) -> &mut Self;
+    fn register_asset<A: Asset>(&mut self) -> &mut Self;
+    fn add_importer<I: Importer>(&mut self) -> &mut Self;
+    fn set_processor<P: Processor>(&mut self) -> &mut Self;
+}
 
-        tasks.spawn(move || {
-            while let Some(mut action) = database.actions_lock().pop() {
-                action.execute(&database.config(), &actions);
+impl AssetExt for GameBuilder {
+    fn add_asset_source<I: AssetIo>(
+        &mut self,
+        name: impl Into<AssetSourceName>,
+        io: I,
+    ) -> &mut Self {
+        let config = self.resource_mut::<AssetConfig>();
+        config.add_source::<I>(name, io);
+        self
+    }
+
+    fn register_asset<A: Asset>(&mut self) -> &mut Self {
+        let registered = {
+            let config = self.resource_mut::<AssetConfig>();
+            let ty = AssetType::of::<A>();
+            if !config.registry().contains(ty) {
+                config.registry_mut().register::<A>();
+                false
+            } else {
+                true
             }
+        };
 
-            database.actions_lock().stop();
-        });
+        if !registered {
+            self.add_resource(Assets::<A>::new());
+            self.register_event::<AssetEvent<A>>();
+        }
+
+        self
+    }
+
+    fn add_importer<I: Importer>(&mut self) -> &mut Self {
+        self.register_asset::<I::Asset>();
+
+        let config = self.resource_mut::<AssetConfig>();
+        config.registry_mut().add_importer::<I>();
+
+        self
+    }
+
+    fn set_processor<P: Processor>(&mut self) -> &mut Self {
+        self.register_asset::<P::Asset>();
+
+        let config = self.resource_mut::<AssetConfig>();
+        config.registry_mut().set_processor::<P>();
+
+        self
+    }
+}
+
+fn init_asset_database(
+    mut database: ResMut<AssetDatabase>,
+    mut events: ResMut<Events<DatabaseInitError>>,
+) {
+    match block_on(database.init()) {
+        Ok(_) => {
+            database.refresh(RefreshMode::FORCE);
+        }
+        Err(error) => events.add(error),
     }
 }

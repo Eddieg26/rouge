@@ -8,7 +8,7 @@ use ecs::{
     event::Event,
     system::{schedule::Phase, IntoSystemConfigs},
     task::TaskPool,
-    world::World,
+    world::{action::WorldActions, World},
 };
 
 pub struct GameBuilder {
@@ -65,6 +65,14 @@ impl GameBuilder {
         self.apps.main_world_mut().try_non_send_resource_mut::<R>()
     }
 
+    pub fn actions(&self) -> &WorldActions {
+        self.apps.main_world().actions()
+    }
+
+    pub fn tasks(&self) -> &TaskPool {
+        self.apps.main_world().tasks()
+    }
+
     pub fn register<C: Component>(&mut self) -> &mut Self {
         self.apps.main_world_mut().register::<C>();
         self
@@ -87,10 +95,12 @@ impl GameBuilder {
 
     pub fn add_plugin<P: Plugin>(&mut self, plugin: P) -> &mut Self {
         let mut plugins = plugin.dependencies().flatten();
+        plugins.add(plugin);
         for (_, plugin) in plugins.iter_mut() {
             plugin.start(self);
         }
         self.plugins.extend(plugins);
+
         self
     }
 
@@ -159,8 +169,9 @@ impl GameBuilder {
         self
     }
 
-    pub fn set_runner(&mut self, runner: impl Fn(Game) + 'static) {
+    pub fn set_runner(&mut self, runner: impl Fn(Game) + 'static) -> &mut Self {
         self.runner = Box::new(runner);
+        self
     }
 
     pub fn run(&mut self) {

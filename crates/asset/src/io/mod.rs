@@ -114,7 +114,7 @@ pub trait AssetIo: Send + Sync + 'static {
     ) -> impl Future<Output = Result<bool, AssetIoError>> + 'a;
 }
 
-pub trait ErasedAssetIo: Send + Sync + 'static {
+pub trait ErasedAssetIo: downcast_rs::Downcast + Send + Sync + 'static {
     fn reader<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, Box<dyn AssetReader>>;
     fn read_dir<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, Box<dyn PathStream>>;
     fn is_dir<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, bool>;
@@ -126,6 +126,7 @@ pub trait ErasedAssetIo: Send + Sync + 'static {
     fn remove_dir<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, ()>;
     fn exists<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, bool>;
 }
+downcast_rs::impl_downcast!(ErasedAssetIo);
 
 impl<T: AssetIo> ErasedAssetIo for T {
     fn reader<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, Box<dyn AssetReader>> {

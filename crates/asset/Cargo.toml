@@ -14,10 +14,11 @@ downcast-rs = { workspace = true }
 hashbrown = { workspace = true, features = ["serde"] }
 bincode = { workspace = true }
 thiserror = { workspace = true }
+bitflags = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 serde = { workspace = true, features = ["derive"] }
 futures-lite = "2.3.0"
 async-std = "1.13.0"
 notify-debouncer-full = "0.3.1"
 notify = "6.1.1"
-stackfuture = "0.3.0"
+blake3 = "0.1.3"

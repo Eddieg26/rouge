@@ -3,9 +3,9 @@ use super::{
     PathStream,
 };
 use crate::asset::{Asset, AssetMetadata, Settings};
-use futures::{AsyncReadExt, AsyncWriteExt};
 use std::{
     collections::HashMap,
+    hash::Hash,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -51,8 +51,26 @@ impl AssetPath {
         &self.path
     }
 
+    pub fn ext(&self) -> Option<&str> {
+        self.path.ext()
+    }
+
     pub fn name(&self) -> Option<&str> {
         self.name.as_deref()
+    }
+
+    pub fn artifact_name(&self) -> PathBuf {
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(self.path.as_ref().as_os_str().as_encoded_bytes());
+        hasher.update(self.source.as_bytes());
+        if let Some(name) = &self.name {
+            hasher.update(name.as_bytes());
+        }
+
+        let hash = hasher.finalize();
+        let name = String::from_utf8_lossy(hash.as_bytes());
+
+        PathBuf::from(name.to_string())
     }
 
     /// remote://assets/texture.png@main
@@ -125,6 +143,15 @@ pub enum AssetSourceName {
     Name(String),
 }
 
+impl AssetSourceName {
+    pub fn as_bytes(&self) -> &[u8] {
+        match self {
+            AssetSourceName::Default => b"default",
+            AssetSourceName::Name(name) => name.as_bytes(),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct AssetSource {
     io: Arc<dyn ErasedAssetIo>,
@@ -133,6 +160,14 @@ pub struct AssetSource {
 impl AssetSource {
     pub fn new<I: AssetIo>(io: I) -> Self {
         Self { io: Arc::new(io) }
+    }
+
+    pub fn io<I: ErasedAssetIo>(&self) -> Option<&I> {
+        self.io.downcast_ref::<I>()
+    }
+
+    pub fn io_dyn(&self) -> &dyn ErasedAssetIo {
+        self.io.as_ref()
     }
 
     pub fn reader<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, Box<dyn AssetReader>> {
@@ -156,6 +191,14 @@ impl AssetSource {
 
     pub fn rename<'a>(&'a self, from: &'a Path, to: &'a Path) -> AssetFuture<'a, ()> {
         self.io.rename(from, to)
+    }
+
+    pub fn create_dir<'a>(&'a self, path: &'a Path) -> AssetFuture<()> {
+        self.io.create_dir(path)
+    }
+
+    pub fn create_dir_all<'a>(&'a self, path: &'a Path) -> AssetFuture<()> {
+        self.io.create_dir_all(path)
     }
 
     pub fn remove<'a>(&'a self, path: &'a Path) -> AssetFuture<()> {
@@ -194,6 +237,8 @@ impl AssetSource {
     ) -> Result<AssetMetadata<A, S>, AssetIoError> {
         let mut reader = self.reader(&Self::metadata_path(path)).await?;
         let mut buffer = String::new();
+
+        use futures::AsyncReadExt;
         reader.read_to_string(&mut buffer).await?;
 
         ron::from_str::<AssetMetadata<A, S>>(&buffer).map_err(AssetIoError::from)
@@ -207,6 +252,7 @@ impl AssetSource {
         let mut writer = self.writer(&Self::metadata_path(path)).await?;
         let content = ron::to_string(settings).map_err(AssetIoError::from)?;
 
+        use futures::AsyncWriteExt;
         writer.write(content.as_bytes()).await?;
 
         Ok(content)

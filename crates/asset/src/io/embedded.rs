@@ -1,7 +1,11 @@
 use super::{AssetIo, AssetIoError, AssetReader, AssetWriter, PathStream};
 use async_std::sync::RwLock;
 use futures::{AsyncRead, AsyncWrite};
-use std::{collections::HashMap, path::PathBuf, sync::Arc};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 #[derive(Clone)]
 pub enum EmbeddedBytes {
@@ -38,9 +42,8 @@ impl AssetReader for EmbeddedReader {
             };
             let len = bytes.len();
             if self.offset < len {
-                let end = (len - self.offset).min(buf.len());
-                buf.copy_from_slice(&bytes[self.offset..self.offset + end]);
-                self.offset += end;
+                buf.extend(&bytes[self.offset..]);
+                let end = len - self.offset;
                 Ok(end)
             } else {
                 Ok(0)
@@ -62,9 +65,10 @@ impl AsyncRead for EmbeddedReader {
             EmbeddedBytes::Dynamic(bytes) => bytes.as_slice(),
         };
         let len = bytes.len();
+        let buf_len = buf.len();
         let end = if self.offset < len {
             let end = (len - self.offset).min(buf.len());
-            buf.copy_from_slice(&bytes[self.offset..self.offset + end]);
+            buf[..len.min(buf_len)].copy_from_slice(&bytes[self.offset..self.offset + end]);
             end
         } else {
             0
@@ -137,9 +141,9 @@ impl EmbeddedFs {
         }
     }
 
-    pub fn embed(&self, path: PathBuf, bytes: &'static [u8]) {
+    pub fn embed(&self, path: impl AsRef<Path>, bytes: &'static [u8]) {
         let mut assets = self.assets.write_blocking();
-        assets.insert(path, EmbeddedBytes::Static(bytes));
+        assets.insert(path.as_ref().to_path_buf(), EmbeddedBytes::Static(bytes));
     }
 }
 

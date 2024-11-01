@@ -1,4 +1,6 @@
-use super::{AssetIo, AssetIoError, AssetReader, AssetWriter, PathStream};
+use crate::asset::{Asset, AssetMetadata, AssetRef, Settings};
+
+use super::{AssetIo, AssetIoError, AssetReader, AssetWriter, PathExt, PathStream};
 use async_std::sync::RwLock;
 use futures::{AsyncRead, AsyncWrite};
 use std::{
@@ -15,12 +17,12 @@ pub enum EmbeddedBytes {
 
 pub struct EmbeddedReader {
     path: PathBuf,
-    fs: EmbeddedFs,
+    fs: EmbeddedAssets,
     offset: usize,
 }
 
 impl EmbeddedReader {
-    pub fn new(path: PathBuf, fs: EmbeddedFs) -> Self {
+    pub fn new(path: PathBuf, fs: EmbeddedAssets) -> Self {
         Self {
             path,
             fs,
@@ -83,12 +85,12 @@ impl AsyncRead for EmbeddedReader {
 
 pub struct EmbeddedWriter {
     path: PathBuf,
-    fs: EmbeddedFs,
+    fs: EmbeddedAssets,
     bytes: Vec<u8>,
 }
 
 impl EmbeddedWriter {
-    pub fn new(path: PathBuf, fs: EmbeddedFs) -> Self {
+    pub fn new(path: PathBuf, fs: EmbeddedAssets) -> Self {
         Self {
             path,
             fs,
@@ -130,24 +132,35 @@ impl AsyncWrite for EmbeddedWriter {
 }
 
 #[derive(Clone)]
-pub struct EmbeddedFs {
+pub struct EmbeddedAssets {
     assets: Arc<RwLock<HashMap<PathBuf, EmbeddedBytes>>>,
 }
 
-impl EmbeddedFs {
+impl EmbeddedAssets {
     pub fn new() -> Self {
         Self {
             assets: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
-    pub fn embed(&self, path: impl AsRef<Path>, bytes: &'static [u8]) {
+    pub fn embed<A: Asset, S: Settings>(
+        &self,
+        id: AssetRef<A>,
+        path: impl AsRef<Path>,
+        bytes: &'static [u8],
+        settings: S,
+    ) {
+        let meta_path = path.as_ref().append_ext("meta");
+        let metadata = AssetMetadata::<A, S>::new(id.into(), settings);
+        let meta_bytes = ron::to_string(&metadata).unwrap().into_bytes();
+
         let mut assets = self.assets.write_blocking();
         assets.insert(path.as_ref().to_path_buf(), EmbeddedBytes::Static(bytes));
+        assets.insert(meta_path, EmbeddedBytes::Dynamic(meta_bytes));
     }
 }
 
-impl AssetIo for EmbeddedFs {
+impl AssetIo for EmbeddedAssets {
     type Reader = EmbeddedReader;
     type Writer = EmbeddedWriter;
 
@@ -160,7 +173,9 @@ impl AssetIo for EmbeddedFs {
         &'a self,
         _: &'a std::path::Path,
     ) -> Result<Box<dyn PathStream>, AssetIoError> {
-        Err(AssetIoError::from(std::io::ErrorKind::Unsupported))
+        let assets = self.assets.read().await;
+        let paths = assets.keys().cloned().collect::<Vec<_>>();
+        Ok(Box::new(futures::stream::iter(paths)))
     }
 
     async fn is_dir<'a>(&'a self, _: &'a std::path::Path) -> Result<bool, AssetIoError> {
@@ -207,4 +222,11 @@ impl AssetIo for EmbeddedFs {
         let assets = self.assets.read().await;
         Ok(assets.contains_key(path))
     }
+}
+
+#[macro_export]
+macro_rules! embed_asset {
+    ($assets:expr, $id:expr, $path:expr, $settings:expr) => {
+        $assets.embed($id, $path, include_bytes!($path), $settings)
+    };
 }

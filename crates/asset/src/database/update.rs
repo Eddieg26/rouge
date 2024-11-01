@@ -301,7 +301,8 @@ impl AssetLoader {
             let mut dependencies = IndexSet::new();
             let mut deps_loaded = IndexSet::new();
 
-            for paths in paths.chunks(100) {
+            let loader_paths = std::mem::take(&mut paths);
+            for paths in loader_paths.chunks(100) {
                 let mut pool = vec![];
                 for path in paths {
                     pool.push(self.load_asset(path, config, library, states));

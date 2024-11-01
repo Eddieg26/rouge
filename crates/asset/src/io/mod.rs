@@ -1,4 +1,4 @@
-use futures::{AsyncRead, AsyncWrite, Stream};
+use futures_lite::{AsyncRead, AsyncWrite, Stream};
 use std::{
     future::Future,
     path::{Path, PathBuf},
@@ -11,6 +11,7 @@ pub mod cache;
 pub mod embedded;
 pub mod local;
 pub mod source;
+pub mod vfs;
 
 #[derive(Clone, Error, Debug)]
 pub enum AssetIoError {

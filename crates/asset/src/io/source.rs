@@ -152,6 +152,18 @@ impl AssetSourceName {
     }
 }
 
+impl From<String> for AssetSourceName {
+    fn from(name: String) -> Self {
+        AssetSourceName::Name(name)
+    }
+}
+
+impl From<&str> for AssetSourceName {
+    fn from(name: &str) -> Self {
+        AssetSourceName::Name(name.to_string())
+    }
+}
+
 #[derive(Clone)]
 pub struct AssetSource {
     io: Arc<dyn ErasedAssetIo>,
@@ -249,11 +261,13 @@ impl AssetSource {
         path: &Path,
         settings: &AssetMetadata<A, S>,
     ) -> Result<String, AssetIoError> {
-        let mut writer = self.writer(&Self::metadata_path(path)).await?;
+        let meta_path = Self::metadata_path(path);
+        let mut writer = self.writer(&meta_path).await?;
         let content = ron::to_string(settings).map_err(AssetIoError::from)?;
 
         use futures::AsyncWriteExt;
         writer.write(content.as_bytes()).await?;
+        writer.flush().await?;
 
         Ok(content)
     }

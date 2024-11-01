@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use crate::{
     asset::{Asset, AssetType, Assets},
     database::{
@@ -5,7 +7,7 @@ use crate::{
         DatabaseInitError,
     },
     importer::{ImportError, Importer, LoadError, Processor},
-    io::{local::LocalAssets, source::AssetSourceName, AssetIo},
+    io::{embedded::EmbeddedAssets, local::LocalAssets, source::AssetSourceName, AssetIo},
 };
 use ecs::{core::resource::ResMut, event::Events};
 use futures::executor::block_on;
@@ -48,6 +50,12 @@ pub trait AssetExt: 'static {
         name: impl Into<AssetSourceName>,
         io: I,
     ) -> &mut Self;
+    fn embed_assets(
+        &mut self,
+        name: impl Into<AssetSourceName>,
+        path: impl AsRef<Path>,
+        assets: EmbeddedAssets,
+    ) -> &mut Self;
     fn register_asset<A: Asset>(&mut self) -> &mut Self;
     fn add_importer<I: Importer>(&mut self) -> &mut Self;
     fn set_processor<P: Processor>(&mut self) -> &mut Self;
@@ -61,6 +69,17 @@ impl AssetExt for GameBuilder {
     ) -> &mut Self {
         let config = self.resource_mut::<AssetConfig>();
         config.add_source::<I>(name, io);
+        self
+    }
+
+    fn embed_assets(
+        &mut self,
+        name: impl Into<AssetSourceName>,
+        _: impl AsRef<Path>,
+        assets: EmbeddedAssets,
+    ) -> &mut Self {
+        let config = self.resource_mut::<AssetConfig>();
+        config.embed_assets(name, assets);
         self
     }
 
@@ -109,7 +128,7 @@ fn init_asset_database(
 ) {
     match block_on(database.init()) {
         Ok(_) => {
-            database.refresh(RefreshMode::FORCE);
+            database.refresh(RefreshMode::FULL);
         }
         Err(error) => events.add(error),
     }

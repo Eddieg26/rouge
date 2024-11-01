@@ -4,6 +4,7 @@ use crate::{
     importer::{ImportContext, ImportError, Importer, LoadError, ProcessContext, Processor},
     io::{
         cache::{Artifact, ArtifactMeta, AssetCache, ErasedLoadedAsset, ProcessedInfo},
+        embedded::EmbeddedAssets,
         source::{AssetPath, AssetSource, AssetSourceName, AssetSources},
         AssetFuture, AssetIo, AssetIoError,
     },
@@ -53,6 +54,10 @@ impl AssetConfig {
 
     pub fn add_source<I: AssetIo>(&mut self, name: impl Into<AssetSourceName>, io: I) {
         self.sources.add(name.into(), io);
+    }
+
+    pub fn embed_assets(&mut self, name: impl Into<AssetSourceName>, assets: EmbeddedAssets) {
+        self.sources.add(name.into(), assets);
     }
 
     pub fn set_cache(&mut self, path: impl AsRef<Path>) {
@@ -150,7 +155,7 @@ impl AssetMeta {
                         .read_metadata_bytes(path)
                         .await
                         .map_err(|e| ImportError::import(asset_path.clone(), e))?;
-
+                    
                     ArtifactMeta::calculate_checksum(&asset, &metadata)
                 };
 

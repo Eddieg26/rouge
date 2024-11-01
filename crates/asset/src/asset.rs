@@ -37,9 +37,20 @@ impl AssetId {
         AssetType::dynamic(ty)
     }
 
-    pub fn raw<A: Asset>(id: Uuid) -> Self {
+    pub fn from<A: Asset>(id: Uuid) -> Self {
         let ty = AssetType::of::<A>();
         let mut id = id;
+
+        unsafe {
+            let addr = std::ptr::addr_of_mut!(id) as *mut u32;
+            std::ptr::write(addr, ty.value().to_be());
+        }
+
+        Self(id)
+    }
+
+    pub fn with_type(&self, ty: AssetType) -> Self {
+        let mut id = self.0;
 
         unsafe {
             let addr = std::ptr::addr_of_mut!(id) as *mut u32;
@@ -90,6 +101,13 @@ impl<A: Asset> AssetRef<A> {
     pub fn new(id: AssetId) -> Self {
         Self {
             id,
+            _marker: PhantomData::default(),
+        }
+    }
+
+    pub fn from(id: Uuid) -> Self {
+        Self {
+            id: AssetId::from::<A>(id),
             _marker: PhantomData::default(),
         }
     }
@@ -158,6 +176,12 @@ impl<'de, A: Asset> serde::Deserialize<'de> for AssetRef<A> {
             id: AssetId::deserialize(de)?,
             _marker: PhantomData::default(),
         })
+    }
+}
+
+impl<A: Asset> Into<AssetId> for AssetRef<A> {
+    fn into(self) -> AssetId {
+        self.id
     }
 }
 

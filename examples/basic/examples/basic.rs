@@ -87,9 +87,9 @@ impl Importer for PlainText {
 const ID: uuid::Uuid = uuid::Uuid::from_u128(0);
 
 fn main() {
-    let embedded = EmbeddedFs::new("");
+    let embedded = EmbeddedFs::new("assets");
     let id = AssetRef::<PlainText>::from(ID);
-    let _ = embed_asset!(embedded, id, "embedded.txt", ());
+    let _ = embed_asset!(embedded, id, "assets/embedded.txt", ());
 
     Game::new()
         .add_plugin(AssetPlugin)
@@ -97,7 +97,16 @@ fn main() {
         .add_importer::<PlainText>()
         .embed_assets("basic", embedded)
         .add_systems(PostInit, |db: Res<AssetDatabase>| {
-            db.load(["basic://embedded.txt", "test.txt"]);
+            db.load(["basic://assets/embedded.txt"]);
+        })
+        .observe::<AssetEvent<PlainText>, _>(|events: Res<Events<AssetEvent<PlainText>>>| {
+            for event in events.iter() {
+                match event {
+                    AssetEvent::Imported(id) => println!("Imported: {:?}", id),
+                    AssetEvent::Loaded(id) => println!("Loaded: {:?}", id),
+                    _ => (),
+                }
+            }
         })
         .observe::<ImportError, _>(|errors: Res<Events<ImportError>>| {
             for error in errors.iter() {

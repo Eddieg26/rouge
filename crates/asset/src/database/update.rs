@@ -169,7 +169,12 @@ impl AssetImporter {
 
         let meta = match config.registry().get(id.ty()) {
             Some(meta) => meta,
-            None => return Err(ImportError::InvalidMeta { ty: id.ty() }),
+            None => {
+                return Err(ImportError::UnRegistered {
+                    id,
+                    path: path.clone(),
+                })
+            }
         };
 
         let artifact = match meta.process(&id, path, source, config.cache()) {
@@ -369,8 +374,14 @@ impl AssetLoader {
                                 LoadError::NotFound { path } => {
                                     errors.push(LoadError::NotFound { path });
                                 }
-                                LoadError::NotRegistered { ty, path: load_path } => {
-                                    errors.push(LoadError::NotRegistered { ty, path: load_path });
+                                LoadError::NotRegistered {
+                                    ty,
+                                    path: load_path,
+                                } => {
+                                    errors.push(LoadError::NotRegistered {
+                                        ty,
+                                        path: load_path,
+                                    });
                                 }
                             };
                         }
@@ -703,7 +714,7 @@ pub fn import_error_id(error: &ImportError, library: &SharedLibrary) -> Option<A
         | ImportError::MissingMainAsset { path }
         | ImportError::Import { path, .. } => library.read_blocking().get(path).map(|info| info.id),
         ImportError::MissingPath { id } => Some(*id),
-        ImportError::InvalidMeta { .. } => None,
+        ImportError::UnRegistered { .. } => None,
     }
 }
 

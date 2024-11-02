@@ -161,8 +161,9 @@ pub enum ImportError {
     InvalidExtension {
         path: AssetPath,
     },
-    InvalidMeta {
-        ty: AssetType,
+    UnRegistered {
+        id: AssetId,
+        path: AssetPath,
     },
     MissingMainAsset {
         path: AssetPath,
@@ -211,7 +212,7 @@ impl ImportError {
             | ImportError::Import { path, .. }
             | ImportError::Process { path, .. } => (Some(path), None),
             ImportError::MissingPath { id } => (None, Some(*id)),
-            ImportError::InvalidMeta { .. } => (None, None),
+            ImportError::UnRegistered { .. } => (None, None),
         }
     }
 }

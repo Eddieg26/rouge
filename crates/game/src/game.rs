@@ -7,7 +7,7 @@ use crate::{
 };
 use ecs::{
     core::{component::Component, resource::Resource},
-    event::{Event, Events},
+    event::{Event, EventId, Events},
     system::{schedule::Phase, IntoSystemConfigs},
     task::TaskPool,
     world::{
@@ -218,12 +218,26 @@ impl Game {
         self.apps.main_app_mut().run(Execute);
         self.apps.run();
         self.apps.main_app_mut().run(PostExecute);
-        let events = self.apps.main_world_mut().resource_mut::<Events<ExitGame>>();
-        events.drain().last().clone()
+        let events = self
+            .apps
+            .main_world_mut()
+            .resource_mut::<Events<ExitGame>>();
+        events.drain().last()
     }
 
     pub fn shutdown(&mut self) {
         self.apps.main_app_mut().run(Shutdown);
+    }
+
+    pub fn flush(&mut self) {
+        self.apps.main_app_mut().world_mut().flush(None);
+    }
+
+    pub fn flush_type<E: Event>(&mut self) {
+        self.apps
+            .main_app_mut()
+            .world_mut()
+            .flush_type(EventId::of::<E>());
     }
 }
 
@@ -240,6 +254,14 @@ pub enum ExitGame {
 }
 
 impl ExitGame {
+    pub fn success() -> Self {
+        ExitGame::Success
+    }
+
+    pub fn failure<E: Error + Send + Sync + 'static>(error: E) -> Self {
+        ExitGame::Failure(Arc::new(error))
+    }
+
     pub fn is_success(&self) -> bool {
         matches!(self, ExitGame::Success)
     }

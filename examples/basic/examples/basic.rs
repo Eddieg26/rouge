@@ -15,6 +15,7 @@ use asset::{
     AsyncReadExt, AsyncWriteExt,
 };
 use std::{future::Future, path::PathBuf};
+use window::plugin::WindowPlugin;
 // use asset::{
 //     asset::{Asset, AssetId, AssetType},
 //     io::{embed::EmbeddedFS, local::LocalFS, AssetSourceConfig},
@@ -93,6 +94,7 @@ fn main() {
 
     Game::new()
         .add_plugin(AssetPlugin)
+        .add_plugin(WindowPlugin)
         .register_asset::<PlainText>()
         .add_importer::<PlainText>()
         .embed_assets("basic", embedded)
@@ -113,13 +115,5 @@ fn main() {
                 println!("Import Error: {:?}", error);
             }
         })
-        .set_runner(runner)
         .run();
-}
-
-fn runner(mut game: Game) {
-    game.startup();
-    loop {
-        game.update();
-    }
 }

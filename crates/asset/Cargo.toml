@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-vfs = { version = "0.12.0" }
 ecs = { path = "../ecs" }
 game = { path = "../game" }
 futures = { workspace = true }

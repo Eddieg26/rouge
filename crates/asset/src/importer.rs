@@ -80,10 +80,10 @@ pub trait Importer {
     type Processor: Processor<Asset = Self::Asset, Settings = Self::Settings>;
     type Error: Error + Send + Sync + 'static;
 
-    fn import<'a>(
-        ctx: &'a mut ImportContext<Self::Asset, Self::Settings>,
-        reader: &'a mut dyn AssetReader,
-    ) -> impl Future<Output = Result<Self::Asset, Self::Error>> + 'a;
+    fn import(
+        ctx: &mut ImportContext<Self::Asset, Self::Settings>,
+        reader: &mut dyn AssetReader,
+    ) -> impl Future<Output = Result<Self::Asset, Self::Error>>;
 
     fn extensions() -> &'static [&'static str];
 }
@@ -229,16 +229,15 @@ impl Event for ImportError {}
 pub enum LoadError {
     NotFound {
         path: AssetPath,
-        load_path: AssetLoadPath,
     },
     NotRegistered {
         ty: AssetType,
-        load_path: AssetLoadPath,
+        path: AssetLoadPath,
     },
     Io {
         id: AssetId,
         error: AssetIoError,
-        load_path: AssetLoadPath,
+        path: AssetLoadPath,
     },
 }
 

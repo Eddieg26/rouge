@@ -1,3 +1,5 @@
+use std::{error::Error, sync::Arc};
+
 use crate::{
     app::{AppBuilders, AppTag, Apps, MainApp},
     phases::{Execute, PostExecute, PreExecute, Shutdown, Startup},
@@ -5,10 +7,13 @@ use crate::{
 };
 use ecs::{
     core::{component::Component, resource::Resource},
-    event::Event,
+    event::{Event, Events},
     system::{schedule::Phase, IntoSystemConfigs},
     task::TaskPool,
-    world::{action::WorldActions, World},
+    world::{
+        action::{WorldAction, WorldActions},
+        World,
+    },
 };
 
 pub struct GameBuilder {
@@ -20,11 +25,12 @@ pub struct GameBuilder {
 impl GameBuilder {
     pub fn new() -> Self {
         let mut apps = AppBuilders::new();
-        apps.main_app_mut().world_mut().add_phase::<Startup>();
-        apps.main_app_mut().world_mut().add_phase::<PreExecute>();
-        apps.main_app_mut().world_mut().add_phase::<Execute>();
-        apps.main_app_mut().world_mut().add_phase::<PostExecute>();
-        apps.main_app_mut().world_mut().add_phase::<Shutdown>();
+        apps.main_world_mut().add_phase::<Startup>();
+        apps.main_world_mut().add_phase::<PreExecute>();
+        apps.main_world_mut().add_phase::<Execute>();
+        apps.main_world_mut().add_phase::<PostExecute>();
+        apps.main_world_mut().add_phase::<Shutdown>();
+        apps.main_world_mut().register_event::<ExitGame>();
 
         Self {
             apps,
@@ -207,11 +213,13 @@ impl Game {
         self.apps.main_app_mut().run(Startup);
     }
 
-    pub fn update(&mut self) {
+    pub fn update(&mut self) -> Option<ExitGame> {
         self.apps.main_app_mut().run(PreExecute);
         self.apps.main_app_mut().run(Execute);
         self.apps.run();
         self.apps.main_app_mut().run(PostExecute);
+        let events = self.apps.main_world_mut().resource_mut::<Events<ExitGame>>();
+        events.drain().last().clone()
     }
 
     pub fn shutdown(&mut self) {
@@ -224,3 +232,27 @@ fn default_runner(mut game: Game) {
     game.update();
     game.shutdown();
 }
+
+#[derive(Debug, Clone)]
+pub enum ExitGame {
+    Success,
+    Failure(Arc<dyn Error + Send + Sync + 'static>),
+}
+
+impl ExitGame {
+    pub fn is_success(&self) -> bool {
+        matches!(self, ExitGame::Success)
+    }
+
+    pub fn is_failure(&self) -> bool {
+        !self.is_success()
+    }
+}
+
+impl WorldAction for ExitGame {
+    fn execute(self, world: &mut World) -> Option<()> {
+        Some(world.resource_mut::<Events<ExitGame>>().add(self))
+    }
+}
+
+impl Event for ExitGame {}

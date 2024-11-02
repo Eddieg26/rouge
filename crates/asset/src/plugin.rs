@@ -1,17 +1,18 @@
-use std::path::Path;
-
 use crate::{
     asset::{Asset, AssetType, Assets},
     database::{
-        config::AssetConfig, events::AssetEvent, update::RefreshMode, AssetDatabase,
-        DatabaseInitError,
+        config::AssetConfig,
+        events::{on_asset_event, on_assets_unloaded, AssetEvent, NotifyDepsUnloaded},
+        update::RefreshMode,
+        AssetDatabase, DatabaseInitError,
     },
     importer::{ImportError, Importer, LoadError, Processor},
-    io::{embedded::EmbeddedAssets, local::LocalAssets, source::AssetSourceName, AssetIo},
+    io::{embedded::EmbeddedFs, local::LocalFs, source::AssetSourceName, FileSystem},
 };
 use ecs::{core::resource::ResMut, event::Events};
 use futures::executor::block_on;
 use game::{GameBuilder, Init, Plugin};
+use std::path::PathBuf;
 
 pub struct AssetPlugin;
 
@@ -25,6 +26,8 @@ impl Plugin for AssetPlugin {
         game.register_event::<ImportError>();
         game.register_event::<LoadError>();
         game.register_event::<DatabaseInitError>();
+        game.register_event::<NotifyDepsUnloaded>();
+        game.observe::<NotifyDepsUnloaded, _>(on_assets_unloaded);
         game.add_systems(Init, init_asset_database);
     }
 
@@ -35,7 +38,7 @@ impl Plugin for AssetPlugin {
         };
 
         if config.source(&AssetSourceName::Default).is_none() {
-            config.add_source::<LocalAssets>(AssetSourceName::Default, LocalAssets::new("assets"));
+            config.add_source(AssetSourceName::Default, LocalFs::new("assets"));
         }
 
         let tasks = game.tasks().clone();
@@ -45,24 +48,19 @@ impl Plugin for AssetPlugin {
 }
 
 pub trait AssetExt: 'static {
-    fn add_asset_source<I: AssetIo>(
+    fn add_asset_source<I: FileSystem>(
         &mut self,
         name: impl Into<AssetSourceName>,
         io: I,
     ) -> &mut Self;
-    fn embed_assets(
-        &mut self,
-        name: impl Into<AssetSourceName>,
-        path: impl AsRef<Path>,
-        assets: EmbeddedAssets,
-    ) -> &mut Self;
+    fn embed_assets(&mut self, name: impl Into<AssetSourceName>, assets: EmbeddedFs) -> &mut Self;
     fn register_asset<A: Asset>(&mut self) -> &mut Self;
     fn add_importer<I: Importer>(&mut self) -> &mut Self;
     fn set_processor<P: Processor>(&mut self) -> &mut Self;
 }
 
 impl AssetExt for GameBuilder {
-    fn add_asset_source<I: AssetIo>(
+    fn add_asset_source<I: FileSystem>(
         &mut self,
         name: impl Into<AssetSourceName>,
         io: I,
@@ -72,12 +70,7 @@ impl AssetExt for GameBuilder {
         self
     }
 
-    fn embed_assets(
-        &mut self,
-        name: impl Into<AssetSourceName>,
-        _: impl AsRef<Path>,
-        assets: EmbeddedAssets,
-    ) -> &mut Self {
+    fn embed_assets(&mut self, name: impl Into<AssetSourceName>, assets: EmbeddedFs) -> &mut Self {
         let config = self.resource_mut::<AssetConfig>();
         config.embed_assets(name, assets);
         self
@@ -98,6 +91,7 @@ impl AssetExt for GameBuilder {
         if !registered {
             self.add_resource(Assets::<A>::new());
             self.register_event::<AssetEvent<A>>();
+            self.observe::<AssetEvent<A>, _>(on_asset_event::<A>);
         }
 
         self
@@ -126,10 +120,16 @@ fn init_asset_database(
     mut database: ResMut<AssetDatabase>,
     mut events: ResMut<Events<DatabaseInitError>>,
 ) {
-    match block_on(database.init()) {
-        Ok(_) => {
-            database.refresh(RefreshMode::FULL);
-        }
+    block_on(init(&mut database, &mut events));
+}
+
+async fn init(database: &mut AssetDatabase, events: &mut Events<DatabaseInitError>) {
+    for (_, source) in database.config().sources().iter() {
+        let _ = source.create_dir(&PathBuf::new()).await;
+    }
+
+    match database.init().await {
+        Ok(_) => database.refresh(RefreshMode::FULL),
         Err(error) => events.add(error),
     }
 }

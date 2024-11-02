@@ -1,5 +1,6 @@
 use futures_lite::{AsyncRead, AsyncWrite, Stream};
 use std::{
+    borrow::Cow,
     future::Future,
     path::{Path, PathBuf},
     pin::Pin,
@@ -71,51 +72,28 @@ pub trait PathStream: Stream<Item = PathBuf> + Send + Unpin {}
 
 impl<T: Stream<Item = PathBuf> + Send + Unpin> PathStream for T {}
 
-pub trait AssetIo: Send + Sync + 'static {
+pub trait FileSystem: Send + Sync + 'static {
     type Reader: AssetReader;
     type Writer: AssetWriter;
 
-    fn reader<'a>(
-        &'a self,
-        path: &'a Path,
-    ) -> impl Future<Output = Result<Self::Reader, AssetIoError>> + 'a;
-    fn read_dir<'a>(
-        &'a self,
-        path: &'a Path,
-    ) -> impl Future<Output = Result<Box<dyn PathStream>, AssetIoError>> + 'a;
-    fn is_dir<'a>(
-        &'a self,
-        path: &'a Path,
-    ) -> impl Future<Output = Result<bool, AssetIoError>> + 'a;
-    fn writer<'a>(
-        &'a self,
-        path: &'a Path,
-    ) -> impl Future<Output = Result<Self::Writer, AssetIoError>> + 'a;
-    fn create_dir<'a>(
-        &'a self,
-        path: &'a Path,
-    ) -> impl Future<Output = Result<(), AssetIoError>> + 'a;
-    fn create_dir_all<'a>(
-        &'a self,
-        path: &'a Path,
-    ) -> impl Future<Output = Result<(), AssetIoError>> + 'a;
-    fn rename<'a>(
-        &'a self,
-        from: &'a Path,
-        to: &'a Path,
-    ) -> impl Future<Output = Result<(), AssetIoError>> + 'a;
-    fn remove<'a>(&'a self, path: &'a Path) -> impl Future<Output = Result<(), AssetIoError>> + 'a;
-    fn remove_dir<'a>(
-        &'a self,
-        path: &'a Path,
-    ) -> impl Future<Output = Result<(), AssetIoError>> + 'a;
-    fn exists<'a>(
-        &'a self,
-        path: &'a Path,
-    ) -> impl Future<Output = Result<bool, AssetIoError>> + 'a;
+    fn root(&self) -> &Path;
+    fn reader(&self, path: &Path) -> impl Future<Output = Result<Self::Reader, AssetIoError>>;
+    fn read_dir(
+        &self,
+        path: &Path,
+    ) -> impl Future<Output = Result<Box<dyn PathStream>, AssetIoError>>;
+    fn is_dir(&self, path: &Path) -> impl Future<Output = Result<bool, AssetIoError>>;
+    fn writer(&self, path: &Path) -> impl Future<Output = Result<Self::Writer, AssetIoError>>;
+    fn create_dir(&self, path: &Path) -> impl Future<Output = Result<(), AssetIoError>>;
+    fn create_dir_all(&self, path: &Path) -> impl Future<Output = Result<(), AssetIoError>>;
+    fn rename(&self, from: &Path, to: &Path) -> impl Future<Output = Result<(), AssetIoError>>;
+    fn remove(&self, path: &Path) -> impl Future<Output = Result<(), AssetIoError>>;
+    fn remove_dir(&self, path: &Path) -> impl Future<Output = Result<(), AssetIoError>>;
+    fn exists(&self, path: &Path) -> impl Future<Output = Result<bool, AssetIoError>>;
 }
 
-pub trait ErasedAssetIo: downcast_rs::Downcast + Send + Sync + 'static {
+pub trait ErasedFileSystem: downcast_rs::Downcast + Send + Sync + 'static {
+    fn root(&self) -> &Path;
     fn reader<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, Box<dyn AssetReader>>;
     fn read_dir<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, Box<dyn PathStream>>;
     fn is_dir<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, bool>;
@@ -127,9 +105,12 @@ pub trait ErasedAssetIo: downcast_rs::Downcast + Send + Sync + 'static {
     fn remove_dir<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, ()>;
     fn exists<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, bool>;
 }
-downcast_rs::impl_downcast!(ErasedAssetIo);
 
-impl<T: AssetIo> ErasedAssetIo for T {
+impl<T: FileSystem> ErasedFileSystem for T {
+    fn root(&self) -> &Path {
+        FileSystem::root(self)
+    }
+
     fn reader<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, Box<dyn AssetReader>> {
         Box::pin(async {
             let reader = self.reader(path).await?;
@@ -169,7 +150,7 @@ impl<T: AssetIo> ErasedAssetIo for T {
     }
 
     fn remove_dir<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, ()> {
-        Box::pin(async { self.remove(path).await })
+        Box::pin(async { self.remove_dir(path).await })
     }
 
     fn exists<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, bool> {
@@ -180,7 +161,7 @@ impl<T: AssetIo> ErasedAssetIo for T {
 pub trait PathExt {
     fn ext(&self) -> Option<&str>;
     fn append_ext(&self, ext: &str) -> PathBuf;
-    fn with_prefix(&self, prefix: impl AsRef<Path>) -> PathBuf;
+    fn with_prefix(&self, prefix: impl AsRef<Path>) -> Cow<Path>;
     fn without_prefix(&self, prefix: impl AsRef<Path>) -> &Path;
 }
 
@@ -192,19 +173,17 @@ impl<T: AsRef<Path>> PathExt for T {
         let path = self.as_ref().to_path_buf();
         format!("{}.{}", path.display(), ext).into()
     }
-    fn with_prefix(&self, prefix: impl AsRef<Path>) -> PathBuf {
+
+    fn with_prefix(&self, prefix: impl AsRef<Path>) -> Cow<Path> {
         match self.as_ref().starts_with(prefix.as_ref()) {
-            true => self.as_ref().to_path_buf(),
-            false => prefix.as_ref().join(self.as_ref()),
+            false => Cow::Owned(prefix.as_ref().join(self)),
+            true => Cow::Borrowed(self.as_ref()),
         }
     }
+
     fn without_prefix(&self, prefix: impl AsRef<Path>) -> &Path {
         let path = self.as_ref();
         let prefix = prefix.as_ref();
-        if path.starts_with(prefix) {
-            path.strip_prefix(prefix).unwrap()
-        } else {
-            path
-        }
+        path.strip_prefix(prefix).unwrap_or(path)
     }
 }

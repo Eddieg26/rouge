@@ -1,56 +1,68 @@
+use super::{AssetIoError, AssetReader, AssetWriter, FileSystem, PathExt};
 use crate::asset::{Asset, AssetMetadata, AssetRef, Settings};
-
-use super::{AssetIo, AssetIoError, AssetReader, AssetWriter, PathExt, PathStream};
 use async_std::sync::RwLock;
-use futures::{AsyncRead, AsyncWrite};
+use futures_lite::{AsyncRead, AsyncWrite};
 use std::{
     collections::HashMap,
+    io::{Cursor, Read, Seek, Write},
     path::{Path, PathBuf},
     sync::Arc,
 };
 
 #[derive(Clone)]
-pub enum EmbeddedBytes {
+pub enum EmbeddedData {
     Static(&'static [u8]),
-    Dynamic(Vec<u8>),
+    Dynamic(Arc<[u8]>),
 }
 
-pub struct EmbeddedReader {
-    path: PathBuf,
-    fs: EmbeddedAssets,
-    offset: usize,
-}
+impl std::ops::Deref for EmbeddedData {
+    type Target = [u8];
 
-impl EmbeddedReader {
-    pub fn new(path: PathBuf, fs: EmbeddedAssets) -> Self {
-        Self {
-            path,
-            fs,
-            offset: 0,
+    fn deref(&self) -> &Self::Target {
+        match self {
+            EmbeddedData::Static(bytes) => bytes,
+            EmbeddedData::Dynamic(bytes) => &bytes,
         }
     }
 }
 
-impl AssetReader for EmbeddedReader {
-    fn read_to_end<'a>(&'a mut self, buf: &'a mut Vec<u8>) -> super::AssetFuture<'a, usize> {
-        Box::pin(async move {
-            let assets = self.fs.assets.read().await;
-            let asset = assets
-                .get(&self.path)
-                .ok_or(super::AssetIoError::NotFound(self.path.to_path_buf()))?;
-            let bytes = match asset {
-                EmbeddedBytes::Static(bytes) => bytes,
-                EmbeddedBytes::Dynamic(bytes) => bytes.as_slice(),
-            };
-            let len = bytes.len();
-            if self.offset < len {
-                buf.extend(&bytes[self.offset..]);
-                let end = len - self.offset;
-                Ok(end)
-            } else {
-                Ok(0)
+pub struct EmbeddedReader {
+    data: EmbeddedData,
+    position: u64,
+}
+
+impl EmbeddedReader {
+    pub fn size(&self) -> u64 {
+        self.data.len() as u64
+    }
+}
+
+impl Read for EmbeddedReader {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let len = buf.len().min((self.size() - self.position) as usize);
+        if len > 0 {
+            buf[..len]
+                .copy_from_slice(&self.data[self.position as usize..self.position as usize + len]);
+        }
+
+        self.position += len as u64;
+        Ok(len)
+    }
+}
+
+impl Seek for EmbeddedReader {
+    fn seek(&mut self, pos: std::io::SeekFrom) -> std::io::Result<u64> {
+        match pos {
+            std::io::SeekFrom::Start(offset) => self.position = offset,
+            std::io::SeekFrom::End(offset) => {
+                self.position = (self.position as i64 + offset) as u64
             }
-        })
+            std::io::SeekFrom::Current(offset) => {
+                self.position = (self.data.len() as i64 + offset) as u64
+            }
+        }
+
+        Ok(self.position)
     }
 }
 
@@ -60,46 +72,53 @@ impl AsyncRead for EmbeddedReader {
         _: &mut std::task::Context<'_>,
         buf: &mut [u8],
     ) -> std::task::Poll<std::io::Result<usize>> {
-        let assets = self.fs.assets.read_blocking();
-        let asset = assets.get(&self.path).ok_or(std::io::ErrorKind::NotFound)?;
-        let bytes = match asset {
-            EmbeddedBytes::Static(bytes) => bytes,
-            EmbeddedBytes::Dynamic(bytes) => bytes.as_slice(),
-        };
-        let len = bytes.len();
-        let buf_len = buf.len();
-        let end = if self.offset < len {
-            let end = (len - self.offset).min(buf.len());
-            buf[..len.min(buf_len)].copy_from_slice(&bytes[self.offset..self.offset + end]);
-            end
-        } else {
-            0
-        };
+        let len = buf.len().min((self.size() - self.position) as usize);
+        if len > 0 {
+            buf[..len]
+                .copy_from_slice(&self.data[self.position as usize..self.position as usize + len]);
+        }
 
-        std::mem::drop(assets);
+        self.position += len as u64;
+        std::task::Poll::Ready(Ok(len))
+    }
+}
 
-        self.offset += end;
-        std::task::Poll::Ready(Ok(end))
+impl AssetReader for EmbeddedReader {
+    fn read_to_end<'a>(&'a mut self, buf: &'a mut Vec<u8>) -> super::AssetFuture<'a, usize> {
+        Box::pin(async move {
+            let len = self.data.len();
+            if self.position < len as u64 {
+                buf.extend(&self.data[self.position as usize..]);
+                let end = len - self.position as usize;
+                Ok(end)
+            } else {
+                Ok(0)
+            }
+        })
     }
 }
 
 pub struct EmbeddedWriter {
+    data: Cursor<Vec<u8>>,
     path: PathBuf,
-    fs: EmbeddedAssets,
-    bytes: Vec<u8>,
+    fs: Handle,
 }
 
-impl EmbeddedWriter {
-    pub fn new(path: PathBuf, fs: EmbeddedAssets) -> Self {
-        Self {
-            path,
-            fs,
-            bytes: Vec::new(),
-        }
+impl Write for EmbeddedWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.data.write(buf)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.data.flush()
     }
 }
 
-impl AssetWriter for EmbeddedWriter {}
+impl Seek for EmbeddedWriter {
+    fn seek(&mut self, pos: std::io::SeekFrom) -> std::io::Result<u64> {
+        self.data.seek(pos)
+    }
+}
 
 impl AsyncWrite for EmbeddedWriter {
     fn poll_write(
@@ -107,39 +126,55 @@ impl AsyncWrite for EmbeddedWriter {
         _: &mut std::task::Context<'_>,
         buf: &[u8],
     ) -> std::task::Poll<std::io::Result<usize>> {
-        self.bytes.extend_from_slice(buf);
-        std::task::Poll::Ready(Ok(buf.len()))
+        let size = self.data.write(buf)?;
+        std::task::Poll::Ready(Ok(size))
     }
 
     fn poll_flush(
-        self: std::pin::Pin<&mut Self>,
+        mut self: std::pin::Pin<&mut Self>,
         _: &mut std::task::Context<'_>,
     ) -> std::task::Poll<std::io::Result<()>> {
-        let mut assets = self.fs.assets.write_blocking();
-        assets.insert(
-            self.path.clone(),
-            EmbeddedBytes::Dynamic(self.bytes.clone()),
-        );
+        self.data.flush()?;
         std::task::Poll::Ready(Ok(()))
     }
 
     fn poll_close(
         self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
+        _: &mut std::task::Context<'_>,
     ) -> std::task::Poll<std::io::Result<()>> {
-        self.poll_flush(cx)
+        std::task::Poll::Ready(Ok(()))
     }
 }
 
-#[derive(Clone)]
-pub struct EmbeddedAssets {
-    assets: Arc<RwLock<HashMap<PathBuf, EmbeddedBytes>>>,
+impl AssetWriter for EmbeddedWriter {}
+
+impl Drop for EmbeddedWriter {
+    fn drop(&mut self) {
+        let mut fs = self.fs.write_arc_blocking();
+        let data = std::mem::take(self.data.get_mut());
+
+        let file = EmbeddedData::Dynamic(Arc::from(data));
+        fs.entries.insert(self.path.clone(), file);
+    }
 }
 
-impl EmbeddedAssets {
-    pub fn new() -> Self {
+#[derive(Default)]
+pub struct EmbeddedAssets {
+    entries: HashMap<PathBuf, EmbeddedData>,
+}
+
+type Handle = Arc<RwLock<EmbeddedAssets>>;
+
+pub struct EmbeddedFs {
+    root: Box<Path>,
+    fs: Handle,
+}
+
+impl EmbeddedFs {
+    pub fn new(root: impl AsRef<Path>) -> Self {
         Self {
-            assets: Arc::new(RwLock::new(HashMap::new())),
+            root: root.as_ref().to_path_buf().into_boxed_path(),
+            fs: Handle::default(),
         }
     }
 
@@ -147,80 +182,105 @@ impl EmbeddedAssets {
         &self,
         id: AssetRef<A>,
         path: impl AsRef<Path>,
-        bytes: &'static [u8],
+        asset: &'static [u8],
         settings: S,
-    ) {
-        let meta_path = path.as_ref().append_ext("meta");
+    ) -> Result<AssetMetadata<A, S>, AssetIoError> {
         let metadata = AssetMetadata::<A, S>::new(id.into(), settings);
-        let meta_bytes = ron::to_string(&metadata).unwrap().into_bytes();
+        let metabytes = ron::to_string(&metadata).map_err(AssetIoError::from)?;
+        let path = path.as_ref().to_path_buf();
 
-        let mut assets = self.assets.write_blocking();
-        assets.insert(path.as_ref().to_path_buf(), EmbeddedBytes::Static(bytes));
-        assets.insert(meta_path, EmbeddedBytes::Dynamic(meta_bytes));
+        let mut fs = self.fs.write_blocking();
+        fs.entries.insert(path.clone(), EmbeddedData::Static(asset));
+        fs.entries.insert(
+            path.append_ext("meta"),
+            EmbeddedData::Dynamic(metabytes.into_bytes().into()),
+        );
+        Ok(metadata)
     }
 }
 
-impl AssetIo for EmbeddedAssets {
+impl std::fmt::Display for EmbeddedFs {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let fs = self.fs.read_blocking();
+        let mut paths = fs.entries.keys().collect::<Vec<_>>();
+        paths.sort();
+        f.debug_list().entries(paths).finish()
+    }
+}
+
+impl FileSystem for EmbeddedFs {
     type Reader = EmbeddedReader;
     type Writer = EmbeddedWriter;
 
-    async fn reader<'a>(&'a self, path: &'a std::path::Path) -> Result<Self::Reader, AssetIoError> {
-        let reader = EmbeddedReader::new(path.to_path_buf(), self.clone());
-        Ok(reader)
+    fn root(&self) -> &Path {
+        &self.root
     }
 
-    async fn read_dir<'a>(
-        &'a self,
-        _: &'a std::path::Path,
-    ) -> Result<Box<dyn PathStream>, AssetIoError> {
-        let assets = self.assets.read().await;
-        let paths = assets.keys().cloned().collect::<Vec<_>>();
+    async fn reader(&self, path: &Path) -> Result<Self::Reader, AssetIoError> {
+        let fs = self.fs.read().await;
+        match fs.entries.get(path).cloned() {
+            Some(data) => Ok(EmbeddedReader { data, position: 0 }),
+            None => Err(AssetIoError::NotFound(path.to_path_buf())),
+        }
+    }
+
+    async fn read_dir(&self, _: &Path) -> Result<Box<dyn super::PathStream>, AssetIoError> {
+        let fs = self.fs.read().await;
+        let paths = fs.entries.keys().cloned().collect::<Vec<_>>();
         Ok(Box::new(futures::stream::iter(paths)))
     }
 
-    async fn is_dir<'a>(&'a self, _: &'a std::path::Path) -> Result<bool, AssetIoError> {
-        Ok(false)
+    async fn is_dir(&self, path: &Path) -> Result<bool, AssetIoError> {
+        let fs = self.fs.read().await;
+        match fs.entries.contains_key(path) {
+            true => Ok(false),
+            false => Err(AssetIoError::NotFound(path.to_path_buf())),
+        }
     }
 
-    async fn create_dir<'a>(&'a self, _: &'a std::path::Path) -> Result<(), AssetIoError> {
-        Err(AssetIoError::from(std::io::ErrorKind::Unsupported))
-    }
+    async fn writer(&self, path: &Path) -> Result<Self::Writer, AssetIoError> {
+        let writer = EmbeddedWriter {
+            data: Cursor::new(vec![]),
+            path: path.to_path_buf(),
+            fs: self.fs.clone(),
+        };
 
-    async fn create_dir_all<'a>(&'a self, _: &'a std::path::Path) -> Result<(), AssetIoError> {
-        Err(AssetIoError::from(std::io::ErrorKind::Unsupported))
-    }
-
-    async fn writer<'a>(&'a self, path: &'a std::path::Path) -> Result<Self::Writer, AssetIoError> {
-        let writer = EmbeddedWriter::new(path.to_path_buf(), self.clone());
         Ok(writer)
     }
 
-    async fn rename<'a>(
-        &'a self,
-        from: &'a std::path::Path,
-        to: &'a std::path::Path,
-    ) -> Result<(), AssetIoError> {
-        let mut assets = self.assets.write_blocking();
-        if let Some(bytes) = assets.remove(from) {
-            assets.insert(to.to_path_buf(), bytes);
+    async fn create_dir(&self, _: &Path) -> Result<(), AssetIoError> {
+        Err(AssetIoError::from(std::io::ErrorKind::Unsupported))
+    }
+
+    async fn create_dir_all(&self, _: &Path) -> Result<(), AssetIoError> {
+        Err(AssetIoError::from(std::io::ErrorKind::Unsupported))
+    }
+
+    async fn rename(&self, from: &Path, to: &Path) -> Result<(), AssetIoError> {
+        let mut fs = self.fs.write().await;
+        match fs.entries.remove(from) {
+            Some(entry) => match fs.entries.contains_key(to) {
+                true => return Err(AssetIoError::from(std::io::ErrorKind::AlreadyExists)),
+                false => {
+                    fs.entries.insert(to.to_path_buf(), entry);
+                    Ok(())
+                }
+            },
+            None => Err(AssetIoError::NotFound(from.to_path_buf())),
         }
-
-        Ok(())
     }
 
-    async fn remove<'a>(&'a self, path: &'a std::path::Path) -> Result<(), AssetIoError> {
-        let mut assets = self.assets.write_blocking();
-        assets.remove(path);
-        Ok(())
+    async fn remove(&self, _: &Path) -> Result<(), AssetIoError> {
+        Err(AssetIoError::from(std::io::ErrorKind::Unsupported))
     }
 
-    async fn remove_dir<'a>(&'a self, _: &'a std::path::Path) -> Result<(), AssetIoError> {
-        Ok(())
+    async fn remove_dir(&self, _: &Path) -> Result<(), AssetIoError> {
+        Err(AssetIoError::from(std::io::ErrorKind::Unsupported))
     }
 
-    async fn exists<'a>(&'a self, path: &'a std::path::Path) -> Result<bool, AssetIoError> {
-        let assets = self.assets.read().await;
-        Ok(assets.contains_key(path))
+    async fn exists(&self, path: &Path) -> Result<bool, AssetIoError> {
+        let fs = self.fs.read().await;
+        Ok(fs.entries.contains_key(path))
     }
 }
 

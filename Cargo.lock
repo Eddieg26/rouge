@@ -41,7 +41,6 @@ dependencies = [
  "serde",
  "thiserror",
  "uuid",
- "vfs",
 ]
 
 [[package]]

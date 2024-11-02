@@ -1,8 +1,8 @@
 use super::{
     config::AssetConfig,
-    events::{ImportAssets, ReloadAssets, UnloadAssets},
+    events::{ReloadAssets, UnloadAssets},
     state::{AssetStates, LoadState, SharedStates},
-    AssetDatabase,
+    AssetDatabase, DatabaseEvent,
 };
 use crate::{
     asset::{Asset, AssetId, AssetMetadata, Settings},
@@ -36,7 +36,7 @@ impl AssetImporter {
         let mut reload = vec![];
         let mut unload = vec![];
 
-        let _ = config.cache().create_unprocessed_path().await;
+        let _ = config.cache().create_unprocessed_dir().await;
 
         while !paths.is_empty() {
             let mut assets = HashMap::new();
@@ -47,10 +47,6 @@ impl AssetImporter {
                 match self.import_asset(&path, config, library).await {
                     Ok(imported) => {
                         for asset in imported {
-                            if let Some(meta) = config.registry().get(asset.id.ty()) {
-                                actions.add(meta.imported(asset.path.clone(), asset.id));
-                            }
-
                             assets.insert(asset.id, asset);
                         }
                     }
@@ -70,6 +66,11 @@ impl AssetImporter {
                             for id in result.removed_dependencies {
                                 states.write().await.remove_dependent(id, result.asset.id);
                             }
+
+                            if let Some(meta) = config.registry().get(result.asset.id.ty()) {
+                                actions.add(meta.imported(result.asset.path, result.asset.id));
+                            }
+
                             reload.push(result.asset.id);
                             unload.extend(result.removed_assets);
                         }
@@ -104,7 +105,7 @@ impl AssetImporter {
             .save_library(library.read().await.deref())
             .await;
 
-        let _ = config.cache().remove_unprocessed_path().await;
+        let _ = config.cache().remove_unprocessed_dir().await;
 
         actions.add(UnloadAssets::new(unload));
         actions.add(ReloadAssets::new(reload));
@@ -313,20 +314,24 @@ impl AssetLoader {
                     match result {
                         Ok(Some(asset)) => {
                             let id = &asset.meta.id;
-                            states
-                                .write()
-                                .await
-                                .loaded(*id, Some(asset.meta.dependencies));
+                            let deps = asset.meta.dependencies;
+                            let parent = asset.meta.parent;
+                            states.write().await.loaded(*id, Some(deps), parent);
 
                             let states = states.read().await;
                             let state = states.get(id).unwrap();
                             for dep in state.dependencies() {
-                                if matches!(
-                                    states.load_state(*dep),
-                                    LoadState::Unloaded | LoadState::Failed
-                                ) {
+                                if states.load_state(*dep).is_unloaded_or_failed() {
                                     dependencies.insert(AssetLoadPath::Id(*dep));
                                 }
+                            }
+
+                            if let Some(parent) = asset
+                                .meta
+                                .parent
+                                .filter(|p| states.load_state(*p).is_unloaded_or_failed())
+                            {
+                                dependencies.insert(AssetLoadPath::Id(parent));
                             }
 
                             if let Some(meta) = config.registry().get(id.ty()) {
@@ -340,7 +345,7 @@ impl AssetLoader {
                                 LoadError::Io {
                                     id,
                                     error,
-                                    load_path,
+                                    path: load_path,
                                 } => {
                                     states.write().await.failed(id);
                                     let states = states.read().await;
@@ -356,16 +361,16 @@ impl AssetLoader {
                                         let error = LoadError::Io {
                                             id,
                                             error,
-                                            load_path,
+                                            path: load_path,
                                         };
                                         actions.add(meta.failed(id, error));
                                     }
                                 }
-                                LoadError::NotFound { path, load_path } => {
-                                    errors.push(LoadError::NotFound { path, load_path });
+                                LoadError::NotFound { path } => {
+                                    errors.push(LoadError::NotFound { path });
                                 }
-                                LoadError::NotRegistered { ty, load_path } => {
-                                    errors.push(LoadError::NotRegistered { ty, load_path });
+                                LoadError::NotRegistered { ty, path: load_path } => {
+                                    errors.push(LoadError::NotRegistered { ty, path: load_path });
                                 }
                             };
                         }
@@ -391,12 +396,7 @@ impl AssetLoader {
             AssetLoadPath::Id(id) => *id,
             AssetLoadPath::Path(path) => match library.read().await.get_id(path) {
                 Some(id) => id,
-                None => {
-                    return Err(LoadError::NotFound {
-                        path: path.clone(),
-                        load_path: load_path.clone(),
-                    })
-                }
+                None => return Err(LoadError::NotFound { path: path.clone() }),
             },
         };
 
@@ -411,7 +411,7 @@ impl AssetLoader {
             None => {
                 return Err(LoadError::NotRegistered {
                     ty: id.ty(),
-                    load_path: load_path.clone(),
+                    path: load_path.clone(),
                 })
             }
         };
@@ -425,13 +425,13 @@ impl AssetLoader {
                 .map_err(|error| LoadError::Io {
                     id,
                     error,
-                    load_path: load_path.clone(),
+                    path: load_path.clone(),
                 })?;
 
         let asset = meta.deserialize(artifact).map_err(|error| LoadError::Io {
             id,
             error: error.into(),
-            load_path: load_path.clone(),
+            path: load_path.clone(),
         })?;
 
         Ok(Some(asset))
@@ -446,8 +446,8 @@ impl AssetLoader {
         deps_loaded: &mut IndexSet<AssetId>,
     ) {
         let state = states.get(id).unwrap();
-        for dep in state.dependents() {
-            if states.is_deps_loaded(dep) && !deps_loaded.contains(dep) {
+        for dep in state.dependents().iter().chain(state.children().iter()) {
+            if states.is_fully_loaded(dep) && !deps_loaded.contains(dep) {
                 let meta = match config.registry().get(dep.ty()) {
                     Some(meta) => meta,
                     None => continue,
@@ -489,13 +489,17 @@ impl AssetRefresher {
             .save_library(library.read().await.deref())
             .await;
 
-        actions.add(BatchEvents::new(result.errors));
+        if !result.errors.is_empty() {
+            actions.add(BatchEvents::new(result.errors));
+        }
+
         if !unloads.is_empty() {
             actions.add(UnloadAssets::new(unloads));
         }
 
         if !result.imports.is_empty() {
-            actions.add(ImportAssets::new(result.imports));
+            let mut events = database.events.lock().await;
+            events.push_front(DatabaseEvent::Import(result.imports));
         }
     }
 
@@ -711,12 +715,28 @@ pub enum ImportScan {
 }
 
 bitflags::bitflags! {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    #[derive( Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
     pub struct RefreshMode: u32 {
         const SOURCE_MODIFIED = 1 << 0;
         const DEPS_MODIFIED = 1 << 2;
         const FORCE = 1 << 4;
         const FULL = Self::SOURCE_MODIFIED.bits() | Self::DEPS_MODIFIED.bits();
+    }
+}
+
+impl std::fmt::Debug for RefreshMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut debug = f.debug_set();
+        if self.contains(RefreshMode::SOURCE_MODIFIED) {
+            debug.entry(&"SOURCE_MODIFIED");
+        }
+        if self.contains(RefreshMode::DEPS_MODIFIED) {
+            debug.entry(&"DEPS_MODIFIED");
+        }
+        if self.contains(RefreshMode::FORCE) {
+            debug.entry(&"FORCE");
+        }
+        debug.finish()
     }
 }
 
@@ -762,3 +782,152 @@ impl Folder {
 
 impl Asset for Folder {}
 impl Settings for Folder {}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        asset::{Asset, AssetMetadata},
+        database::{config::AssetConfig, events::AssetEvent, state::LoadState, AssetDatabase},
+        importer::{DefaultProcessor, ImportContext, Importer},
+        io::{
+            cache::AssetCache, source::AssetSourceName, vfs::VirtualFs, AssetIoError, AssetReader,
+            FileSystem,
+        },
+        plugin::{AssetExt, AssetPlugin},
+    };
+    use ecs::{core::resource::Res, event::Events, world::action::WorldActions};
+    use futures_lite::{future::block_on, AsyncReadExt, AsyncWriteExt};
+    use game::{ExitGame, Game, GameBuilder, PostInit};
+    use uuid::Uuid;
+
+    #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+    struct PlainText(String);
+    impl Asset for PlainText {}
+
+    impl Importer for PlainText {
+        type Asset = PlainText;
+        type Settings = ();
+        type Processor = DefaultProcessor<Self, Self::Settings>;
+        type Error = AssetIoError;
+
+        async fn import(
+            _ctx: &mut ImportContext<'_, Self::Asset, Self::Settings>,
+            reader: &mut dyn AssetReader,
+        ) -> Result<Self::Asset, Self::Error> {
+            let mut data = String::new();
+            reader.read_to_string(&mut data).await?;
+            Ok(PlainText(data))
+        }
+
+        fn extensions() -> &'static [&'static str] {
+            &["txt"]
+        }
+    }
+
+    trait TestAssetGame {
+        fn set_test_cache(&mut self) -> &mut Self;
+    }
+
+    impl TestAssetGame for GameBuilder {
+        fn set_test_cache(&mut self) -> &mut Self {
+            self.resource_mut::<AssetConfig>()
+                .set_cache(AssetCache::test());
+            self
+        }
+    }
+
+    fn test_runner(mut game: Game) {
+        game.startup();
+        let instant = std::time::Instant::now();
+        const DURATION: std::time::Duration = std::time::Duration::from_secs(5);
+        while instant.elapsed() < DURATION {
+            match game.update() {
+                Some(ExitGame::Success) => {
+                    game.shutdown();
+                    return;
+                }
+                Some(ExitGame::Failure(error)) => panic!("{}", error),
+                None => (),
+            }
+        }
+
+        game.shutdown();
+        panic!("Test timed out");
+    }
+
+    async fn create_vfs() -> VirtualFs {
+        let fs = VirtualFs::new("");
+        let mut writer = fs.writer("test.txt".as_ref()).await.unwrap();
+        writer.write(b"Hello, World!").await.unwrap();
+
+        let metadata = AssetMetadata::<PlainText, ()>::new(ID, ());
+        let metadata = ron::to_string(&metadata).unwrap();
+        let mut meta_writer = fs.writer("test.txt.meta".as_ref()).await.unwrap();
+        meta_writer.write(metadata.as_bytes()).await.unwrap();
+
+        fs
+    }
+
+    const ID: Uuid = Uuid::from_u128(0);
+
+    #[test]
+    fn import_asset() {
+        let file_system = block_on(create_vfs());
+        Game::new()
+            .add_plugin(AssetPlugin)
+            .register_asset::<PlainText>()
+            .add_importer::<PlainText>()
+            .add_asset_source(AssetSourceName::Default, file_system)
+            .set_runner(test_runner)
+            .set_test_cache()
+            .observe::<AssetEvent<PlainText>, _>(
+                |events: Res<Events<AssetEvent<PlainText>>>,
+                 database: Res<AssetDatabase>,
+                 actions: &WorldActions| {
+                    let library = database.library().read_blocking();
+                    for event in events.iter() {
+                        match event {
+                            AssetEvent::Imported(id) => {
+                                let path = library.get_path(id).map(|p| p.path());
+                                assert_eq!(path.and_then(|p| p.to_str()), Some("test.txt"));
+                                actions.add(ExitGame::Success);
+                            }
+                            _ => (),
+                        }
+                    }
+                },
+            )
+            .run();
+    }
+
+    #[test]
+    fn load_asset() {
+        let file_system = block_on(create_vfs());
+        Game::new()
+            .add_plugin(AssetPlugin)
+            .register_asset::<PlainText>()
+            .add_importer::<PlainText>()
+            .add_asset_source(AssetSourceName::Default, file_system)
+            .set_runner(test_runner)
+            .set_test_cache()
+            .add_systems(PostInit, |db: Res<AssetDatabase>| db.load(["test.txt"]))
+            .observe::<AssetEvent<PlainText>, _>(
+                |events: Res<Events<AssetEvent<PlainText>>>,
+                 database: Res<AssetDatabase>,
+                 actions: &WorldActions| {
+                    let states = database.states().read_blocking();
+                    for event in events.iter() {
+                        match event {
+                            AssetEvent::Loaded(id) => {
+                                let state = states.get(id).unwrap();
+                                assert_eq!(state.state(), LoadState::Loaded);
+                                actions.add(ExitGame::Success);
+                            }
+                            _ => (),
+                        }
+                    }
+                },
+            )
+            .run();
+    }
+}

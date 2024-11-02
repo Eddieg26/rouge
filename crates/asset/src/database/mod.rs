@@ -8,7 +8,7 @@ use config::AssetConfig;
 use ecs::{core::resource::Resource, event::Event, task::TaskPool, world::action::WorldActions};
 use futures::executor::block_on;
 use state::SharedStates;
-use std::sync::Arc;
+use std::{collections::VecDeque, sync::Arc};
 use update::{AssetImporter, AssetLoader, AssetRefresher, RefreshMode};
 
 pub mod config;
@@ -43,7 +43,7 @@ pub struct AssetDatabase {
     library: SharedLibrary,
     states: SharedStates,
     state: Arc<Mutex<DatabaseState>>,
-    events: Arc<Mutex<Vec<DatabaseEvent>>>,
+    events: Arc<Mutex<VecDeque<DatabaseEvent>>>,
 }
 
 impl AssetDatabase {
@@ -89,24 +89,29 @@ impl AssetDatabase {
     pub fn refresh(&self, mode: RefreshMode) {
         self.events
             .lock_arc_blocking()
-            .push(DatabaseEvent::Refresh(mode));
+            .push_back(DatabaseEvent::Refresh(mode));
+
         self.update();
     }
 
     pub fn import(&self, paths: impl IntoIterator<Item = impl Into<AssetPath>>) {
-        let paths = paths.into_iter().map(Into::into).collect();
-        self.events
-            .lock_arc_blocking()
-            .push(DatabaseEvent::Import(paths));
-        self.update();
+        let paths = paths.into_iter().map(Into::into).collect::<Vec<_>>();
+        if !paths.is_empty() {
+            self.events
+                .lock_arc_blocking()
+                .push_back(DatabaseEvent::Import(paths));
+            self.update();
+        }
     }
 
     pub fn load(&self, paths: impl IntoIterator<Item = impl Into<AssetLoadPath>>) {
-        let paths = paths.into_iter().map(Into::into).collect();
-        self.events
-            .lock_arc_blocking()
-            .push(DatabaseEvent::Load(paths));
-        self.update();
+        let paths = paths.into_iter().map(Into::into).collect::<Vec<_>>();
+        if !paths.is_empty() {
+            self.events
+                .lock_arc_blocking()
+                .push_back(DatabaseEvent::Load(paths));
+            self.update();
+        }
     }
 
     fn update(&self) {

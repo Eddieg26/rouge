@@ -1,5 +1,5 @@
 use super::{
-    AssetFuture, AssetIo, AssetIoError, AssetReader, AssetWriter, ErasedAssetIo, PathExt,
+    AssetFuture, AssetIoError, AssetReader, AssetWriter, ErasedFileSystem, FileSystem, PathExt,
     PathStream,
 };
 use crate::asset::{Asset, AssetMetadata, Settings};
@@ -17,13 +17,24 @@ pub struct AssetPath {
     name: Option<Box<str>>,
 }
 
+impl From<&AssetPath> for PathBuf {
+    fn from(value: &AssetPath) -> Self {
+        let source = match value.source {
+            AssetSourceName::Default => "",
+            AssetSourceName::Name(ref name) => name,
+        };
+
+        let path = format!("{}://{}", source, value.path.display());
+        match &value.name {
+            Some(name) => PathBuf::from(format!("{}@{}", path, &name)),
+            None => PathBuf::from(path),
+        }
+    }
+}
+
 impl std::fmt::Display for AssetPath {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}://{}", self.source, self.path.display())?;
-        if let Some(name) = &self.name {
-            write!(f, "@{}", name)?;
-        }
-        Ok(())
+        write!(f, "{}", PathBuf::from(self).display())
     }
 }
 
@@ -166,19 +177,15 @@ impl From<&str> for AssetSourceName {
 
 #[derive(Clone)]
 pub struct AssetSource {
-    io: Arc<dyn ErasedAssetIo>,
+    io: Arc<dyn ErasedFileSystem>,
 }
 
 impl AssetSource {
-    pub fn new<I: AssetIo>(io: I) -> Self {
+    pub fn new<I: FileSystem>(io: I) -> Self {
         Self { io: Arc::new(io) }
     }
 
-    pub fn io<I: ErasedAssetIo>(&self) -> Option<&I> {
-        self.io.downcast_ref::<I>()
-    }
-
-    pub fn io_dyn(&self) -> &dyn ErasedAssetIo {
+    pub fn io(&self) -> &dyn ErasedFileSystem {
         self.io.as_ref()
     }
 
@@ -201,7 +208,7 @@ impl AssetSource {
         self.io.writer(path)
     }
 
-    pub fn rename<'a>(&'a self, from: &'a Path, to: &'a Path) -> AssetFuture<'a, ()> {
+    pub fn rename<'a>(&'a self, from: &'a Path, to: &'a Path) -> AssetFuture<()> {
         self.io.rename(from, to)
     }
 
@@ -284,7 +291,7 @@ impl AssetSources {
         }
     }
 
-    pub fn add<I: AssetIo>(&mut self, name: AssetSourceName, io: I) {
+    pub fn add<I: FileSystem>(&mut self, name: AssetSourceName, io: I) {
         self.sources.insert(name, AssetSource::new(io));
     }
 

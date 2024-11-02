@@ -1,22 +1,30 @@
-use super::{local::LocalAssets, source::AssetPath, AssetIo, AssetIoError};
-use crate::asset::{Asset, AssetId, AssetType, ErasedAsset};
+use super::{local::LocalFs, source::AssetPath, vfs::VirtualFs, AssetIoError, ErasedFileSystem};
+use crate::asset::{Asset, AssetId, AssetType, ErasedAsset, MetaMode};
 use async_std::sync::RwLock;
-use futures::{AsyncReadExt, AsyncWriteExt};
+use futures_lite::{AsyncReadExt, AsyncWriteExt};
 use hashbrown::HashMap;
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
 
-#[derive(Clone)]
 pub struct AssetCache {
-    fs: LocalAssets,
+    fs: Box<dyn ErasedFileSystem>,
+    meta_mode: MetaMode,
 }
 
 impl AssetCache {
     pub fn new(path: impl AsRef<Path>) -> Self {
         Self {
-            fs: LocalAssets::new(path),
+            fs: Box::new(LocalFs::new(path)),
+            meta_mode: MetaMode::Text,
+        }
+    }
+
+    pub fn test() -> Self {
+        Self {
+            fs: Box::new(VirtualFs::new(".cache")),
+            meta_mode: MetaMode::Binary,
         }
     }
 
@@ -42,6 +50,10 @@ impl AssetCache {
         Ok(library)
     }
 
+    pub fn root(&self) -> &Path {
+        self.fs.root()
+    }
+
     pub fn artifact_path(&self, id: &AssetId) -> PathBuf {
         self.fs.root().join("artifacts").join(id.to_string())
     }
@@ -50,12 +62,13 @@ impl AssetCache {
         self.fs.root().join("temp").join(id.to_string())
     }
 
-    pub async fn create_unprocessed_path(&self) -> Result<(), AssetIoError> {
+    pub async fn create_unprocessed_dir(&self) -> Result<(), AssetIoError> {
         self.fs.create_dir_all(&self.fs.root().join("temp")).await
     }
 
-    pub async fn remove_unprocessed_path(&self) -> Result<(), AssetIoError> {
-        self.fs.remove_dir(&self.fs.root().join("temp")).await
+    pub async fn remove_unprocessed_dir(&self) -> Result<(), AssetIoError> {
+        let path = self.fs.root().join("temp");
+        self.fs.remove_dir(&path).await
     }
 
     pub async fn load_asset<A: Asset>(&self, id: &AssetId) -> Result<LoadedAsset<A>, AssetIoError> {
@@ -121,15 +134,23 @@ impl AssetCache {
         }
 
         let mut file = self.fs.reader(&path).await?;
-        let mut data = Vec::new();
-        file.read_to_end(&mut data).await?;
-        bincode::deserialize(&data).map_err(AssetIoError::from)
+        let mut data = String::new();
+        file.read_to_string(&mut data).await?;
+        match self.meta_mode {
+            MetaMode::Text => ron::from_str(&data).map_err(AssetIoError::from),
+            MetaMode::Binary => bincode::deserialize(data.as_bytes()).map_err(AssetIoError::from),
+        }
     }
 
     pub async fn save_library(&self, map: &AssetLibrary) -> Result<(), AssetIoError> {
         let path = self.fs.root().join("assets.lib");
         let mut file = self.fs.writer(&path).await?;
-        let data = bincode::serialize(map).map_err(AssetIoError::from)?;
+        let data = match self.meta_mode {
+            MetaMode::Text => ron::to_string(map)
+                .map_err(AssetIoError::from)?
+                .into_bytes(),
+            MetaMode::Binary => bincode::serialize(map).map_err(AssetIoError::from)?,
+        };
         file.write_all(&data).await.map_err(AssetIoError::from)
     }
 }
@@ -347,6 +368,14 @@ impl AssetLibrary {
 
     pub fn iter(&self) -> impl Iterator<Item = (&AssetPath, &AssetInfo)> {
         self.assets.iter()
+    }
+
+    pub fn paths(&self) -> impl Iterator<Item = &AssetPath> {
+        self.assets.keys()
+    }
+
+    pub fn ids(&self) -> impl Iterator<Item = &AssetId> {
+        self.paths.keys()
     }
 
     pub fn clear(&mut self) {

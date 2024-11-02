@@ -59,6 +59,10 @@ impl AssetId {
 
         Self(id)
     }
+
+    pub fn value(&self) -> Uuid {
+        self.0
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
@@ -185,6 +189,12 @@ impl<A: Asset> Into<AssetId> for AssetRef<A> {
     }
 }
 
+impl<A: Asset> Into<Uuid> for AssetRef<A> {
+    fn into(self) -> Uuid {
+        self.id.value()
+    }
+}
+
 pub struct AssetMetadata<A: Asset, S: Settings> {
     id: AssetId,
     settings: S,
@@ -192,9 +202,9 @@ pub struct AssetMetadata<A: Asset, S: Settings> {
 }
 
 impl<A: Asset, S: Settings> AssetMetadata<A, S> {
-    pub fn new(id: AssetId, settings: S) -> Self {
+    pub fn new(id: Uuid, settings: S) -> Self {
         Self {
-            id,
+            id: AssetId::from::<A>(id),
             settings,
             _marker: PhantomData::default(),
         }
@@ -398,4 +408,10 @@ impl ErasedAsset {
         assert!(self.ty == AssetType::of::<A>());
         self.asset.into()
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MetaMode {
+    Text,
+    Binary,
 }

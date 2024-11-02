@@ -1,17 +1,18 @@
-use super::events::{AssetDepsLoaded, AssetFailed, AssetImported, AssetLoaded, AssetUnloaded};
+use super::events::{
+    AssetDepsLoaded, AssetDepsUnloaded, AssetFailed, AssetImported, AssetLoaded, AssetUnloaded,
+};
 use crate::{
     asset::{Asset, AssetId, AssetMetadata, AssetType, ErasedAsset},
     importer::{ImportContext, ImportError, Importer, LoadError, ProcessContext, Processor},
     io::{
         cache::{Artifact, ArtifactMeta, AssetCache, ErasedLoadedAsset, ProcessedInfo},
-        embedded::EmbeddedAssets,
+        embedded::EmbeddedFs,
         source::{AssetPath, AssetSource, AssetSourceName, AssetSources},
-        AssetFuture, AssetIo, AssetIoError,
+        AssetFuture, AssetIoError, FileSystem,
     },
 };
 use ecs::{core::resource::Resource, world::action::WorldActionFn};
 use hashbrown::HashMap;
-use std::path::Path;
 
 pub struct AssetConfig {
     registry: AssetRegistry,
@@ -52,16 +53,17 @@ impl AssetConfig {
         self.registry.add_importer::<I>();
     }
 
-    pub fn add_source<I: AssetIo>(&mut self, name: impl Into<AssetSourceName>, io: I) {
+    pub fn add_source<I: FileSystem>(&mut self, name: impl Into<AssetSourceName>, io: I) {
         self.sources.add(name.into(), io);
     }
 
-    pub fn embed_assets(&mut self, name: impl Into<AssetSourceName>, assets: EmbeddedAssets) {
+    pub fn embed_assets(&mut self, name: impl Into<AssetSourceName>, assets: EmbeddedFs) {
         self.sources.add(name.into(), assets);
     }
 
-    pub fn set_cache(&mut self, path: impl AsRef<Path>) {
-        self.cache = AssetCache::new(path);
+    #[allow(dead_code)]
+    pub(crate) fn set_cache(&mut self, cache: AssetCache) {
+        self.cache = cache;
     }
 }
 
@@ -85,6 +87,7 @@ pub struct AssetMeta {
     imported: fn(AssetPath, AssetId) -> WorldActionFn,
     loaded: fn(AssetId, ErasedAsset, Option<Vec<AssetId>>) -> WorldActionFn,
     deps_loaded: fn(AssetId) -> WorldActionFn,
+    deps_unloaded: fn(AssetId) -> WorldActionFn,
     unloaded: fn(AssetId) -> WorldActionFn,
     failed: fn(AssetId, LoadError) -> WorldActionFn,
 }
@@ -116,6 +119,7 @@ impl AssetMeta {
                 }
             },
             deps_loaded: |id| AssetDepsLoaded::<A>::new(id).into(),
+            deps_unloaded: |id| AssetDepsUnloaded::<A>::new(id).into(),
             unloaded: |id| AssetUnloaded::<A>::new(id).into(),
             failed: |id, error| AssetFailed::<A>::new(id, error).into(),
         }
@@ -155,7 +159,7 @@ impl AssetMeta {
                         .read_metadata_bytes(path)
                         .await
                         .map_err(|e| ImportError::import(asset_path.clone(), e))?;
-                    
+
                     ArtifactMeta::calculate_checksum(&asset, &metadata)
                 };
 
@@ -192,7 +196,7 @@ impl AssetMeta {
                 {
                     Ok(metadata) => metadata,
                     Err(error) => match artifact.meta.parent.is_some() {
-                        true => AssetMetadata::new(artifact.meta.id, P::Settings::default()),
+                        true => AssetMetadata::new(artifact.id().value(), P::Settings::default()),
                         false => return Err(error),
                     },
                 };
@@ -251,6 +255,10 @@ impl AssetMeta {
 
     pub fn deps_loaded(&self, id: AssetId) -> WorldActionFn {
         (self.deps_loaded)(id)
+    }
+
+    pub fn deps_unloaded(&self, id: AssetId) -> WorldActionFn {
+        (self.deps_unloaded)(id)
     }
 
     pub fn unloaded(&self, id: AssetId) -> WorldActionFn {

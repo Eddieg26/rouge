@@ -1,4 +1,4 @@
-use super::{AssetIo, AssetIoError, AssetReader, AssetWriter};
+use super::{AssetIoError, AssetReader, AssetWriter, FileSystem, PathExt};
 use async_std::sync::RwLock;
 use futures::{executor::block_on, AsyncRead, AsyncWrite};
 use futures_lite::StreamExt;
@@ -20,6 +20,24 @@ pub struct VirtualEntry {
     ty: VirtualEntryType,
     data: Arc<Vec<u8>>,
     created: SystemTime,
+}
+
+impl VirtualEntry {
+    fn file(data: Vec<u8>, created: Option<SystemTime>) -> Self {
+        Self {
+            ty: VirtualEntryType::File,
+            data: Arc::new(data),
+            created: created.unwrap_or(SystemTime::now()),
+        }
+    }
+
+    fn directory() -> Self {
+        Self {
+            ty: VirtualEntryType::Directory,
+            data: Arc::default(),
+            created: SystemTime::now(),
+        }
+    }
 }
 
 pub struct FileReader {
@@ -97,7 +115,7 @@ impl AssetReader for FileReader {
 pub struct FileWriter {
     data: Cursor<Vec<u8>>,
     path: PathBuf,
-    fs: VfsHandle,
+    fs: Handle,
 }
 
 impl Write for FileWriter {
@@ -146,46 +164,42 @@ impl AssetWriter for FileWriter {}
 
 impl Drop for FileWriter {
     fn drop(&mut self) {
-        let data = std::mem::take(self.data.get_mut());
         let mut fs = self.fs.write_arc_blocking();
-        let prev = fs.entries.get(&self.path);
+        let prev = fs.entries.remove(&self.path);
+        let data = std::mem::take(self.data.get_mut());
 
-        let file = VirtualEntry {
-            ty: VirtualEntryType::File,
-            data: Arc::new(data),
-            created: prev.map(|file| file.created).unwrap_or(SystemTime::now()),
-        };
-
+        let file = VirtualEntry::file(data, prev.map(|p| p.created));
         fs.entries.insert(self.path.clone(), file);
     }
 }
-
-pub type VfsHandle = Arc<RwLock<VirtualAssets>>;
 
 #[derive(Default)]
 pub struct VirtualAssets {
     entries: HashMap<PathBuf, VirtualEntry>,
 }
 
+type Handle = Arc<RwLock<VirtualAssets>>;
+
+#[derive(Clone)]
 pub struct VirtualFs {
-    fs: VfsHandle,
+    root: Box<Path>,
+    fs: Handle,
 }
 
 impl VirtualFs {
-    pub fn new() -> Self {
+    pub fn new(root: impl AsRef<Path>) -> Self {
         let mut fs = VirtualAssets::default();
-        fs.entries.insert(
-            PathBuf::from(""),
-            VirtualEntry {
-                ty: VirtualEntryType::Directory,
-                data: Arc::default(),
-                created: SystemTime::now(),
-            },
-        );
+        fs.entries
+            .insert(root.as_ref().to_path_buf(), VirtualEntry::directory());
 
         Self {
+            root: root.as_ref().to_path_buf().into_boxed_path(),
             fs: Arc::new(RwLock::new(fs)),
         }
+    }
+
+    pub fn root(&self) -> &Path {
+        &self.root
     }
 
     pub fn print(&self, path: &Path, depth: usize, f: &mut std::fmt::Formatter<'_>) {
@@ -213,22 +227,23 @@ impl VirtualFs {
 
 impl std::fmt::Display for VirtualFs {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.print(Path::new(""), 0, f);
+        self.print(&self.root, 0, f);
         Ok(())
     }
 }
 
-impl AssetIo for VirtualFs {
+impl FileSystem for VirtualFs {
     type Reader = FileReader;
     type Writer = FileWriter;
 
-    async fn reader<'a>(
-        &'a self,
-        path: &'a std::path::Path,
-    ) -> Result<Self::Reader, super::AssetIoError> {
-        let path = path.strip_prefix("/").unwrap_or(path);
+    fn root(&self) -> &Path {
+        &self.root
+    }
+
+    async fn reader(&self, path: &std::path::Path) -> Result<Self::Reader, super::AssetIoError> {
+        let path = path.with_prefix(&self.root);
         let fs = self.fs.read().await;
-        match fs.entries.get(path) {
+        match fs.entries.get(path.as_ref()) {
             Some(entry) => match entry.ty {
                 VirtualEntryType::File => {
                     let reader = FileReader {
@@ -245,13 +260,13 @@ impl AssetIo for VirtualFs {
         }
     }
 
-    async fn read_dir<'a>(
-        &'a self,
-        path: &'a std::path::Path,
+    async fn read_dir(
+        &self,
+        path: &std::path::Path,
     ) -> Result<Box<dyn super::PathStream>, super::AssetIoError> {
-        let path = path.strip_prefix("/").unwrap_or(path);
+        let path = path.with_prefix(&self.root);
         let fs = self.fs.read().await;
-        match fs.entries.get(path) {
+        match fs.entries.get(path.as_ref()) {
             Some(entry) => match entry.ty {
                 VirtualEntryType::File => Err(AssetIoError::from(std::io::ErrorKind::Unsupported)),
                 VirtualEntryType::Directory => {
@@ -263,7 +278,7 @@ impl AssetIo for VirtualFs {
                             continue;
                         }
 
-                        if prefix.len() == 1 && entry.parent() == Some(path) {
+                        if prefix.len() == 1 && entry.parent() == Some(path.as_ref()) {
                             paths.push(entry.to_path_buf());
                             continue;
                         }
@@ -284,12 +299,12 @@ impl AssetIo for VirtualFs {
         }
     }
 
-    async fn is_dir<'a>(&'a self, path: &'a std::path::Path) -> Result<bool, super::AssetIoError> {
-        let path = path.strip_prefix("/").unwrap_or(path);
+    async fn is_dir(&self, path: &std::path::Path) -> Result<bool, super::AssetIoError> {
+        let path = path.with_prefix(&self.root);
         let fs = self.fs.read().await;
         match fs
             .entries
-            .get(path)
+            .get(path.as_ref())
             .map(|e| e.ty == VirtualEntryType::Directory)
         {
             Some(value) => Ok(value),
@@ -297,44 +312,38 @@ impl AssetIo for VirtualFs {
         }
     }
 
-    async fn writer<'a>(
-        &'a self,
-        path: &'a std::path::Path,
-    ) -> Result<Self::Writer, super::AssetIoError> {
-        let path = path.strip_prefix("/").unwrap_or(path);
+    async fn writer(&self, path: &std::path::Path) -> Result<Self::Writer, super::AssetIoError> {
+        let path = path.with_prefix(&self.root);
         let fs = self.fs.read().await;
-        match fs.entries.get(path) {
+        match fs.entries.get(path.as_ref()) {
             Some(entry) => match entry.ty {
                 VirtualEntryType::File => {
-                    let reader = FileWriter {
+                    let writer = FileWriter {
                         data: Cursor::new(vec![]),
                         path: path.to_path_buf(),
                         fs: self.fs.clone(),
                     };
-                    Ok(reader)
+                    Ok(writer)
                 }
                 VirtualEntryType::Directory => {
                     Err(AssetIoError::from(std::io::ErrorKind::Unsupported))
                 }
             },
             None => {
-                let reader = FileWriter {
+                let writer = FileWriter {
                     data: Cursor::new(vec![]),
                     path: path.to_path_buf(),
                     fs: self.fs.clone(),
                 };
-                Ok(reader)
+                Ok(writer)
             }
         }
     }
 
-    async fn create_dir<'a>(
-        &'a self,
-        path: &'a std::path::Path,
-    ) -> Result<(), super::AssetIoError> {
-        let path = path.strip_prefix("/").unwrap_or(path);
+    async fn create_dir(&self, path: &std::path::Path) -> Result<(), super::AssetIoError> {
+        let path = path.with_prefix(&self.root);
         let mut fs = self.fs.write().await;
-        match fs.entries.get(path) {
+        match fs.entries.get(path.as_ref()) {
             Some(entry) => match entry.ty {
                 VirtualEntryType::File => {
                     Err(AssetIoError::from(std::io::ErrorKind::AlreadyExists))
@@ -348,12 +357,7 @@ impl AssetIo for VirtualFs {
                     }
                 }
 
-                let dir = VirtualEntry {
-                    ty: VirtualEntryType::Directory,
-                    data: Arc::default(),
-                    created: SystemTime::now(),
-                };
-
+                let dir = VirtualEntry::directory();
                 fs.entries.insert(path.to_path_buf(), dir);
 
                 Ok(())
@@ -361,50 +365,42 @@ impl AssetIo for VirtualFs {
         }
     }
 
-    async fn create_dir_all<'a>(
-        &'a self,
-        path: &'a std::path::Path,
-    ) -> Result<(), super::AssetIoError> {
-        let path = path.strip_prefix("/").unwrap_or(path);
+    async fn create_dir_all(&self, path: &std::path::Path) -> Result<(), super::AssetIoError> {
+        let path = path.with_prefix(&self.root);
         let mut fs = self.fs.write().await;
         let mut current = path.to_path_buf();
         while let Some(parent) = current.parent() {
-            if let Some(ty) = fs.entries.get(parent).and_then(|e| Some(e.ty)) {
-                match ty {
-                    VirtualEntryType::File => {
-                        return Err(AssetIoError::from(std::io::Error::new(
-                            std::io::ErrorKind::Unsupported,
-                            format!("Not a directory: {:?}", parent),
-                        )))
-                    }
-                    VirtualEntryType::Directory => continue,
+            match fs.entries.get(parent).and_then(|e| Some(e.ty)) {
+                Some(VirtualEntryType::File) => {
+                    return Err(AssetIoError::from(std::io::Error::new(
+                        std::io::ErrorKind::Unsupported,
+                        format!("Not a directory: {:?}", parent),
+                    )))
                 }
-            } else {
-                let dir = VirtualEntry {
-                    ty: VirtualEntryType::Directory,
-                    data: Arc::default(),
-                    created: SystemTime::now(),
-                };
-
-                fs.entries.insert(parent.to_path_buf(), dir);
+                Some(VirtualEntryType::Directory) => current = parent.to_path_buf(),
+                None => {
+                    let dir = VirtualEntry::directory();
+                    fs.entries.insert(parent.to_path_buf(), dir);
+                    current = parent.to_path_buf();
+                }
             }
-
-            current = parent.to_path_buf();
         }
 
-        self.create_dir(path).await
+        std::mem::drop(fs);
+
+        self.create_dir(path.as_ref()).await
     }
 
-    async fn rename<'a>(
-        &'a self,
-        from: &'a std::path::Path,
-        to: &'a std::path::Path,
+    async fn rename(
+        &self,
+        from: &std::path::Path,
+        to: &std::path::Path,
     ) -> Result<(), super::AssetIoError> {
-        let from = from.strip_prefix("/").unwrap_or(from);
-        let to = to.strip_prefix("/").unwrap_or(to);
+        let from = from.with_prefix(&self.root);
+        let to = to.with_prefix(&self.root);
         let mut fs = self.fs.write().await;
-        match fs.entries.remove(from) {
-            Some(entry) => match fs.entries.contains_key(to) {
+        match fs.entries.remove(from.as_ref()) {
+            Some(entry) => match fs.entries.contains_key(to.as_ref()) {
                 true => return Err(AssetIoError::from(std::io::ErrorKind::AlreadyExists)),
                 false => {
                     fs.entries.insert(to.to_path_buf(), entry);
@@ -415,32 +411,31 @@ impl AssetIo for VirtualFs {
         }
     }
 
-    async fn remove<'a>(&'a self, path: &'a std::path::Path) -> Result<(), super::AssetIoError> {
-        let path = path.strip_prefix("/").unwrap_or(path);
+    async fn remove(&self, path: &std::path::Path) -> Result<(), super::AssetIoError> {
+        let path = path.with_prefix(&self.root);
         let mut fs = self.fs.write().await;
-        match fs.entries.remove(path) {
+        match fs.entries.remove(path.as_ref()) {
             Some(_) => Ok(()),
             None => Err(AssetIoError::NotFound(path.to_path_buf())),
         }
     }
 
-    async fn remove_dir<'a>(
-        &'a self,
-        path: &'a std::path::Path,
-    ) -> Result<(), super::AssetIoError> {
-        let path = path.strip_prefix("/").unwrap_or(path);
+    async fn remove_dir(&self, path: &std::path::Path) -> Result<(), super::AssetIoError> {
+        let path = path.with_prefix(&self.root);
         let mut fs = self.fs.write().await;
-        match fs.entries.get(path).map(|e| e.ty) {
+        match fs.entries.get(path.as_ref()).map(|e| e.ty) {
             Some(VirtualEntryType::File) => Err(AssetIoError::from(std::io::Error::new(
                 std::io::ErrorKind::Unsupported,
                 format!("Not a directory: {:?}", path),
             ))),
-            Some(VirtualEntryType::Directory) => Ok(fs.entries.remove(path).map(|_| ()).unwrap()),
+            Some(VirtualEntryType::Directory) => {
+                Ok(fs.entries.remove(path.as_ref()).map(|_| ()).unwrap())
+            }
             None => Err(AssetIoError::NotFound(path.to_path_buf())),
         }
     }
 
-    async fn exists<'a>(&'a self, path: &'a std::path::Path) -> Result<bool, super::AssetIoError> {
+    async fn exists(&self, path: &std::path::Path) -> Result<bool, super::AssetIoError> {
         let fs = self.fs.read().await;
         Ok(fs.entries.contains_key(path))
     }

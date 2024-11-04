@@ -2,14 +2,14 @@ use crate::{
     asset::{Asset, AssetType, Assets},
     database::{
         config::AssetConfig,
-        events::{on_asset_event, on_assets_unloaded, AssetEvent, NotifyDepsUnloaded},
+        events::{on_asset_event, on_update_assets_modified, AssetEvent, AssetsModified},
         update::RefreshMode,
         AssetDatabase, DatabaseInitError,
     },
     importer::{ImportError, Importer, LoadError, Processor},
     io::{embedded::EmbeddedFs, local::LocalFs, source::AssetSourceName, FileSystem},
 };
-use ecs::{core::resource::ResMut, event::Events};
+use ecs::{core::resource::ResMut, event::Events, world::builtin::events::ResourceUpdate};
 use futures::executor::block_on;
 use game::{GameBuilder, Init, Plugin};
 use std::path::PathBuf;
@@ -23,12 +23,13 @@ impl Plugin for AssetPlugin {
 
     fn start(&mut self, game: &mut GameBuilder) {
         game.add_resource(AssetConfig::new());
+        game.add_resource(AssetsModified::new());
         game.register_event::<ImportError>();
         game.register_event::<LoadError>();
         game.register_event::<DatabaseInitError>();
-        game.register_event::<NotifyDepsUnloaded>();
-        game.observe::<NotifyDepsUnloaded, _>(on_assets_unloaded);
+        game.register_event::<ResourceUpdate<AssetsModified>>();
         game.add_systems(Init, init_asset_database);
+        game.observe::<ResourceUpdate<AssetsModified>, _>(on_update_assets_modified);
     }
 
     fn finish(&mut self, game: &mut GameBuilder) {

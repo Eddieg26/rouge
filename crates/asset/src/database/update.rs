@@ -1,7 +1,7 @@
 use super::{
     config::AssetConfig,
     events::{ReloadAssets, UnloadAssets},
-    state::{AssetStates, LoadState, SharedStates},
+    state::{LoadState, SharedStates},
     AssetDatabase, DatabaseEvent,
 };
 use crate::{
@@ -14,10 +14,7 @@ use crate::{
         source::{AssetPath, AssetSource},
     },
 };
-use ecs::{
-    core::IndexSet,
-    world::action::{BatchEvents, WorldActions},
-};
+use ecs::{core::IndexSet, world::action::BatchEvents};
 use futures::future::join_all;
 use futures_lite::StreamExt;
 use hashbrown::{HashMap, HashSet};
@@ -321,12 +318,25 @@ impl AssetLoader {
                             let id = &asset.meta.id;
                             let deps = asset.meta.dependencies;
                             let parent = asset.meta.parent;
-                            states.write().await.loaded(*id, Some(deps), parent);
+
+                            if let Some(meta) = config.registry().get(id.ty()) {
+                                actions.add(meta.added(*id, asset.asset, None));
+                            }
+
+                            for id in states.write().await.loaded(*id, Some(deps), parent) {
+                                let meta = match config.registry().get(id.ty()) {
+                                    Some(meta) => meta,
+                                    None => continue,
+                                };
+
+                                actions.add(meta.loaded(id));
+                                deps_loaded.insert(id);
+                            }
 
                             let states = states.read().await;
                             let state = states.get(id).unwrap();
                             for dep in state.dependencies() {
-                                if states.load_state(*dep).is_unloaded_or_failed() {
+                                if states.get_load_state(*dep).is_unloaded_or_failed() {
                                     dependencies.insert(AssetLoadPath::Id(*dep));
                                 }
                             }
@@ -334,54 +344,38 @@ impl AssetLoader {
                             if let Some(parent) = asset
                                 .meta
                                 .parent
-                                .filter(|p| states.load_state(*p).is_unloaded_or_failed())
+                                .filter(|p| states.get_load_state(*p).is_unloaded_or_failed())
                             {
                                 dependencies.insert(AssetLoadPath::Id(parent));
                             }
 
-                            if let Some(meta) = config.registry().get(id.ty()) {
-                                actions.add(meta.loaded(*id, asset.asset, None));
-                            }
-
-                            self.finish_loading(id, config, &states, actions, &mut deps_loaded);
+                            deps_loaded.insert(*id);
                         }
                         Err(error) => {
                             match error {
-                                LoadError::Io {
-                                    id,
-                                    error,
-                                    path: load_path,
-                                } => {
-                                    states.write().await.failed(id);
-                                    let states = states.read().await;
-                                    self.finish_loading(
-                                        &id,
-                                        config,
-                                        &states,
-                                        actions,
-                                        &mut deps_loaded,
-                                    );
+                                LoadError::Io { id, error, path } => {
+                                    for id in states.write().await.failed(id) {
+                                        let meta = match config.registry().get(id.ty()) {
+                                            Some(meta) => meta,
+                                            None => continue,
+                                        };
+
+                                        actions.add(meta.loaded(id));
+                                        deps_loaded.insert(id);
+                                    }
 
                                     if let Some(meta) = config.registry().get(id.ty()) {
-                                        let error = LoadError::Io {
-                                            id,
-                                            error,
-                                            path: load_path,
-                                        };
+                                        let error = LoadError::Io { id, error, path };
                                         actions.add(meta.failed(id, error));
                                     }
+
+                                    deps_loaded.insert(id);
                                 }
                                 LoadError::NotFound { path } => {
-                                    errors.push(LoadError::NotFound { path });
+                                    errors.push(LoadError::NotFound { path })
                                 }
-                                LoadError::NotRegistered {
-                                    ty,
-                                    path: load_path,
-                                } => {
-                                    errors.push(LoadError::NotRegistered {
-                                        ty,
-                                        path: load_path,
-                                    });
+                                LoadError::NotRegistered { ty, path } => {
+                                    errors.push(LoadError::NotRegistered { ty, path })
                                 }
                             };
                         }
@@ -411,7 +405,7 @@ impl AssetLoader {
             },
         };
 
-        if states.read().await.load_state(id) == LoadState::Loading {
+        if states.read().await.get_load_state(id) == LoadState::Loading {
             return Ok(None);
         } else {
             states.write().await.loading(id);
@@ -446,28 +440,6 @@ impl AssetLoader {
         })?;
 
         Ok(Some(asset))
-    }
-
-    fn finish_loading(
-        &self,
-        id: &AssetId,
-        config: &AssetConfig,
-        states: &AssetStates,
-        actions: &WorldActions,
-        deps_loaded: &mut IndexSet<AssetId>,
-    ) {
-        let state = states.get(id).unwrap();
-        for dep in state.dependents().iter().chain(state.children().iter()) {
-            if states.is_fully_loaded(dep) && !deps_loaded.contains(dep) {
-                let meta = match config.registry().get(dep.ty()) {
-                    Some(meta) => meta,
-                    None => continue,
-                };
-
-                actions.add(meta.deps_loaded(*dep));
-                deps_loaded.insert(*dep);
-            }
-        }
     }
 }
 
@@ -898,7 +870,7 @@ mod tests {
                     let library = database.library().read_blocking();
                     for event in events.iter() {
                         match event {
-                            AssetEvent::Imported(id) => {
+                            AssetEvent::Imported { id } => {
                                 let path = library.get_path(id).map(|p| p.path());
                                 assert_eq!(path.and_then(|p| p.to_str()), Some("test.txt"));
                                 actions.add(ExitGame::Success);
@@ -929,7 +901,7 @@ mod tests {
                     let states = database.states().read_blocking();
                     for event in events.iter() {
                         match event {
-                            AssetEvent::Loaded(id) => {
+                            AssetEvent::Added { id } => {
                                 let state = states.get(id).unwrap();
                                 assert_eq!(state.state(), LoadState::Loaded);
                                 actions.add(ExitGame::Success);

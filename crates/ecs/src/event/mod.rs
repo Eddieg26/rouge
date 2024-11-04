@@ -8,7 +8,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-pub trait Event: Send + Sync + 'static {}
+pub trait Event: Send +  'static {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct EventId(Type);
@@ -52,6 +52,10 @@ impl<E: Event> Events<E> {
         self.invoked.lock().unwrap().insert(EventId::of::<E>());
     }
 
+    pub fn get(&self, index: usize) -> Option<&E> {
+        self.events.get(index)
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = &E> {
         self.events.iter()
     }
@@ -66,6 +70,14 @@ impl<E: Event> Events<E> {
 
     pub fn clear(&mut self) {
         self.events.clear();
+    }
+}
+
+impl<E: Event> std::ops::Index<usize> for Events<E> {
+    type Output = E;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        self.get(index).unwrap()
     }
 }
 

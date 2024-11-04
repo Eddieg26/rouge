@@ -1,5 +1,5 @@
 use super::events::{
-    AssetDepsLoaded, AssetDepsUnloaded, AssetFailed, AssetImported, AssetLoaded, AssetUnloaded,
+    AssetAdded, AssetFailed, AssetImported, AssetLoaded, AssetModified, AssetUnloaded,
 };
 use crate::{
     asset::{Asset, AssetId, AssetMetadata, AssetType, ErasedAsset},
@@ -85,10 +85,10 @@ pub struct AssetMeta {
     serialize: fn(&ErasedAsset) -> Result<Vec<u8>, bincode::Error>,
     deserialize: fn(Artifact) -> Result<ErasedLoadedAsset, bincode::Error>,
     imported: fn(AssetPath, AssetId) -> WorldActionFn,
-    loaded: fn(AssetId, ErasedAsset, Option<Vec<AssetId>>) -> WorldActionFn,
-    deps_loaded: fn(AssetId) -> WorldActionFn,
-    deps_unloaded: fn(AssetId) -> WorldActionFn,
+    added: fn(AssetId, ErasedAsset, Option<Vec<AssetId>>) -> WorldActionFn,
+    loaded: fn(AssetId) -> WorldActionFn,
     unloaded: fn(AssetId) -> WorldActionFn,
+    modified: fn(AssetId) -> WorldActionFn,
     failed: fn(AssetId, LoadError) -> WorldActionFn,
 }
 
@@ -110,16 +110,15 @@ impl AssetMeta {
                 Ok(ErasedLoadedAsset::new(asset, artifact.meta))
             },
             imported: |path, id| AssetImported::<A>::new(path, id).into(),
-            loaded: |id, asset, deps| {
-                let loaded = AssetLoaded::<A>::new(id, asset.take());
-                if let Some(deps) = deps {
-                    loaded.with_dependencies(deps).into()
-                } else {
-                    loaded.into()
+            added: |id, asset, deps| {
+                let event = AssetAdded::<A>::new(id, asset.take());
+                match deps {
+                    Some(deps) => event.with_dependencies(deps).into(),
+                    None => event.into(),
                 }
             },
-            deps_loaded: |id| AssetDepsLoaded::<A>::new(id).into(),
-            deps_unloaded: |id| AssetDepsUnloaded::<A>::new(id).into(),
+            loaded: |id| AssetLoaded::<A>::new(id).into(),
+            modified: |id| AssetModified::<A>::new(id).into(),
             unloaded: |id| AssetUnloaded::<A>::new(id).into(),
             failed: |id, error| AssetFailed::<A>::new(id, error).into(),
         }
@@ -244,21 +243,21 @@ impl AssetMeta {
         (self.imported)(path, id)
     }
 
-    pub fn loaded(
+    pub fn added(
         &self,
         id: AssetId,
         asset: ErasedAsset,
         deps: Option<Vec<AssetId>>,
     ) -> WorldActionFn {
-        (self.loaded)(id, asset, deps)
+        (self.added)(id, asset, deps)
     }
 
-    pub fn deps_loaded(&self, id: AssetId) -> WorldActionFn {
-        (self.deps_loaded)(id)
+    pub fn loaded(&self, id: AssetId) -> WorldActionFn {
+        (self.loaded)(id)
     }
 
-    pub fn deps_unloaded(&self, id: AssetId) -> WorldActionFn {
-        (self.deps_unloaded)(id)
+    pub fn modified(&self, id: AssetId) -> WorldActionFn {
+        (self.modified)(id)
     }
 
     pub fn unloaded(&self, id: AssetId) -> WorldActionFn {

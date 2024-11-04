@@ -7,9 +7,8 @@ edition = "2021"
 crc32fast = { workspace = true }
 downcast-rs = { workspace = true }
 hashbrown = { workspace = true }
-indexmap = { workspace = true }
-rayon = { workspace = true }
 threadpool = { workspace = true }
 futures = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 uuid = { workspace = true, features = ["v4", "serde"] }
+indexmap = "2.6.0"

@@ -1,0 +1,17 @@
+[package]
+name = "graphics"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ecs = { path = "../ecs" }
+game = { path = "../game" }
+asset = { path = "../asset" }
+window = { path = "../window" }
+glam = { workspace = true, features = ["serde", "bytemuck"] }
+bytemuck = { workspace = true }
+serde = { workspace = true }
+uuid = { workspace = true }
+crc32fast = { workspace = true }
+downcast-rs = { workspace = true }
+wgpu = "23.0.0"

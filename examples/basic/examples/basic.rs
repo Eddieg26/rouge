@@ -104,8 +104,8 @@ fn main() {
         .observe::<AssetEvent<PlainText>, _>(|events: Res<Events<AssetEvent<PlainText>>>| {
             for event in events.iter() {
                 match event {
-                    AssetEvent::Imported(id) => println!("Imported: {:?}", id),
-                    AssetEvent::Loaded(id) => println!("Loaded: {:?}", id),
+                    AssetEvent::Imported { id } => println!("Imported: {:?}", id),
+                    AssetEvent::Added { id } => println!("Loaded: {:?}", id),
                     _ => (),
                 }
             }

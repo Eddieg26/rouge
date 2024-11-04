@@ -1,29 +1,34 @@
-use super::{
-    state::{AssetState, AssetStates},
-    AssetDatabase,
-};
+use super::{state::AssetState, AssetDatabase};
 use crate::{
     asset::{Asset, AssetId, Assets},
     importer::LoadError,
     io::{cache::AssetLoadPath, source::AssetPath},
 };
 use ecs::{
-    core::resource::{Res, ResMut},
+    core::resource::{Res, ResMut, Resource},
     event::{Event, Events},
-    world::action::{WorldAction, WorldActions},
+    world::{action::WorldAction, builtin::events::ResourceUpdate},
 };
 use hashbrown::HashSet;
 
 pub enum AssetEvent<A: Asset> {
-    Imported(AssetId),
-    Loaded(AssetId),
+    Imported {
+        id: AssetId,
+    },
+    Added {
+        id: AssetId,
+    },
     Unloaded {
         id: AssetId,
         asset: Option<A>,
         state: AssetState,
     },
-    DepsLoaded(AssetId),
-    DepsUnloaded(AssetId),
+    Loaded {
+        id: AssetId,
+    },
+    Modified {
+        id: AssetId,
+    },
     Failed {
         id: AssetId,
         error: LoadError,
@@ -33,97 +38,42 @@ pub enum AssetEvent<A: Asset> {
 impl<A: Asset> Event for AssetEvent<A> {}
 
 pub(crate) fn on_asset_event<A: Asset>(
-    events: Res<Events<AssetEvent<A>>>,
     database: Res<AssetDatabase>,
-    mut deps_unloaded: ResMut<Events<NotifyDepsUnloaded>>,
-    actions: &WorldActions,
+    events: Res<Events<AssetEvent<A>>>,
+    mut modified_list: ResMut<AssetsModified>,
+    mut modified_events: ResMut<Events<ResourceUpdate<AssetsModified>>>,
 ) {
-    let mut unloaded = HashSet::new();
     for event in events.iter() {
-        match event {
-            AssetEvent::Unloaded { state, .. } => {
-                let states = database.states.read_arc_blocking();
-                on_asset_unloaded(state, &states, &mut unloaded);
-                for child in state.children() {
-                    let meta = match database.config().registry().get(child.ty()) {
-                        Some(meta) => meta,
-                        None => continue,
-                    };
+        let id = match event {
+            AssetEvent::Modified { id } => id,
+            AssetEvent::Unloaded { id, .. } => id,
+            _ => continue,
+        };
 
-                    actions.add(meta.unloaded(*child));
-                }
+        let states = database.states.read_arc_blocking();
+        if let Some(state) = states.get(id) {
+            for dep in state.dependents() {
+                modified_list.add(*dep);
             }
-            _ => {}
         }
     }
 
-    if !unloaded.is_empty() {
-        deps_unloaded.add(NotifyDepsUnloaded::new(unloaded));
-    }
+    modified_events.add(ResourceUpdate::new());
 }
 
-fn on_asset_unloaded(
-    state: &AssetState,
-    states: &AssetStates,
-    deps_unloaded: &mut HashSet<AssetId>,
+pub(crate) fn on_update_assets_modified(
+    database: Res<AssetDatabase>,
+    mut modified_list: ResMut<AssetsModified>,
 ) {
-    for dependent in state.dependents() {
-        let dep_state = match states.get(dependent) {
-            Some(state) => state,
+    for id in modified_list.drain() {
+        let meta = match database.config().registry().get(id.ty()) {
+            Some(meta) => meta,
             None => continue,
         };
 
-        deps_unloaded.insert(*dependent);
-        on_asset_unloaded(dep_state, states, deps_unloaded);
+        meta.modified(id);
     }
 }
-
-pub(crate) fn on_assets_unloaded(
-    mut unloaded: ResMut<Events<NotifyDepsUnloaded>>,
-    database: Res<AssetDatabase>,
-    actions: &WorldActions,
-) {
-    let mut tracked = HashSet::new();
-    let registry = database.config().registry();
-    for unloaded in unloaded.take() {
-        for id in unloaded.ids {
-            if tracked.insert(id) {
-                let meta = match registry.get(id.ty()) {
-                    Some(meta) => meta,
-                    None => continue,
-                };
-
-                actions.add(meta.deps_unloaded(id));
-            }
-        }
-    }
-}
-
-pub struct NotifyDepsUnloaded {
-    ids: HashSet<AssetId>,
-}
-
-impl NotifyDepsUnloaded {
-    pub fn new(ids: HashSet<AssetId>) -> Self {
-        Self { ids }
-    }
-}
-
-impl std::ops::Deref for NotifyDepsUnloaded {
-    type Target = HashSet<AssetId>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.ids
-    }
-}
-
-impl std::ops::DerefMut for NotifyDepsUnloaded {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.ids
-    }
-}
-
-impl Event for NotifyDepsUnloaded {}
 
 pub struct AssetImported<A: Asset> {
     pub path: AssetPath,
@@ -145,19 +95,19 @@ impl<A: Asset> WorldAction for AssetImported<A> {
     fn execute(self, world: &mut ecs::world::World) -> Option<()> {
         world
             .resource_mut::<Events<AssetEvent<A>>>()
-            .add(AssetEvent::Imported(self.id));
+            .add(AssetEvent::Imported { id: self.id });
         Some(())
     }
 }
 
-pub struct AssetLoaded<A: Asset> {
+pub struct AssetAdded<A: Asset> {
     id: AssetId,
     asset: A,
     dependencies: Option<Vec<AssetId>>,
     parent: Option<AssetId>,
 }
 
-impl<A: Asset> AssetLoaded<A> {
+impl<A: Asset> AssetAdded<A> {
     pub fn new(id: AssetId, asset: A) -> Self {
         Self {
             id,
@@ -190,25 +140,26 @@ impl<A: Asset> AssetLoaded<A> {
     }
 }
 
-impl<A: Asset> WorldAction for AssetLoaded<A> {
+impl<A: Asset> WorldAction for AssetAdded<A> {
     fn execute(self, world: &mut ecs::world::World) -> Option<()> {
         world.resource_mut::<Assets<A>>().add(self.id, self.asset);
         world
             .resource_mut::<Events<AssetEvent<A>>>()
-            .add(AssetEvent::Loaded(self.id));
+            .add(AssetEvent::Added { id: self.id });
 
         let database = world.resource::<AssetDatabase>();
         let mut states = database.states.write_arc_blocking();
-        Some(states.loaded(self.id, self.dependencies, self.parent))
+        states.loaded(self.id, self.dependencies, self.parent);
+        Some(())
     }
 }
 
-pub struct AssetDepsLoaded<A: Asset> {
+pub struct AssetLoaded<A: Asset> {
     id: AssetId,
     _marker: std::marker::PhantomData<A>,
 }
 
-impl<A: Asset> AssetDepsLoaded<A> {
+impl<A: Asset> AssetLoaded<A> {
     pub fn new(id: AssetId) -> Self {
         Self {
             id,
@@ -217,22 +168,22 @@ impl<A: Asset> AssetDepsLoaded<A> {
     }
 }
 
-impl<A: Asset> WorldAction for AssetDepsLoaded<A> {
+impl<A: Asset> WorldAction for AssetLoaded<A> {
     fn execute(self, world: &mut ecs::world::World) -> Option<()> {
         world
             .resource_mut::<Events<AssetEvent<A>>>()
-            .add(AssetEvent::DepsLoaded(self.id));
+            .add(AssetEvent::Loaded { id: self.id });
 
         Some(())
     }
 }
 
-pub struct AssetDepsUnloaded<A: Asset> {
+pub(crate) struct AssetModified<A: Asset> {
     id: AssetId,
     _marker: std::marker::PhantomData<A>,
 }
 
-impl<A: Asset> AssetDepsUnloaded<A> {
+impl<A: Asset> AssetModified<A> {
     pub fn new(id: AssetId) -> Self {
         Self {
             id,
@@ -241,15 +192,53 @@ impl<A: Asset> AssetDepsUnloaded<A> {
     }
 }
 
-impl<A: Asset> WorldAction for AssetDepsUnloaded<A> {
+impl<A: Asset> WorldAction for AssetModified<A> {
     fn execute(self, world: &mut ecs::world::World) -> Option<()> {
         world
             .resource_mut::<Events<AssetEvent<A>>>()
-            .add(AssetEvent::DepsUnloaded(self.id));
+            .add(AssetEvent::Modified { id: self.id });
 
         Some(())
     }
 }
+
+pub struct AssetsModified {
+    ids: HashSet<AssetId>,
+}
+
+impl AssetsModified {
+    pub fn new() -> Self {
+        Self {
+            ids: HashSet::new(),
+        }
+    }
+
+    pub fn add(&mut self, id: AssetId) {
+        self.ids.insert(id);
+    }
+
+    pub fn remove(&mut self, id: AssetId) {
+        self.ids.remove(&id);
+    }
+
+    pub fn contains(&self, id: &AssetId) -> bool {
+        self.ids.contains(id)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &AssetId> {
+        self.ids.iter()
+    }
+
+    pub fn len(&self) -> usize {
+        self.ids.len()
+    }
+
+    pub fn drain(&mut self) -> impl Iterator<Item = AssetId> + '_ {
+        self.ids.drain()
+    }
+}
+
+impl Resource for AssetsModified {}
 
 pub struct AssetUnloaded<A: Asset> {
     id: AssetId,
@@ -333,7 +322,7 @@ impl WorldAction for ReloadAssets {
         let states = database.states.read_arc_blocking();
 
         let reloads = self.ids.drain(..).filter_map(|id| {
-            let state = states.load_state(id);
+            let state = states.get_load_state(id);
             (state.is_loaded() || state.is_failed()).then_some(AssetLoadPath::Id(id))
         });
 

@@ -160,7 +160,7 @@ pub mod actions {
 
 pub mod events {
     use crate::{
-        core::{component::Component, entity::Entity},
+        core::{component::Component, entity::Entity, resource::Resource},
         event::Event,
     };
 
@@ -247,6 +247,20 @@ pub mod events {
     }
 
     impl Event for HierarchyUpdate {}
+
+    pub struct ResourceUpdate<R: Resource> {
+        _marker: std::marker::PhantomData<R>,
+    }
+
+    impl<R: Resource> ResourceUpdate<R> {
+        pub fn new() -> Self {
+            Self {
+                _marker: std::marker::PhantomData::default(),
+            }
+        }
+    }
+
+    impl<R: Resource + Send> Event for ResourceUpdate<R> {}
 }
 
 pub mod components {

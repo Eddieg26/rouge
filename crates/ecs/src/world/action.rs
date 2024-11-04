@@ -5,7 +5,7 @@ use crate::{
 };
 use std::sync::{Arc, Mutex};
 
-pub trait WorldAction: Send + Sync + 'static {
+pub trait WorldAction: Send + 'static {
     fn execute(self, world: &mut World) -> Option<()>;
 }
 

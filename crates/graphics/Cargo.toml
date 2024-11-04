@@ -8,10 +8,12 @@ ecs = { path = "../ecs" }
 game = { path = "../game" }
 asset = { path = "../asset" }
 window = { path = "../window" }
+spatial = { path = "../spatial" }
 glam = { workspace = true, features = ["serde", "bytemuck"] }
 bytemuck = { workspace = true }
 serde = { workspace = true }
 uuid = { workspace = true }
 crc32fast = { workspace = true }
 downcast-rs = { workspace = true }
-wgpu = "23.0.0"
+bitflags = { workspace = true }
+wgpu = { version = "23.0.0", features = ["spirv", "glsl"] }

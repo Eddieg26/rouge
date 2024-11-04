@@ -301,6 +301,10 @@ pub mod components {
             self.0.iter().position(|&e| e == entity)
         }
 
+        pub fn entities(&self) -> &[Entity] {
+            &self.0
+        }
+
         pub fn iter(&self) -> impl Iterator<Item = &Entity> + '_ {
             self.0.iter()
         }

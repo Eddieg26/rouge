@@ -1,0 +1,10 @@
+[package]
+name = "spatial"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ecs = { path = "../ecs" }
+game = { path = "../game" }
+glam = { workspace = true }
+serde = { workspace = true }

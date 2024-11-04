@@ -1,6 +1,5 @@
-use std::sync::Arc;
-
 use ecs::core::resource::Resource;
+use std::sync::Arc;
 
 pub struct RenderInstance(wgpu::Instance);
 
@@ -26,7 +25,7 @@ impl std::ops::Deref for RenderInstance {
 #[derive(Debug, Clone)]
 pub struct RenderDevice {
     device: Arc<wgpu::Device>,
-    queue: Arc<wgpu::Queue>,
+    pub queue: Arc<wgpu::Queue>,
 }
 
 impl RenderDevice {
@@ -56,10 +55,6 @@ impl RenderDevice {
             device: Arc::new(device),
             queue: Arc::new(queue),
         })
-    }
-
-    pub fn queue(&self) -> &Arc<wgpu::Queue> {
-        &self.queue
     }
 }
 

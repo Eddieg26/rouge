@@ -424,3 +424,50 @@ impl_into_system_configs!(A, B, C, D, E, F2, G);
 impl_into_system_configs!(A, B, C, D, E, F2, G, H);
 impl_into_system_configs!(A, B, C, D, E, F2, G, H, I);
 impl_into_system_configs!(A, B, C, D, E, F2, G, H, I, J);
+
+pub struct StaticSystemArg<'w, S: SystemArg>(ArgItem<'w, S>);
+
+impl<'w, S: SystemArg> std::ops::Deref for StaticSystemArg<'w, S> {
+    type Target = ArgItem<'w, S>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<'w, 's, S: SystemArg> std::ops::DerefMut for StaticSystemArg<'w, S> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl<'w, S: SystemArg> StaticSystemArg<'w, S> {
+    pub fn into_inner(self) -> ArgItem<'w, S> {
+        self.0
+    }
+}
+
+impl<S: SystemArg + 'static> SystemArg for StaticSystemArg<'_, S> {
+    type Item<'world> = StaticSystemArg<'world, S>;
+
+    fn get<'a>(world: &'a WorldCell) -> Self::Item<'a> {
+        StaticSystemArg(S::get(world))
+    }
+
+    fn access() -> Vec<WorldAccess> {
+        S::access()
+    }
+}
+
+pub mod unlifetime {
+    use crate::{
+        core::resource::{Res, ResMut},
+        world::query::Query,
+    };
+
+    pub type Read<T> = &'static T;
+    pub type Write<T> = &'static mut T;
+    pub type ReadRes<T> = Res<'static, T>;
+    pub type WriteRes<T> = ResMut<'static, T>;
+    pub type StaticQuery<Q, F = ()> = Query<'static, Q, F>;
+}

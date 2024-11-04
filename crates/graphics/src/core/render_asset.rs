@@ -24,16 +24,16 @@ impl<R: RenderAsset> RenderAssets<R> {
         self.assets.insert(id, asset);
     }
 
-    pub fn get(&self, id: R::Id) -> Option<&R> {
-        self.assets.get(&id)
+    pub fn get(&self, id: &R::Id) -> Option<&R> {
+        self.assets.get(id)
     }
 
-    pub fn get_mut(&mut self, id: R::Id) -> Option<&mut R> {
-        self.assets.get_mut(&id)
+    pub fn get_mut(&mut self, id: &R::Id) -> Option<&mut R> {
+        self.assets.get_mut(id)
     }
 
-    pub fn remove(&mut self, id: R::Id) -> Option<R> {
-        self.assets.shift_remove(&id)
+    pub fn remove(&mut self, id: &R::Id) -> Option<R> {
+        self.assets.shift_remove(id)
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (&R::Id, &R)> {
@@ -88,6 +88,12 @@ impl<R: RenderAsset> Default for RenderAssets<R> {
 }
 
 impl<R: RenderAsset> Resource for RenderAssets<R> {}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ReadWrite {
+    Enabled,
+    Disabled,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AssetUsage {
@@ -146,11 +152,7 @@ pub trait RenderAssetExtractor: 'static {
         Ok(())
     }
 
-    fn remove(
-        id: &AssetId,
-        assets: &RenderAssets<Self::Asset>,
-        arg: &mut ArgItem<Self::Arg>,
-    ) -> Option<<Self::Asset as RenderAsset>::Id>;
+    fn remove(id: &AssetId, assets: &mut RenderAssets<Self::Asset>, arg: &mut ArgItem<Self::Arg>);
 
     fn usage(id: &AssetId, source: &Self::Source) -> AssetUsage {
         AssetUsage::Keep

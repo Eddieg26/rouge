@@ -63,6 +63,10 @@ impl AssetId {
     pub fn value(&self) -> Uuid {
         self.0
     }
+
+    pub fn as_u128(&self) -> u128 {
+        self.0.as_u128()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]

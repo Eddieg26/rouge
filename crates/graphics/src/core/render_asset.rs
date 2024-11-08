@@ -107,16 +107,6 @@ pub enum RenderAssetWorld {
     Render,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ExtractedResource {
-    Buffer,
-    Texture,
-    Sampler,
-    Shader,
-    BindGroup,
-    Pipeline,
-}
-
 #[derive(Debug, Clone)]
 pub enum ExtractError {
     MissingAsset,
@@ -157,10 +147,6 @@ pub trait RenderAssetExtractor: 'static {
     fn usage(id: &AssetId, source: &Self::Source) -> AssetUsage {
         AssetUsage::Keep
     }
-
-    fn extracted_resource() -> Option<ExtractedResource> {
-        None
-    }
 }
 
 pub trait RenderResourceExtractor: 'static {
@@ -168,8 +154,4 @@ pub trait RenderResourceExtractor: 'static {
     type Arg: SystemArg;
 
     fn extract(arg: ArgItem<Self::Arg>) -> Result<Self::Resource, ExtractError>;
-
-    fn extracted_resource() -> Option<ExtractedResource> {
-        None
-    }
 }

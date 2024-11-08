@@ -1,4 +1,4 @@
-use crate::core::RenderDevice;
+use crate::{core::RenderDevice, resources::Id};
 use spatial::size::Size;
 use std::collections::HashMap;
 use wgpu::TextureFormat;
@@ -41,7 +41,7 @@ impl RenderGraphTexture {
 
 impl GraphResource for RenderGraphTexture {
     fn id(value: &str) -> GraphResourceId {
-        GraphResourceId::Texture(Id::new(value))
+        GraphResourceId::Texture(Id::from(value))
     }
 }
 
@@ -74,7 +74,7 @@ impl RenderGraphBuffer {
 
 impl GraphResource for RenderGraphBuffer {
     fn id(value: &str) -> GraphResourceId {
-        GraphResourceId::Buffer(Id::new(value))
+        GraphResourceId::Buffer(Id::from(value))
     }
 }
 
@@ -83,64 +83,6 @@ impl std::ops::Deref for RenderGraphBuffer {
 
     fn deref(&self) -> &Self::Target {
         &self.0
-    }
-}
-pub struct Id<T> {
-    id: u32,
-    _marker: std::marker::PhantomData<T>,
-}
-
-impl<T> Id<T> {
-    pub fn new(name: &str) -> Self {
-        let mut hasher = crc32fast::Hasher::new();
-        hasher.update(name.as_bytes());
-        Self {
-            id: hasher.finalize(),
-            _marker: std::marker::PhantomData,
-        }
-    }
-}
-
-impl<T> std::fmt::Debug for Id<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:x}", self.id)
-    }
-}
-
-impl<T> std::fmt::Display for Id<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:x}", self.id)
-    }
-}
-
-impl<T> std::hash::Hash for Id<T> {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.id.hash(state)
-    }
-}
-
-impl<T> PartialEq for Id<T> {
-    fn eq(&self, other: &Self) -> bool {
-        self.id == other.id
-    }
-}
-
-impl<T> Eq for Id<T> {}
-
-impl<T> Clone for Id<T> {
-    fn clone(&self) -> Self {
-        Self {
-            id: self.id,
-            _marker: std::marker::PhantomData,
-        }
-    }
-}
-
-impl<T> Copy for Id<T> {}
-
-impl<T> Id<T> {
-    pub fn id(&self) -> u32 {
-        self.id
     }
 }
 
@@ -182,13 +124,13 @@ impl GraphResources {
     }
 
     pub fn create_texture(&mut self, name: &str, desc: TextureDesc) -> Id<RenderGraphTexture> {
-        let handle = Id::new(name);
+        let handle = Id::from(name);
         self.texture_descs.insert(handle, desc);
         handle
     }
 
     pub fn create_buffer(&mut self, name: &str, desc: BufferDesc) -> Id<RenderGraphBuffer> {
-        let handle = Id::new(name);
+        let handle = Id::from(name);
         self.buffer_descs.insert(handle, desc);
         handle
     }
@@ -198,7 +140,7 @@ impl GraphResources {
         name: &str,
         texture: RenderGraphTexture,
     ) -> Id<RenderGraphTexture> {
-        let handle = Id::new(name);
+        let handle = Id::from(name);
         self.textures.insert(handle, texture);
         handle
     }
@@ -208,7 +150,7 @@ impl GraphResources {
         name: &str,
         buffer: RenderGraphBuffer,
     ) -> Id<RenderGraphBuffer> {
-        let handle = Id::new(name);
+        let handle = Id::from(name);
         self.buffers.insert(handle, buffer);
         handle
     }

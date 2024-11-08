@@ -8,10 +8,7 @@ use std::{borrow::Cow, sync::Arc};
 
 use crate::core::{
     device::RenderDevice,
-    render_asset::{
-        AssetUsage, ExtractError, ExtractedResource, RenderAsset, RenderAssetExtractor,
-        RenderAssets,
-    },
+    render_asset::{AssetUsage, ExtractError, RenderAsset, RenderAssetExtractor, RenderAssets},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
@@ -231,9 +228,5 @@ impl RenderAssetExtractor for Shader {
 
     fn usage(_: &AssetId, _: &Self::Source) -> AssetUsage {
         AssetUsage::Discard
-    }
-
-    fn extracted_resource() -> Option<ExtractedResource> {
-        None
     }
 }

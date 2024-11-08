@@ -1,10 +1,15 @@
 use crate::core::{device::RenderDevice, render_asset::RenderAsset};
-use asset::{Asset, AssetId};
+use std::sync::Arc;
 
 pub mod format;
+pub mod render;
+pub mod sampler;
 pub mod texture2d;
 
 pub use format::*;
+pub use wgpu::TextureUsages;
+
+use super::Id;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum TextureDimension {
@@ -76,7 +81,7 @@ impl Into<wgpu::AddressMode> for WrapMode {
     }
 }
 
-pub trait Texture: Asset + 'static {
+pub trait Texture: 'static {
     fn width(&self) -> u32;
     fn height(&self) -> u32;
     fn depth(&self) -> u32;
@@ -89,13 +94,40 @@ pub trait Texture: Asset + 'static {
     fn pixels(&self) -> &[u8];
 }
 
-pub struct GpuTexture {
-    texture: wgpu::Texture,
-    view: wgpu::TextureView,
-    sampler: wgpu::Sampler,
+pub struct TextureDesc<'a> {
+    pub label: Option<&'a str>,
+    pub width: u32,
+    pub height: u32,
+    pub depth: u32,
+    pub mipmaps: bool,
+    pub format: TextureFormat,
+    pub dimension: TextureDimension,
+    pub usage: wgpu::TextureUsages,
+    pub pixels: Vec<u8>,
 }
 
-impl GpuTexture {
+impl Default for TextureDesc<'_> {
+    fn default() -> Self {
+        Self {
+            label: None,
+            width: 1,
+            height: 1,
+            depth: 1,
+            mipmaps: false,
+            format: TextureFormat::Rgba8Unorm,
+            dimension: TextureDimension::D2,
+            usage: wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::COPY_SRC,
+            pixels: vec![0, 0, 0, 0],
+        }
+    }
+}
+
+pub struct RenderTexture {
+    texture: Arc<wgpu::Texture>,
+    view: wgpu::TextureView,
+}
+
+impl RenderTexture {
     pub fn create<T: Texture>(device: &RenderDevice, texture: &T) -> Self {
         let size = wgpu::Extent3d {
             width: texture.width(),
@@ -144,34 +176,65 @@ impl GpuTexture {
             size,
         );
 
-        let address_mode = texture.wrap_mode().into();
-        let filter_mode = texture.filter_mode().into();
-
         let view = created.create_view(&wgpu::TextureViewDescriptor::default());
-        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: None,
-            address_mode_u: address_mode,
-            address_mode_v: address_mode,
-            address_mode_w: address_mode,
-            mag_filter: filter_mode,
-            min_filter: filter_mode,
-            mipmap_filter: filter_mode,
-            lod_min_clamp: 0.0,
-            lod_max_clamp: 100.0,
-            compare: None,
-            anisotropy_clamp: 1,
-            border_color: match address_mode {
-                wgpu::AddressMode::ClampToBorder => {
-                    Some(wgpu::SamplerBorderColor::TransparentBlack)
-                }
-                _ => None,
-            },
-        });
 
         Self {
-            texture: created,
+            texture: Arc::new(created),
             view,
-            sampler,
+        }
+    }
+
+    pub fn from_desc(device: &RenderDevice, desc: &TextureDesc) -> Self {
+        let size = wgpu::Extent3d {
+            width: desc.width,
+            height: desc.height,
+            depth_or_array_layers: desc.depth,
+        };
+
+        let mip_level_count = if desc.mipmaps {
+            let dimension = desc.dimension.into();
+            size.max_mips(dimension)
+        } else {
+            1
+        };
+
+        let format = desc.format.into();
+
+        let created = device.create_texture(&wgpu::TextureDescriptor {
+            label: desc.label,
+            size,
+            mip_level_count,
+            sample_count: 1,
+            dimension: desc.dimension.into(),
+            format,
+            usage: desc.usage,
+            view_formats: &[format],
+        });
+
+        if desc.pixels.len() >= desc.width as usize * desc.height as usize {
+            device.queue.write_texture(
+                wgpu::ImageCopyTexture {
+                    texture: &created,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: desc.format.aspect(),
+                },
+                &desc.pixels,
+                wgpu::ImageDataLayout {
+                    bytes_per_row: format
+                        .block_copy_size(Some(desc.format.aspect()))
+                        .map(|s| s * size.width),
+                    ..Default::default()
+                },
+                size,
+            );
+        }
+
+        let view = created.create_view(&wgpu::TextureViewDescriptor::default());
+
+        Self {
+            texture: Arc::new(created),
+            view,
         }
     }
 
@@ -181,10 +244,6 @@ impl GpuTexture {
 
     pub fn view(&self) -> &wgpu::TextureView {
         &self.view
-    }
-
-    pub fn sampler(&self) -> &wgpu::Sampler {
-        &self.sampler
     }
 
     pub fn update<T: Texture>(&self, device: &RenderDevice, texture: &T) {
@@ -212,7 +271,7 @@ impl GpuTexture {
     }
 }
 
-impl std::ops::Deref for GpuTexture {
+impl std::ops::Deref for RenderTexture {
     type Target = wgpu::TextureView;
 
     fn deref(&self) -> &Self::Target {
@@ -220,6 +279,6 @@ impl std::ops::Deref for GpuTexture {
     }
 }
 
-impl RenderAsset for GpuTexture {
-    type Id = AssetId;
+impl RenderAsset for RenderTexture {
+    type Id = Id<RenderTexture>;
 }

@@ -445,6 +445,14 @@ impl<'w, S: SystemArg> StaticSystemArg<'w, S> {
     pub fn into_inner(self) -> ArgItem<'w, S> {
         self.0
     }
+
+    pub fn inner(&self) -> &ArgItem<'w, S> {
+        &self.0
+    }
+
+    pub fn inner_mut(&mut self) -> &mut ArgItem<'w, S> {
+        &mut self.0
+    }
 }
 
 impl<S: SystemArg + 'static> SystemArg for StaticSystemArg<'_, S> {

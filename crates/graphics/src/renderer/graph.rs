@@ -1,11 +1,11 @@
 use super::{
     context::RenderContext,
     resources::{
-        BufferDesc, GraphResource, GraphResourceId, GraphResources, Id, RenderGraphBuffer,
+        BufferDesc, GraphResource, GraphResourceId, GraphResources, RenderGraphBuffer,
         RenderGraphTexture, TextureDesc,
     },
 };
-use crate::{core::RenderDevice, surface::RenderSurface};
+use crate::{core::RenderDevice, resources::Id, surface::RenderSurface};
 use ecs::core::IndexMap;
 use std::any::TypeId;
 

@@ -188,3 +188,49 @@ impl Into<wgpu::TextureFormat> for TextureFormat {
         }
     }
 }
+
+impl From<wgpu::TextureFormat> for TextureFormat {
+    fn from(value: wgpu::TextureFormat) -> Self {
+        match value {
+            wgpu::TextureFormat::R8Unorm => TextureFormat::R8Unorm,
+            wgpu::TextureFormat::R8Snorm => TextureFormat::R8Snorm,
+            wgpu::TextureFormat::R8Uint => TextureFormat::R8Uint,
+            wgpu::TextureFormat::R8Sint => TextureFormat::R8Sint,
+            wgpu::TextureFormat::R16Uint => TextureFormat::R16Uint,
+            wgpu::TextureFormat::R16Sint => TextureFormat::R16Sint,
+            wgpu::TextureFormat::R16Float => TextureFormat::R16Float,
+            wgpu::TextureFormat::Rg8Unorm => TextureFormat::Rg8Unorm,
+            wgpu::TextureFormat::Rg8Snorm => TextureFormat::Rg8Snorm,
+            wgpu::TextureFormat::Rg8Uint => TextureFormat::Rg8Uint,
+            wgpu::TextureFormat::Rg8Sint => TextureFormat::Rg8Sint,
+            wgpu::TextureFormat::R32Uint => TextureFormat::R32Uint,
+            wgpu::TextureFormat::R32Sint => TextureFormat::R32Sint,
+            wgpu::TextureFormat::R32Float => TextureFormat::R32Float,
+            wgpu::TextureFormat::Rg16Uint => TextureFormat::Rg16Uint,
+            wgpu::TextureFormat::Rg16Sint => TextureFormat::Rg16Sint,
+            wgpu::TextureFormat::Rg16Float => TextureFormat::Rg16Float,
+            wgpu::TextureFormat::Rgba8Unorm => TextureFormat::Rgba8Unorm,
+            wgpu::TextureFormat::Rgba8UnormSrgb => TextureFormat::Rgba8UnormSrgb,
+            wgpu::TextureFormat::Rgba8Snorm => TextureFormat::Rgba8Snorm,
+            wgpu::TextureFormat::Rgba8Uint => TextureFormat::Rgba8Uint,
+            wgpu::TextureFormat::Rgba8Sint => TextureFormat::Rgba8Sint,
+            wgpu::TextureFormat::Bgra8Unorm => TextureFormat::Bgra8Unorm,
+            wgpu::TextureFormat::Bgra8UnormSrgb => TextureFormat::Bgra8UnormSrgb,
+            wgpu::TextureFormat::Rg32Uint => TextureFormat::Rg32Uint,
+            wgpu::TextureFormat::Rg32Sint => TextureFormat::Rg32Sint,
+            wgpu::TextureFormat::Rg32Float => TextureFormat::Rg32Float,
+            wgpu::TextureFormat::Rgba16Uint => TextureFormat::Rgba16Uint,
+            wgpu::TextureFormat::Rgba16Sint => TextureFormat::Rgba16Sint,
+            wgpu::TextureFormat::Rgba16Float => TextureFormat::Rgba16Float,
+            wgpu::TextureFormat::Rgba32Uint => TextureFormat::Rgba32Uint,
+            wgpu::TextureFormat::Rgba32Sint => TextureFormat::Rgba32Sint,
+            wgpu::TextureFormat::Rgba32Float => TextureFormat::Rgba32Float,
+            wgpu::TextureFormat::Stencil8 => TextureFormat::Stencil8,
+            wgpu::TextureFormat::Depth16Unorm => TextureFormat::Depth16Unorm,
+            wgpu::TextureFormat::Depth24Plus => TextureFormat::Depth24Plus,
+            wgpu::TextureFormat::Depth24PlusStencil8 => TextureFormat::Depth24PlusStencil8,
+            wgpu::TextureFormat::Depth32Float => TextureFormat::Depth32Float,
+            _ => panic!("Unsupported texture format: {:?}", value),
+        }
+    }
+}

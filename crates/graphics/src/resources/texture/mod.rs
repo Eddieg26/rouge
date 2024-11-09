@@ -123,11 +123,15 @@ impl Default for TextureDesc<'_> {
 }
 
 pub struct RenderTexture {
-    texture: Arc<wgpu::Texture>,
+    texture: Option<Arc<wgpu::Texture>>,
     view: wgpu::TextureView,
 }
 
 impl RenderTexture {
+    pub fn new(texture: Option<Arc<wgpu::Texture>>, view: wgpu::TextureView) -> Self {
+        Self { texture, view }
+    }
+
     pub fn create<T: Texture>(device: &RenderDevice, texture: &T) -> Self {
         let size = wgpu::Extent3d {
             width: texture.width(),
@@ -179,7 +183,7 @@ impl RenderTexture {
         let view = created.create_view(&wgpu::TextureViewDescriptor::default());
 
         Self {
-            texture: Arc::new(created),
+            texture: Some(Arc::new(created)),
             view,
         }
     }
@@ -233,41 +237,17 @@ impl RenderTexture {
         let view = created.create_view(&wgpu::TextureViewDescriptor::default());
 
         Self {
-            texture: Arc::new(created),
+            texture: Some(Arc::new(created)),
             view,
         }
     }
 
-    pub fn texture(&self) -> &wgpu::Texture {
-        &self.texture
+    pub fn texture(&self) -> Option<&Arc<wgpu::Texture>> {
+        self.texture.as_ref()
     }
 
     pub fn view(&self) -> &wgpu::TextureView {
         &self.view
-    }
-
-    pub fn update<T: Texture>(&self, device: &RenderDevice, texture: &T) {
-        let pixels = texture.pixels();
-        let aspect = texture.format().aspect();
-
-        device.queue.write_texture(
-            wgpu::ImageCopyTexture {
-                texture: &self.texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect,
-            },
-            pixels,
-            wgpu::ImageDataLayout {
-                bytes_per_row: self
-                    .texture
-                    .format()
-                    .block_copy_size(Some(aspect))
-                    .map(|s| s * self.texture.size().width),
-                ..Default::default()
-            },
-            self.texture.size(),
-        );
     }
 }
 

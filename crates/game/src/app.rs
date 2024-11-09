@@ -1,13 +1,16 @@
 use crate::phases::{Extract, Update};
 use ecs::{
-    core::{resource::Resource, IndexMap, Type},
-    system::schedule::Phase,
+    core::{component::Component, resource::Resource, IndexMap, Type},
+    event::Event,
+    system::{schedule::Phase, ArgItem, IntoSystemConfigs, SystemArg, WorldAccess},
     task::TaskPool,
-    world::World,
+    world::{
+        action::{WorldActionFn, WorldActions}, cell::WorldCell, World
+    },
 };
 use std::sync::{Arc, Mutex};
 
-pub trait AppTag: 'static {
+pub trait AppTag: 'static + Send {
     const NAME: &'static str;
 }
 
@@ -30,13 +33,125 @@ impl SubApp {
         &mut self.world
     }
 
-    pub fn extract(&mut self, main: MainWorld) {
+    pub fn resource<R: Resource + Send>(&self) -> &R {
+        self.world.resource::<R>()
+    }
+
+    pub fn resource_mut<R: Resource + Send>(&mut self) -> &mut R {
+        self.world.resource_mut::<R>()
+    }
+
+    pub fn non_send_resource<R: Resource>(&self) -> &R {
+        self.world.non_send_resource::<R>()
+    }
+
+    pub fn non_send_resource_mut<R: Resource>(&mut self) -> &mut R {
+        self.world.non_send_resource_mut::<R>()
+    }
+
+    pub fn try_resource<R: Resource + Send>(&self) -> Option<&R> {
+        self.world.try_resource::<R>()
+    }
+
+    pub fn try_resource_mut<R: Resource + Send>(&mut self) -> Option<&mut R> {
+        self.world.try_resource_mut::<R>()
+    }
+
+    pub fn try_non_send_resource<R: Resource>(&self) -> Option<&R> {
+        self.world.try_non_send_resource::<R>()
+    }
+
+    pub fn try_non_send_resource_mut<R: Resource>(&mut self) -> Option<&mut R> {
+        self.world.try_non_send_resource_mut::<R>()
+    }
+
+    pub fn actions(&self) -> &WorldActions {
+        self.world.actions()
+    }
+
+    pub fn tasks(&self) -> &TaskPool {
+        self.world.tasks()
+    }
+
+    pub fn register<C: Component>(&mut self) -> &mut Self {
+        self.world.register::<C>();
+        self
+    }
+
+    pub fn register_event<E: Event>(&mut self) -> &mut Self {
+        self.world.register_event::<E>();
+        self
+    }
+
+    pub fn register_resource<R: Resource + Send>(&mut self) -> &mut Self {
+        self.world.register_resource::<R>();
+        self
+    }
+
+    pub fn register_non_send_resource<R: Resource + Default>(&mut self) -> &mut Self {
+        self.world.register_non_send_resource::<R>();
+        self
+    }
+
+    pub fn add_resource<R: Resource + Send>(&mut self, resource: R) -> &mut Self {
+        self.world.add_resource(resource);
+        self
+    }
+
+    pub fn add_non_send_resource<R: Resource>(&mut self, resource: R) -> &mut Self {
+        self.world.add_non_send_resource::<R>(resource);
+        self
+    }
+
+    pub fn remove_resource<R: Resource + Send>(&mut self) -> Option<R> {
+        self.world.remove_resource::<R>()
+    }
+
+    pub fn remove_non_send_resource<R: Resource>(&mut self) -> Option<R> {
+        self.world.remove_non_send_resource::<R>()
+    }
+
+    pub fn add_systems<M>(
+        &mut self,
+        phase: impl Phase,
+        systems: impl IntoSystemConfigs<M>,
+    ) -> &mut Self {
+        self.world.add_systems::<M>(phase, systems);
+        self
+    }
+
+    pub fn observe<E: Event, M>(&mut self, observers: impl IntoSystemConfigs<M>) -> &mut Self {
+        self.world.observe::<E, M>(observers);
+        self
+    }
+
+    pub fn add_phase<P: Phase>(&mut self) -> &mut Self {
+        self.world.add_phase::<P>();
+        self
+    }
+
+    pub fn add_sub_phase<Main: Phase, Sub: Phase>(&mut self) -> &mut Self {
+        self.world.add_sub_phase::<Main, Sub>();
+        self
+    }
+
+    pub fn add_phase_before<P: Phase, Before: Phase>(&mut self) -> &mut Self {
+        self.world.add_phase_before::<P, Before>();
+        self
+    }
+
+    pub fn add_phase_after<P: Phase, After: Phase>(&mut self) -> &mut Self {
+        self.world.add_phase_after::<P, After>();
+        self
+    }
+
+    pub(crate) fn extract(&mut self, main: MainWorld) {
         self.world.add_resource(main);
         self.world.run(Extract);
         self.world.remove_resource::<MainWorld>();
     }
 
-    pub fn run(&mut self) {
+    pub(crate) fn run(&mut self) {
         self.world.run(Update);
     }
 }
@@ -120,9 +235,9 @@ impl AppBuilders {
         let ty = Type::of::<A>();
         if !self.apps.contains_key(&ty) {
             let mut app = SubApp::new();
-            app.world_mut().register_resource::<MainWorld>();
-            app.world_mut().add_phase::<Extract>();
-            app.world_mut().add_phase::<Update>();
+            app.register_resource::<MainWorld>();
+            app.add_phase::<Extract>();
+            app.add_phase::<Update>();
 
             self.apps.insert(ty, app);
         }
@@ -214,6 +329,77 @@ impl MainWorld {
 impl Resource for MainWorld {}
 unsafe impl Send for MainWorld {}
 unsafe impl Sync for MainWorld {}
+
+#[derive(Clone)]
+pub struct MainActions(WorldActions);
+
+impl MainActions {
+    pub fn new(actions: WorldActions) -> Self {
+        Self(actions)
+    }
+
+    pub fn add(&self, action: impl Into<WorldActionFn>) {
+        self.0.add(action);
+    }
+
+    pub fn extend(&self, actions: Vec<impl Into<WorldActionFn>>) {
+        self.0.extend(actions);
+    }
+}
+
+impl Resource for MainActions {}
+
+pub struct SubActions<A: AppTag>(WorldActions, std::marker::PhantomData<A>);
+impl<A: AppTag> SubActions<A> {
+    pub fn new() -> Self {
+        Self(WorldActions::default(), std::marker::PhantomData)
+    }
+
+    pub fn add(&self, action: impl Into<WorldActionFn>) {
+        self.0.add(action);
+    }
+
+    pub fn extend(&self, actions: Vec<impl Into<WorldActionFn>>) {
+        self.0.extend(actions);
+    }
+}
+
+impl<A: AppTag> Resource for SubActions<A> {}
+
+pub struct Main<'w, S: SystemArg>(ArgItem<'w, S>);
+
+impl<'w, S: SystemArg> std::ops::Deref for Main<'w, S> {
+    type Target = ArgItem<'w, S>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<'w, 's, S: SystemArg> std::ops::DerefMut for Main<'w, S> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl<'w, P: SystemArg> Main<'w, P> {
+    pub fn into_inner(self) -> ArgItem<'w, P> {
+        self.0
+    }
+}
+
+impl<S: SystemArg + 'static> SystemArg for Main<'_, S> {
+    type Item<'world> = Main<'world, S>;
+
+    fn get<'a>(world: WorldCell<'a>) -> Self::Item<'a> {
+        let world = world.resource::<MainWorld>();
+        Main(S::get(world.inner().into()))
+    }
+
+    fn access() -> Vec<WorldAccess> {
+        S::access()
+    }
+}
 
 #[cfg(test)]
 

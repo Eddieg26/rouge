@@ -62,7 +62,7 @@ impl<'a> Drop for Spawner<'a> {
 impl SystemArg for Spawner<'_> {
     type Item<'a> = Spawner<'a>;
 
-    fn get<'a>(world: &'a WorldCell) -> Self::Item<'a> {
+    fn get<'a>(world: WorldCell<'a>) -> Self::Item<'a> {
         Spawner::new(world.get_mut())
     }
 

@@ -8,6 +8,8 @@ use crate::{
 };
 use std::sync::{Arc, Mutex};
 
+use super::cell::WorldCell;
+
 #[derive(Debug, Clone)]
 pub struct WorldAccessTracker {
     access: Arc<Mutex<Bitset>>,
@@ -70,7 +72,7 @@ impl<R: Resource + Send> SystemArg for Res<'_, R> {
         }
     }
 
-    fn get<'a>(world: &'a crate::world::cell::WorldCell) -> Self::Item<'a> {
+    fn get<'a>(world: WorldCell<'a>) -> Self::Item<'a> {
         world.resource::<R>()
     }
 
@@ -99,7 +101,7 @@ impl<R: Resource + Send> SystemArg for ResMut<'_, R> {
         }
     }
 
-    fn get<'a>(world: &'a crate::world::cell::WorldCell) -> Self::Item<'a> {
+    fn get<'a>(world: WorldCell<'a>) -> Self::Item<'a> {
         world.resource_mut::<R>()
     }
 

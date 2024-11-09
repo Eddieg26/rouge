@@ -21,7 +21,7 @@ impl SystemId {
 pub struct System {
     id: SystemId,
     name: Option<&'static str>,
-    run: Box<dyn Fn(&WorldCell) + Send + Sync>,
+    run: Box<dyn Fn(WorldCell) + Send + Sync>,
 }
 
 impl System {
@@ -41,7 +41,7 @@ impl System {
         self.name
     }
 
-    pub fn run(&self, world: &WorldCell) {
+    pub fn run(&self, world: WorldCell) {
         (self.run)(world)
     }
 }
@@ -49,7 +49,7 @@ impl System {
 pub struct SystemConfig {
     id: SystemId,
     name: Option<&'static str>,
-    run: Box<dyn Fn(&WorldCell) + Send + Sync>,
+    run: Box<dyn Fn(WorldCell) + Send + Sync>,
     access: fn() -> Vec<WorldAccess>,
     after: Option<SystemId>,
     is_send: bool,
@@ -58,7 +58,7 @@ pub struct SystemConfig {
 impl SystemConfig {
     pub fn new(
         name: Option<&'static str>,
-        run: Box<dyn Fn(&WorldCell) + Send + Sync>,
+        run: Box<dyn Fn(WorldCell) + Send + Sync>,
         access: fn() -> Vec<WorldAccess>,
         is_send: bool,
     ) -> Self {
@@ -273,7 +273,7 @@ pub trait SystemArg {
     type Item<'a>;
 
     fn init(_world: &WorldCell) {}
-    fn get<'a>(world: &'a WorldCell) -> Self::Item<'a>;
+    fn get<'a>(world: WorldCell<'a>) -> Self::Item<'a>;
     fn access() -> Vec<WorldAccess> {
         Vec::new()
     }
@@ -288,13 +288,13 @@ pub trait SystemArg {
 impl SystemArg for () {
     type Item<'a> = ();
 
-    fn get<'a>(_: &'a WorldCell) -> Self::Item<'a> {}
+    fn get<'a>(_: WorldCell<'a>) -> Self::Item<'a> {}
 }
 
 impl SystemArg for &World {
     type Item<'a> = &'a World;
 
-    fn get<'a>(world: &'a WorldCell) -> Self::Item<'a> {
+    fn get<'a>(world: WorldCell<'a>) -> Self::Item<'a> {
         world.get()
     }
 
@@ -306,7 +306,7 @@ impl SystemArg for &World {
 impl SystemArg for Entities {
     type Item<'a> = &'a Entities;
 
-    fn get<'a>(world: &'a WorldCell) -> Self::Item<'a> {
+    fn get<'a>(world: WorldCell<'a>) -> Self::Item<'a> {
         world.get().entities()
     }
 }
@@ -316,7 +316,7 @@ pub type ArgItem<'a, A> = <A as SystemArg>::Item<'a>;
 impl<F: Fn() + Send + Sync + 'static> IntoSystemConfigs<F> for F {
     fn configs(self) -> Vec<SystemConfig> {
         let name = std::any::type_name::<F>();
-        let run = move |_: &WorldCell| {
+        let run = move |_: WorldCell| {
             self();
         };
         let access = || Vec::new();
@@ -359,7 +359,7 @@ macro_rules! impl_into_system_configs {
         {
             fn configs(self) -> Vec<SystemConfig> {
                 let name = std::any::type_name::<F>();
-                let run = move |world: &WorldCell| {
+                let run = move |world: WorldCell| {
                     let ($($arg,)*) = ($($arg::get(world),)*);
                     self($($arg),*);
                 };
@@ -397,7 +397,7 @@ macro_rules! impl_into_system_configs {
         impl<$($arg: SystemArg),*> SystemArg for ($($arg,)*) {
             type Item<'a> = ($($arg::Item<'a>,)*);
 
-            fn get<'a>(world: &'a WorldCell) -> Self::Item<'a> {
+            fn get<'a>(world: WorldCell<'a>) -> Self::Item<'a> {
                 ($($arg::get(world),)*)
             }
 
@@ -458,7 +458,7 @@ impl<'w, S: SystemArg> StaticSystemArg<'w, S> {
 impl<S: SystemArg + 'static> SystemArg for StaticSystemArg<'_, S> {
     type Item<'world> = StaticSystemArg<'world, S>;
 
-    fn get<'a>(world: &'a WorldCell) -> Self::Item<'a> {
+    fn get<'a>(world: WorldCell<'a>) -> Self::Item<'a> {
         StaticSystemArg(S::get(world))
     }
 

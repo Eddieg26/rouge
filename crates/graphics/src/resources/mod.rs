@@ -26,7 +26,7 @@ impl<T> Id<T> {
         Self::new(id)
     }
 
-    pub fn into<S>(&self) -> Id<S> {
+    pub fn to<S>(&self) -> Id<S> {
         Id::new(self.id)
     }
 }

@@ -181,7 +181,7 @@ fn update_child_transforms(children: &Children, parent: &Transform, world: &Worl
     let cell = WorldCell::from(world);
     for (transform, children) in
         FilterQuery::<(&mut Transform, Option<&Children>), With<Parent>>::new(
-            &cell,
+            cell,
             children.entities(),
         )
     {

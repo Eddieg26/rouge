@@ -4,6 +4,7 @@ use crate::{
     app::{AppBuilders, AppTag, Apps, MainApp},
     phases::{Execute, PostExecute, PreExecute, Shutdown, Startup},
     plugin::{Plugin, Plugins},
+    MainActions, SubActions, SubApp,
 };
 use ecs::{
     core::{component::Component, resource::Resource},
@@ -89,12 +90,12 @@ impl GameBuilder {
         self
     }
 
-    pub fn register_resource<R: Resource + Default + Send>(&mut self) -> &mut Self {
+    pub fn register_resource<R: Resource + Send>(&mut self) -> &mut Self {
         self.apps.main_world_mut().register_resource::<R>();
         self
     }
 
-    pub fn register_non_send_resource<R: Resource + Default>(&mut self) -> &mut Self {
+    pub fn register_non_send_resource<R: Resource>(&mut self) -> &mut Self {
         self.apps.main_world_mut().register_non_send_resource::<R>();
         self
     }
@@ -135,30 +136,34 @@ impl GameBuilder {
         self
     }
 
-    pub fn add_sub_app<A: AppTag>(&mut self) -> &mut World {
-        self.apps.add::<A>().world_mut()
+    pub fn add_sub_app<A: AppTag>(&mut self) -> &mut SubApp {
+        self.add_resource(SubActions::<A>::new());
+
+        let actions = self.actions().clone();
+        let app = self.apps.add::<A>();
+        app.add_resource(MainActions::new(actions));
+
+        app
     }
 
-    pub fn sub_app<A: AppTag>(&self) -> &World {
+    pub fn sub_app<A: AppTag>(&self) -> &SubApp {
         self.apps
             .sub::<A>()
             .expect(&format!("Sub app {:?} not found", A::NAME))
-            .world()
     }
 
-    pub fn sub_app_mut<A: AppTag>(&mut self) -> &mut World {
+    pub fn sub_app_mut<A: AppTag>(&mut self) -> &mut SubApp {
         self.apps
             .sub_mut::<A>()
             .expect(&format!("Sub app {:?} not found", A::NAME))
-            .world_mut()
     }
 
-    pub fn try_sub_app<A: AppTag>(&self) -> Option<&World> {
-        self.apps.sub::<A>().map(|app| app.world())
+    pub fn try_sub_app<A: AppTag>(&self) -> Option<&SubApp> {
+        self.apps.sub::<A>()
     }
 
-    pub fn try_sub_app_mut<A: AppTag>(&mut self) -> Option<&mut World> {
-        self.apps.sub_mut::<A>().map(|app| app.world_mut())
+    pub fn try_sub_app_mut<A: AppTag>(&mut self) -> Option<&mut SubApp> {
+        self.apps.sub_mut::<A>()
     }
 
     pub fn add_systems<M>(
@@ -172,6 +177,26 @@ impl GameBuilder {
 
     pub fn observe<E: Event, M>(&mut self, observers: impl IntoSystemConfigs<M>) -> &mut Self {
         self.apps.main_world_mut().observe::<E, M>(observers);
+        self
+    }
+
+    pub fn add_phase<P: Phase>(&mut self) -> &mut Self {
+        self.apps.main_world_mut().add_phase::<P>();
+        self
+    }
+
+    pub fn add_sub_phase<Main: Phase, Sub: Phase>(&mut self) -> &mut Self {
+        self.apps.main_world_mut().add_sub_phase::<Main, Sub>();
+        self
+    }
+
+    pub fn add_phase_before<P: Phase, Before: Phase>(&mut self) -> &mut Self {
+        self.apps.main_world_mut().add_phase_before::<P, Before>();
+        self
+    }
+
+    pub fn add_phase_after<P: Phase, After: Phase>(&mut self) -> &mut Self {
+        self.apps.main_world_mut().add_phase_after::<P, After>();
         self
     }
 

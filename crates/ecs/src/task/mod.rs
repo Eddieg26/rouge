@@ -100,7 +100,7 @@ impl<'a, Output: 'static> AsyncTaskPool<'a, Output> {
 impl SystemArg for &TaskPool {
     type Item<'a> = &'a TaskPool;
 
-    fn get<'a>(world: &'a crate::world::cell::WorldCell) -> Self::Item<'a> {
+    fn get<'a>(world: crate::world::cell::WorldCell<'a>) -> Self::Item<'a> {
         world.get().tasks()
     }
 }

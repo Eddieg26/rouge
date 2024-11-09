@@ -66,7 +66,7 @@ pub trait BaseQuery: Send + Sync {
     type Item<'a>: Send + Sync;
 
     fn init(_: &World, _: &mut QueryState) {}
-    fn fetch<'a>(world: &'a WorldCell, entity: Entity) -> Self::Item<'a>;
+    fn fetch<'a>(world: WorldCell<'a>, entity: Entity) -> Self::Item<'a>;
     fn access() -> Vec<WorldAccess>;
 }
 
@@ -86,7 +86,7 @@ impl<C: Component> BaseQuery for &C {
         state.add_component(id);
     }
 
-    fn fetch<'a>(world: &'a WorldCell, entity: Entity) -> Self::Item<'a> {
+    fn fetch<'a>(world: WorldCell<'a>, entity: Entity) -> Self::Item<'a> {
         world.get().get_component(entity).unwrap()
     }
 
@@ -114,7 +114,7 @@ impl<C: Component> BaseQuery for &mut C {
         state.add_component(id);
     }
 
-    fn fetch<'a>(world: &'a WorldCell, entity: Entity) -> Self::Item<'a> {
+    fn fetch<'a>(world: WorldCell<'a>, entity: Entity) -> Self::Item<'a> {
         world.get_mut().get_component_mut(entity).unwrap()
     }
 
@@ -133,7 +133,7 @@ impl<C: Component> BaseQuery for Option<&C> {
         <&C as BaseQuery>::init(world, state);
     }
 
-    fn fetch<'a>(world: &'a WorldCell, entity: Entity) -> Self::Item<'a> {
+    fn fetch<'a>(world: WorldCell<'a>, entity: Entity) -> Self::Item<'a> {
         world.get().get_component(entity)
     }
 
@@ -149,7 +149,7 @@ impl<C: Component> BaseQuery for Option<&mut C> {
         <&mut C as BaseQuery>::init(world, state);
     }
 
-    fn fetch<'a>(world: &'a WorldCell, entity: Entity) -> Self::Item<'a> {
+    fn fetch<'a>(world: WorldCell<'a>, entity: Entity) -> Self::Item<'a> {
         world.get_mut().get_component_mut(entity)
     }
 
@@ -161,7 +161,7 @@ impl<C: Component> BaseQuery for Option<&mut C> {
 impl BaseQuery for Entity {
     type Item<'a> = Entity;
 
-    fn fetch<'a>(_: &'a WorldCell, entity: Entity) -> Self::Item<'a> {
+    fn fetch<'a>(_: WorldCell<'a>, entity: Entity) -> Self::Item<'a> {
         entity
     }
 
@@ -199,13 +199,13 @@ impl QueryFilter for () {
 }
 
 pub struct Query<'a, Q: BaseQuery, F: QueryFilter = ()> {
-    world: &'a WorldCell<'a>,
+    world: WorldCell<'a>,
     cursor: QueryCursor<'a>,
     _marker: std::marker::PhantomData<(Q, F)>,
 }
 
 impl<'a, Q: BaseQuery, F: QueryFilter> Query<'a, Q, F> {
-    pub fn new(world: &'a WorldCell) -> Self {
+    pub fn new(world: WorldCell<'a>) -> Self {
         let mut state = QueryState::new();
         Q::init(world.get(), &mut state);
         F::init(world.get(), &mut state);
@@ -229,7 +229,7 @@ impl<'a, Q: BaseQuery, F: QueryFilter> Query<'a, Q, F> {
 }
 
 pub struct FilterQuery<'a, Q: BaseQuery, F: QueryFilter = ()> {
-    world: &'a WorldCell<'a>,
+    world: WorldCell<'a>,
     archetypes: IndexSet<&'a Archetype>,
     archetype: usize,
     entity: usize,
@@ -238,7 +238,7 @@ pub struct FilterQuery<'a, Q: BaseQuery, F: QueryFilter = ()> {
 }
 
 impl<'a, Q: BaseQuery, F: QueryFilter> FilterQuery<'a, Q, F> {
-    pub fn new(world: &'a WorldCell, entities: &'a [Entity]) -> Self {
+    pub fn new(world: WorldCell<'a>, entities: &'a [Entity]) -> Self {
         let mut state = QueryState::new();
         Q::init(world.get(), &mut state);
         F::init(world.get(), &mut state);
@@ -299,7 +299,7 @@ impl<'a, Q: BaseQuery, F: QueryFilter> Iterator for Query<'a, Q, F> {
         }
 
         let entity = self.cursor.entity()?;
-        let item = Q::fetch(&self.world, *entity);
+        let item = Q::fetch(self.world, *entity);
         self.cursor.next();
         Some(item)
     }
@@ -318,7 +318,7 @@ impl<'a, Q: BaseQuery, F: QueryFilter> Iterator for FilterQuery<'a, Q, F> {
         }
 
         let entity = self.entities[self.entity];
-        let item = Q::fetch(&self.world, entity);
+        let item = Q::fetch(self.world, entity);
         self.entity += 1;
         Some(item)
     }
@@ -327,7 +327,7 @@ impl<'a, Q: BaseQuery, F: QueryFilter> Iterator for FilterQuery<'a, Q, F> {
 impl<Q: BaseQuery, F: QueryFilter> SystemArg for Query<'_, Q, F> {
     type Item<'a> = Query<'a, Q, F>;
 
-    fn get<'a>(world: &'a WorldCell) -> Self::Item<'a> {
+    fn get<'a>(world: WorldCell<'a>) -> Self::Item<'a> {
         Query::new(world)
     }
 
@@ -356,7 +356,7 @@ macro_rules! impl_base_query_for_tuples {
                     )+
                 }
 
-                fn fetch<'a>(world: &'a WorldCell<'a>, entity: Entity) -> Self::Item<'a> {
+                fn fetch<'a>(world: WorldCell<'a>, entity: Entity) -> Self::Item<'a> {
                     ($($name::fetch(world, entity),)+)
                 }
 

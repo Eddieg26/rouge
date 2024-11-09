@@ -55,7 +55,7 @@ impl WorldActions {
 impl SystemArg for &WorldActions {
     type Item<'a> = &'a WorldActions;
 
-    fn get<'a>(world: &'a WorldCell) -> Self::Item<'a> {
+    fn get<'a>(world: WorldCell<'a>) -> Self::Item<'a> {
         &world.get().actions
     }
 }

@@ -12,7 +12,6 @@ pub struct RenderContext<'a> {
     device: &'a RenderDevice,
     resources: &'a GraphResources,
     target: &'a RenderTarget,
-    index: usize,
     actions: Vec<RenderNodeAction>,
 }
 
@@ -28,7 +27,6 @@ impl<'a> RenderContext<'a> {
             device,
             resources,
             target,
-            index: 0,
             actions: Vec::new(),
         }
     }
@@ -45,11 +43,7 @@ impl<'a> RenderContext<'a> {
         self.target
     }
 
-    pub fn index(&self) -> usize {
-        self.index
-    }
-
-    pub fn actions(&self) -> &[RenderNodeAction] {
+    pub(crate) fn actions(&self) -> &[RenderNodeAction] {
         &self.actions
     }
 

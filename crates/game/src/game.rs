@@ -138,6 +138,24 @@ impl GameBuilder {
         self.apps.main_world_mut().remove_non_send_resource::<R>()
     }
 
+    pub fn scoped_resource<R: Resource + Send>(
+        &mut self,
+        scope: impl FnOnce(&mut World, &mut R),
+    ) -> &mut Self {
+        self.apps.main_world_mut().scoped_resource::<R>(scope);
+        self
+    }
+
+    pub fn scoped_non_send_resource<R: Resource>(
+        &mut self,
+        scope: impl FnOnce(&mut World, &mut R),
+    ) -> &mut Self {
+        self.apps
+            .main_world_mut()
+            .scoped_non_send_resource::<R>(scope);
+        self
+    }
+
     pub fn invoke_event<E: Event>(&mut self, event: E) -> &mut Self {
         self.apps.main_world_mut().invoke_event(event);
         self

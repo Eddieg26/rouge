@@ -121,6 +121,22 @@ impl SubApp {
         self.world.remove_non_send_resource::<R>()
     }
 
+    pub fn scoped_resource<R: Resource + Send>(
+        &mut self,
+        scope: impl FnOnce(&mut World, &mut R),
+    ) -> &mut Self {
+        self.world.scoped_resource::<R>(scope);
+        self
+    }
+
+    pub fn scoped_non_send_resource<R: Resource>(
+        &mut self,
+        scope: impl FnOnce(&mut World, &mut R),
+    ) -> &mut Self {
+        self.world.scoped_non_send_resource::<R>(scope);
+        self
+    }
+
     pub fn add_systems<M>(
         &mut self,
         phase: impl Phase,

@@ -1,5 +1,9 @@
-use super::resources::GraphResources;
-use crate::{core::RenderDevice, surface::target::RenderTarget};
+use super::resources::{GraphResources, RenderGraphBuffer, RenderGraphTexture};
+use crate::{
+    core::{RenderAssets, RenderDevice},
+    resources::{texture::RenderTexture, Id},
+    surface::target::RenderTarget,
+};
 use ecs::{core::resource::Resource, world::World};
 
 pub enum RenderNodeAction {
@@ -12,6 +16,7 @@ pub struct RenderContext<'a> {
     device: &'a RenderDevice,
     resources: &'a GraphResources,
     target: &'a RenderTarget,
+    textures: &'a RenderAssets<RenderTexture>,
     actions: Vec<RenderNodeAction>,
 }
 
@@ -27,6 +32,7 @@ impl<'a> RenderContext<'a> {
             device,
             resources,
             target,
+            textures: world.resource::<RenderAssets<RenderTexture>>(),
             actions: Vec::new(),
         }
     }
@@ -41,6 +47,22 @@ impl<'a> RenderContext<'a> {
 
     pub fn target(&self) -> &RenderTarget {
         self.target
+    }
+
+    pub fn textures(&self) -> &RenderAssets<RenderTexture> {
+        self.textures
+    }
+
+    pub fn texture(&self, id: &Id<RenderTexture>) -> Option<&RenderTexture> {
+        self.textures.get(id)
+    }
+
+    pub fn graph_texture(&self, id: &Id<RenderGraphTexture>) -> Option<&RenderGraphTexture> {
+        self.resources.texture(id)
+    }
+
+    pub fn graph_buffer(&self, id: &Id<RenderGraphBuffer>) -> Option<&RenderGraphBuffer> {
+        self.resources.buffer(id)
     }
 
     pub fn resource<R: Resource + Send>(&self) -> &R {
@@ -64,8 +86,9 @@ impl<'a> RenderContext<'a> {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor::default())
     }
 
-    pub fn submit(&mut self, command_buffer: wgpu::CommandBuffer) {
-        self.actions.push(RenderNodeAction::Submit(command_buffer));
+    pub fn submit(&mut self, encoder: wgpu::CommandEncoder) {
+        self.actions
+            .push(RenderNodeAction::Submit(encoder.finish()));
     }
 
     pub fn flush(&mut self) {

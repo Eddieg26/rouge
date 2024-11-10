@@ -160,7 +160,11 @@ impl RenderGraphBuilder {
 
     fn build_order(&self) -> Vec<Vec<usize>> {
         let mut order = Vec::new();
-        let mut dependencies = HashMap::new();
+        let mut dependencies = self
+            .nodes
+            .keys()
+            .map(|id| (id, Vec::new()))
+            .collect::<HashMap<_, _>>();
 
         for edge in &self.edges {
             let (node, resource, access) = match &edge.from {

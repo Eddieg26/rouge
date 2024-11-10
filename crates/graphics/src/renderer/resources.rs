@@ -125,6 +125,14 @@ impl GraphResources {
         }
     }
 
+    pub fn texture(&self, id: &Id<RenderGraphTexture>) -> Option<&RenderGraphTexture> {
+        self.textures.get(id)
+    }
+
+    pub fn buffer(&self, id: &Id<RenderGraphBuffer>) -> Option<&RenderGraphBuffer> {
+        self.buffers.get(id)
+    }
+
     pub fn create_texture(&mut self, name: &str, desc: TextureDesc) -> Id<RenderGraphTexture> {
         let handle = Id::from(name);
         self.texture_descs.insert(handle, desc);

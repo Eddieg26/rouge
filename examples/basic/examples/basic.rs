@@ -14,7 +14,14 @@ use asset::{
     plugin::{AssetExt, AssetPlugin},
     AsyncReadExt, AsyncWriteExt,
 };
-use graphics::plugin::RenderPlugin;
+use graphics::{
+    core::Color,
+    plugin::RenderPlugin,
+    renderer::{
+        graph::{RenderGraphBuilder, RenderGraphNode},
+        pass::{Attachment, LoadOp, Operations, RenderPass, StoreOp},
+    },
+};
 use std::{future::Future, path::PathBuf};
 use window::plugin::WindowPlugin;
 // use asset::{
@@ -95,6 +102,9 @@ fn main() {
 
     Game::new()
         .add_plugin(RenderPlugin)
+        .scoped_resource::<RenderGraphBuilder>(|_, builder| {
+            builder.add_node(BasicRenderNode::new());
+        })
         .register_asset::<PlainText>()
         .add_importer::<PlainText>()
         .embed_assets("basic", embedded)
@@ -116,4 +126,34 @@ fn main() {
             }
         })
         .run();
+}
+
+pub struct BasicRenderNode {
+    pass: RenderPass,
+}
+
+impl BasicRenderNode {
+    pub fn new() -> Self {
+        Self {
+            pass: RenderPass::new().with_color(
+                Attachment::Surface,
+                None,
+                StoreOp::Store,
+                Some(Color::blue()),
+            ),
+        }
+    }
+}
+
+impl RenderGraphNode for BasicRenderNode {
+    fn name(&self) -> &str {
+        "Basic"
+    }
+
+    fn run(&mut self, ctx: &mut graphics::renderer::context::RenderContext) {
+        let mut encoder = ctx.encoder();
+        if let Some(_) = self.pass.begin(ctx.target(), ctx, None, &mut encoder) {}
+
+        ctx.submit(encoder);
+    }
 }

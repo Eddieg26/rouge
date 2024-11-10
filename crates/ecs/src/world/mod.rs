@@ -216,6 +216,20 @@ impl World {
         self.non_send_resources.remove::<R>()
     }
 
+    pub fn scoped_resource<R: Resource + Send>(&mut self, scope: impl FnOnce(&mut Self, &mut R)) {
+        let mut resource = self.remove_resource::<R>().expect("Resource not found");
+        scope(self, &mut resource);
+        self.add_resource(resource);
+    }
+
+    pub fn scoped_non_send_resource<R: Resource>(&mut self, scope: impl FnOnce(&mut Self, &mut R)) {
+        let mut resource = self
+            .remove_non_send_resource::<R>()
+            .expect("Resource not found");
+        scope(self, &mut resource);
+        self.add_non_send_resource(resource);
+    }
+
     pub fn invoke_event<E: Event>(&mut self, event: E) -> &mut Self {
         self.events.invoke::<E>();
         self.resource_mut::<Events<E>>().add(event);
@@ -255,12 +269,6 @@ impl World {
     pub fn add_phase_after<P: Phase, After: Phase>(&mut self) -> &mut Self {
         self.systems.schedule_mut().insert_after::<P, After>();
         self
-    }
-
-    pub fn scoped_resource<R: Resource + Send>(&mut self, scope: impl FnOnce(&mut Self, &mut R)) {
-        let mut resource = self.remove_resource::<R>().expect("Resource not found");
-        scope(self, &mut resource);
-        self.add_resource(resource);
     }
 
     pub fn run(&mut self, phase: impl Phase) {

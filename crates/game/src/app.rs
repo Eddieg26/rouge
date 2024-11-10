@@ -5,7 +5,9 @@ use ecs::{
     system::{schedule::Phase, ArgItem, IntoSystemConfigs, SystemArg, WorldAccess},
     task::TaskPool,
     world::{
-        action::{WorldActionFn, WorldActions}, cell::WorldCell, World
+        action::{WorldActionFn, WorldActions},
+        cell::WorldCell,
+        World,
     },
 };
 use std::sync::{Arc, Mutex};
@@ -63,6 +65,14 @@ impl SubApp {
 
     pub fn try_non_send_resource_mut<R: Resource>(&mut self) -> Option<&mut R> {
         self.world.try_non_send_resource_mut::<R>()
+    }
+
+    pub fn has_resource<R: Resource + Send>(&self) -> bool {
+        self.world.has_resource::<R>()
+    }
+
+    pub fn has_non_send_resource<R: Resource>(&self) -> bool {
+        self.world.has_non_send_resource::<R>()
     }
 
     pub fn actions(&self) -> &WorldActions {
@@ -125,13 +135,13 @@ impl SubApp {
         self
     }
 
-    pub fn add_phase<P: Phase>(&mut self) -> &mut Self {
-        self.world.add_phase::<P>();
+    pub fn add_extract_phase<P: Phase>(&mut self) -> &mut Self {
+        self.world.add_sub_phase::<Extract, P>();
         self
     }
 
-    pub fn add_sub_phase<Main: Phase, Sub: Phase>(&mut self) -> &mut Self {
-        self.world.add_sub_phase::<Main, Sub>();
+    pub fn add_phase<P: Phase>(&mut self) -> &mut Self {
+        self.world.add_sub_phase::<Update, P>();
         self
     }
 
@@ -147,6 +157,7 @@ impl SubApp {
 
     pub(crate) fn extract(&mut self, main: MainWorld) {
         self.world.add_resource(main);
+        self.world.flush(None);
         self.world.run(Extract);
         self.world.remove_resource::<MainWorld>();
     }
@@ -236,8 +247,8 @@ impl AppBuilders {
         if !self.apps.contains_key(&ty) {
             let mut app = SubApp::new();
             app.register_resource::<MainWorld>();
-            app.add_phase::<Extract>();
-            app.add_phase::<Update>();
+            app.world.add_phase::<Extract>();
+            app.world.add_phase::<Update>();
 
             self.apps.insert(ty, app);
         }
@@ -351,8 +362,8 @@ impl Resource for MainActions {}
 
 pub struct SubActions<A: AppTag>(WorldActions, std::marker::PhantomData<A>);
 impl<A: AppTag> SubActions<A> {
-    pub fn new() -> Self {
-        Self(WorldActions::default(), std::marker::PhantomData)
+    pub fn new(actions: WorldActions) -> Self {
+        Self(actions, std::marker::PhantomData)
     }
 
     pub fn add(&self, action: impl Into<WorldActionFn>) {
@@ -365,6 +376,12 @@ impl<A: AppTag> SubActions<A> {
 }
 
 impl<A: AppTag> Resource for SubActions<A> {}
+
+impl<A: AppTag> Clone for SubActions<A> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone(), std::marker::PhantomData)
+    }
+}
 
 pub struct Main<'w, S: SystemArg>(ArgItem<'w, S>);
 

@@ -1,4 +1,5 @@
 use ecs::core::resource::Resource;
+use std::sync::Arc;
 use winit::{event_loop::ActiveEventLoop, window::WindowId};
 
 pub struct WindowConfig {
@@ -72,8 +73,9 @@ impl WindowConfig {
 
 impl Resource for WindowConfig {}
 
+#[derive(Clone)]
 pub struct Window {
-    inner: winit::window::Window,
+    inner: Arc<winit::window::Window>,
 }
 
 impl Window {
@@ -89,7 +91,9 @@ impl Window {
 
         let window = event_loop.create_window(attributes).unwrap();
 
-        Self { inner: window }
+        Self {
+            inner: Arc::new(window),
+        }
     }
 
     pub fn id(&self) -> WindowId {
@@ -101,14 +105,6 @@ impl Window {
     }
 
     pub fn inner(&self) -> &winit::window::Window {
-        &self.inner
-    }
-}
-
-impl std::ops::Deref for Window {
-    type Target = winit::window::Window;
-
-    fn deref(&self) -> &Self::Target {
         &self.inner
     }
 }

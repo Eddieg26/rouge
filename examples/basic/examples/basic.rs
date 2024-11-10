@@ -14,6 +14,7 @@ use asset::{
     plugin::{AssetExt, AssetPlugin},
     AsyncReadExt, AsyncWriteExt,
 };
+use graphics::plugin::RenderPlugin;
 use std::{future::Future, path::PathBuf};
 use window::plugin::WindowPlugin;
 // use asset::{
@@ -36,7 +37,7 @@ use ecs::{
         World,
     },
 };
-use game::{Game, PostInit};
+use game::{Game, PostInit, Update};
 use pollster::block_on;
 
 pub struct TestEvent;
@@ -93,8 +94,7 @@ fn main() {
     let _ = embed_asset!(embedded, id, "assets/embedded.txt", ());
 
     Game::new()
-        .add_plugin(AssetPlugin)
-        .add_plugin(WindowPlugin)
+        .add_plugin(RenderPlugin)
         .register_asset::<PlainText>()
         .add_importer::<PlainText>()
         .embed_assets("basic", embedded)

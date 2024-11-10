@@ -47,8 +47,8 @@ impl WorldActions {
         list.extend(actions.drain(..).map(|a| a.into()));
     }
 
-    pub fn drain(&self) -> Vec<WorldActionFn> {
-        self.actions.lock().unwrap().drain(..).collect()
+    pub fn take(&self) -> Vec<WorldActionFn> {
+        std::mem::take(&mut self.actions.lock().unwrap())
     }
 }
 

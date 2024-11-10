@@ -1,5 +1,4 @@
 use crate::core::{device::RenderDevice, render_asset::RenderAsset};
-use std::sync::Arc;
 
 pub mod format;
 pub mod render;
@@ -123,12 +122,12 @@ impl Default for TextureDesc<'_> {
 }
 
 pub struct RenderTexture {
-    texture: Option<Arc<wgpu::Texture>>,
+    texture: Option<wgpu::Texture>,
     view: wgpu::TextureView,
 }
 
 impl RenderTexture {
-    pub fn new(texture: Option<Arc<wgpu::Texture>>, view: wgpu::TextureView) -> Self {
+    pub fn new(texture: Option<wgpu::Texture>, view: wgpu::TextureView) -> Self {
         Self { texture, view }
     }
 
@@ -183,7 +182,7 @@ impl RenderTexture {
         let view = created.create_view(&wgpu::TextureViewDescriptor::default());
 
         Self {
-            texture: Some(Arc::new(created)),
+            texture: Some(created),
             view,
         }
     }
@@ -237,12 +236,12 @@ impl RenderTexture {
         let view = created.create_view(&wgpu::TextureViewDescriptor::default());
 
         Self {
-            texture: Some(Arc::new(created)),
+            texture: Some(created),
             view,
         }
     }
 
-    pub fn texture(&self) -> Option<&Arc<wgpu::Texture>> {
+    pub fn texture(&self) -> Option<&wgpu::Texture> {
         self.texture.as_ref()
     }
 

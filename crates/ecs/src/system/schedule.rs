@@ -41,20 +41,20 @@ impl Into<Type> for PhaseId {
 #[derive(Debug, Clone)]
 pub struct SystemGroup {
     indexes: Vec<usize>,
-    non_send: usize,
+    send: usize,
 }
 
 impl SystemGroup {
-    pub fn new(indexes: Vec<usize>, non_send: usize) -> Self {
-        Self { indexes, non_send }
+    pub fn new(indexes: Vec<usize>, send: usize) -> Self {
+        Self { indexes, send }
     }
 
     pub fn indexes(&self) -> &[usize] {
         &self.indexes
     }
 
-    pub fn non_send(&self) -> usize {
-        self.non_send
+    pub fn send(&self) -> usize {
+        self.send
     }
 }
 
@@ -132,13 +132,16 @@ impl SystemGraph {
 
                     match last_group_index {
                         Some(group) => {
-                            groups[group].send.push(index);
+                            match config.is_send {
+                                true => groups[group].send.push(index),
+                                false => groups[group].non_send.push(index),
+                            }
                             groups[group].with_access(access);
                         }
                         None => {
                             let group = match config.is_send {
                                 true => GroupInfo::new_send(index, access),
-                                false => GroupInfo::new_non_send(index, access),
+                                false => GroupInfo::new_non_send(index, access)
                             };
 
                             groups.push(group);
@@ -152,9 +155,9 @@ impl SystemGraph {
                     .into_iter()
                     .map(|group| {
                         let mut indexes = group.send;
-                        let non_send = indexes.len();
+                        let send = indexes.len();
                         indexes.extend(group.non_send);
-                        SystemGroup::new(indexes, non_send)
+                        SystemGroup::new(indexes, send)
                     })
                     .collect();
 

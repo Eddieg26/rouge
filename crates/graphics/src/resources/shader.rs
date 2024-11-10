@@ -3,13 +3,15 @@ use asset::{
     io::{AssetIoError, AssetReader},
     Asset, AssetId, AsyncReadExt,
 };
-use ecs::system::{unlifetime::ReadRes, ArgItem, StaticSystemArg};
+use ecs::system::{unlifetime::ReadRes, ArgItem, StaticArg};
 use std::{borrow::Cow, sync::Arc};
 
 use crate::core::{
     device::RenderDevice,
     render_asset::{AssetUsage, ExtractError, RenderAsset, RenderAssetExtractor, RenderAssets},
 };
+
+use super::Id;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum ShaderStage {
@@ -195,10 +197,8 @@ impl Shader {
     }
 }
 
-impl Asset for Shader {}
-
 impl RenderAsset for Shader {
-    type Id = AssetId;
+    type Id = Id<Shader>;
 }
 
 impl std::ops::Deref for Shader {
@@ -212,7 +212,7 @@ impl std::ops::Deref for Shader {
 impl RenderAssetExtractor for Shader {
     type Source = ShaderSource;
     type Asset = Shader;
-    type Arg = StaticSystemArg<'static, ReadRes<RenderDevice>>;
+    type Arg = StaticArg<'static, ReadRes<RenderDevice>>;
 
     fn extract(
         _: &AssetId,
@@ -223,7 +223,7 @@ impl RenderAssetExtractor for Shader {
     }
 
     fn remove(id: &AssetId, assets: &mut RenderAssets<Self::Asset>, _: &mut ArgItem<Self::Arg>) {
-        assets.remove(id);
+        assets.remove(&Id::<Shader>::from(id));
     }
 
     fn usage(_: &AssetId, _: &Self::Source) -> AssetUsage {

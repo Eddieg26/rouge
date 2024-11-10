@@ -156,15 +156,17 @@ impl SystemRunner for ParallelRunner {
     fn run(&self, world: &WorldCell, systems: &[&SystemGraph]) {
         for graph in systems {
             for group in graph.groups() {
-                let pool_size = group.indexes().len().min(RunMode::max_threads());
-                let mut pool = ScopedTaskPool::new(pool_size);
-                for index in group.indexes()[..pool_size].iter() {
-                    pool.spawn(move || graph.systems()[*index].run(*world));
+                let pool_size = group.send().min(RunMode::max_threads());
+                if pool_size > 0 {
+                    let mut pool = ScopedTaskPool::new(pool_size);
+                    for index in group.indexes()[..pool_size].iter() {
+                        pool.spawn(move || graph.systems()[*index].run(*world));
+                    }
+
+                    pool.run();
                 }
 
-                pool.run();
-
-                for index in group.indexes()[pool_size..].iter() {
+                for index in group.indexes()[group.send()..].iter() {
                     graph.systems()[*index].run(*world);
                 }
             }

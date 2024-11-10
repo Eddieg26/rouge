@@ -79,12 +79,12 @@ impl App {
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         let world = self.game.app_mut().world_mut();
-        let has_window = world.try_resource::<Window>().is_some();
+        let has_window = world.try_non_send_resource::<Window>().is_some();
         match (has_window, world.remove_resource::<WindowConfig>()) {
             (false, Some(config)) => {
                 let window = Window::new(config, event_loop);
                 let id = window.id();
-                world.add_resource(window);
+                world.add_non_send_resource(window);
                 self.run_event(WindowCreated::new(id));
                 self.start();
             }
@@ -92,9 +92,11 @@ impl ApplicationHandler for App {
         }
     }
 
-    fn about_to_wait(&mut self, _: &ActiveEventLoop) {
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         if let Some(exit) = self.update() {
+            println!("Exiting: {:?}", exit);
             self.run_event(exit);
+            event_loop.exit();
         }
     }
 
@@ -104,9 +106,9 @@ impl ApplicationHandler for App {
                 self.run_event(WindowClosed::new(window));
                 event_loop.exit();
             }
+            WindowEvent::Destroyed => self.run_event(WindowDestroyed::new(window)),
             WindowEvent::Resized(size) => self.run_event(WindowResized::new(size)),
             WindowEvent::Moved(position) => self.run_event(WindowMoved::new(position)),
-            WindowEvent::Destroyed => self.run_event(WindowDestroyed::new(window)),
             WindowEvent::DroppedFile(path) => self.run_event(DroppedFile::new(path)),
             WindowEvent::HoveredFile(path) => self.run_event(HoveredFile::new(path)),
             WindowEvent::HoveredFileCancelled => self.run_event(HoveredFileCancelled),

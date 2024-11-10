@@ -1,7 +1,9 @@
-use crate::{core::RenderDevice, resources::Id};
+use crate::{
+    core::RenderDevice,
+    resources::{texture::TextureFormat, Id},
+};
 use spatial::size::Size;
 use std::collections::HashMap;
-use wgpu::TextureFormat;
 
 pub use wgpu::{BufferUsages, TextureUsages};
 
@@ -164,16 +166,12 @@ impl GraphResources {
     }
 
     pub fn resize(&mut self, device: &RenderDevice, size: Size) {
-        let new_size = self.size.max(size);
-        if new_size.width > self.size.width || new_size.height > self.size.height {
-            self.size = new_size;
-
-            for (handle, desc) in self.texture_descs.iter() {
-                if !self.textures.contains_key(handle) {
-                    let texture =
-                        RenderGraphTexture::create(device, desc, self.size.width, self.size.height);
-                    self.textures.insert(*handle, texture);
-                }
+        self.size = size;
+        for (handle, desc) in self.texture_descs.iter() {
+            if !self.textures.contains_key(handle) {
+                let texture =
+                    RenderGraphTexture::create(device, desc, self.size.width, self.size.height);
+                self.textures.insert(*handle, texture);
             }
         }
     }

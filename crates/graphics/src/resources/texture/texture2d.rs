@@ -1,5 +1,14 @@
-use super::{FilterMode, Texture, TextureDimension, TextureFormat, WrapMode};
+use crate::core::{RenderAssetExtractor, RenderAssets, RenderDevice};
+
+use super::{
+    sampler::{Sampler, SamplerDesc},
+    FilterMode, RenderTexture, Texture, TextureDimension, TextureFormat, WrapMode,
+};
 use asset::{Asset, Settings};
+use ecs::system::{
+    unlifetime::{ReadRes, WriteRes},
+    StaticArg,
+};
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct Texture2d {
@@ -114,3 +123,49 @@ impl Default for Texture2dSettings {
 }
 
 impl Settings for Texture2dSettings {}
+
+impl RenderAssetExtractor for Texture2d {
+    type Source = Texture2d;
+    type Asset = RenderTexture;
+    type Arg = StaticArg<'static, (ReadRes<RenderDevice>, WriteRes<RenderAssets<Sampler>>)>;
+
+    fn extract(
+        id: &asset::AssetId,
+        source: &mut Self::Source,
+        arg: &mut ecs::system::ArgItem<Self::Arg>,
+    ) -> Result<Self::Asset, crate::core::ExtractError> {
+        let (device, samplers) = arg.inner_mut();
+
+        let texture = RenderTexture::create(device, source);
+        let sampler = Sampler::create(
+            device,
+            &SamplerDesc {
+                label: None,
+                wrap_mode: source.wrap_mode,
+                filter_mode: source.filter_mode,
+                border_color: match source.wrap_mode {
+                    WrapMode::ClampToBorder => Some(wgpu::SamplerBorderColor::TransparentBlack),
+                    _ => None,
+                },
+                ..Default::default()
+            },
+        );
+
+        samplers.add(id.into(), sampler);
+
+        source.pixels.clear();
+
+        Ok(texture)
+    }
+
+    fn remove(
+        id: &asset::AssetId,
+        assets: &mut crate::core::RenderAssets<Self::Asset>,
+        arg: &mut ecs::system::ArgItem<Self::Arg>,
+    ) {
+        let (.., samplers) = arg.inner_mut();
+
+        samplers.remove(&id.into());
+        assets.remove(&id.into());
+    }
+}

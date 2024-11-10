@@ -1,5 +1,5 @@
 use super::{
-    context::RenderContext,
+    context::{RenderContext, RenderNodeAction},
     resources::{
         BufferDesc, GraphResource, GraphResourceId, GraphResources, RenderGraphBuffer,
         RenderGraphTexture, TextureDesc,
@@ -7,13 +7,13 @@ use super::{
 };
 use crate::{
     core::{RenderAssets, RenderDevice},
-    resources::{texture::RenderTexture, Id},
-    surface::{target::RenderTarget, RenderSurface, RenderSurfaceTexture},
+    resources::Id,
+    surface::{target::RenderTarget, RenderSurface},
 };
 use ecs::{
-    core::IndexMap,
+    core::{resource::Resource, IndexMap},
     system::AccessType,
-    world::{cell::WorldCell, World},
+    world::World,
 };
 use spatial::size::Size;
 use std::{any::TypeId, collections::HashMap};
@@ -67,14 +67,15 @@ impl From<(EdgeSlot, EdgeSlot)> for NodeEdge {
     }
 }
 
-pub trait RenderGraphNode: downcast_rs::Downcast + Sync + 'static {
+pub trait RenderGraphNode: downcast_rs::Downcast + Send + Sync + 'static {
     fn name(&self) -> &str;
 
-    fn run(&mut self, ctx: &RenderContext);
+    fn run(&mut self, ctx: &mut RenderContext);
 }
 downcast_rs::impl_downcast!(RenderGraphNode);
 
 pub struct RenderGraphBuilder {
+    surface: Id<RenderTarget>,
     resources: GraphResources,
     nodes: IndexMap<NodeId, Box<dyn RenderGraphNode>>,
     edges: Vec<NodeEdge>,
@@ -83,6 +84,7 @@ pub struct RenderGraphBuilder {
 impl RenderGraphBuilder {
     pub fn new() -> Self {
         Self {
+            surface: RenderSurface::ID,
             resources: GraphResources::new(),
             nodes: IndexMap::new(),
             edges: Vec::new(),
@@ -144,13 +146,16 @@ impl RenderGraphBuilder {
         self.resources.import_buffer(name, buffer)
     }
 
-    pub fn build(mut self, device: &RenderDevice, surface: &RenderSurface) -> RenderGraph {
+    pub fn set_surface(&mut self, surface: Id<RenderTarget>) {
+        self.surface = surface;
+    }
+
+    pub fn build(mut self, device: &RenderDevice, size: Size) -> RenderGraph {
         self.resources.build(device);
-        self.resources
-            .resize(device, Size::new(surface.width(), surface.height()));
+        self.resources.resize(device, size);
 
         let order = self.build_order();
-        RenderGraph::new(self.resources, self.nodes, order)
+        RenderGraph::new(self.surface, self.resources, self.nodes, order)
     }
 
     fn build_order(&self) -> Vec<Vec<usize>> {
@@ -206,19 +211,24 @@ impl RenderGraphBuilder {
     }
 }
 
+impl Resource for RenderGraphBuilder {}
+
 pub struct RenderGraph {
     resources: GraphResources,
     nodes: IndexMap<NodeId, Box<dyn RenderGraphNode>>,
     order: Vec<Vec<usize>>,
+    surface: Id<RenderTarget>,
 }
 
 impl RenderGraph {
     fn new(
+        surface: Id<RenderTarget>,
         resources: GraphResources,
         nodes: IndexMap<NodeId, Box<dyn RenderGraphNode>>,
         order: Vec<Vec<usize>>,
     ) -> Self {
         Self {
+            surface,
             resources,
             nodes,
             order,
@@ -257,34 +267,52 @@ impl RenderGraph {
         self.resources.resize(device, size);
     }
 
-    fn pre_run(&self, world: &WorldCell) {
-        let surface = match world.resource::<RenderSurface>().texture() {
-            Ok(texture) => texture,
-            Err(_) => return,
-        };
-
-        let texture = RenderTexture::new(None, surface.texture.create_view(&Default::default()));
-
-        world
-            .resource_mut::<RenderAssets<RenderTexture>>()
-            .add(RenderSurface::ID.to::<RenderTexture>(), texture);
-
-        world.resource_mut::<RenderSurfaceTexture>().set(surface);
-    }
-
     pub fn run(&mut self, world: &World) {
         let device = world.resource::<RenderDevice>();
         let targets = world.resource::<RenderAssets<RenderTarget>>();
-        let target = match targets.get(&RenderSurface::ID) {
+        let target = match targets.get(&self.surface) {
             Some(target) => target,
             None => return,
         };
 
         for group in &self.order {
+            let mut actions = vec![];
             for node in group {
-                let ctx = RenderContext::new(world, device, &self.resources, target);
-                self.nodes[*node].run(&ctx);
+                let mut ctx = RenderContext::new(world, device, &self.resources, target);
+                self.nodes[*node].run(&mut ctx);
+
+                let buffers = ctx.finish();
+                if !buffers.is_empty() {
+                    actions.extend(buffers);
+                    actions.push(RenderNodeAction::Flush);
+                }
+            }
+
+            let mut buffers = vec![];
+            for action in actions {
+                match action {
+                    RenderNodeAction::Submit(buffer) => buffers.push(buffer),
+                    RenderNodeAction::Flush => {
+                        if !buffers.is_empty() {
+                            device.queue.submit(buffers.drain(..));
+                            device.queue.on_submitted_work_done(|| {});
+                        }
+                    }
+                }
             }
         }
     }
 }
+
+impl Default for RenderGraph {
+    fn default() -> Self {
+        Self {
+            surface: RenderSurface::ID,
+            resources: GraphResources::new(),
+            nodes: Default::default(),
+            order: Default::default(),
+        }
+    }
+}
+
+impl Resource for RenderGraph {}

@@ -1,6 +1,5 @@
-use super::{binding::BindGroupLayout, mesh::MeshAttributeKind, shader::Shader};
+use super::{binding::BindGroupLayout, mesh::MeshAttributeKind, shader::Shader, Handle};
 use crate::core::{RenderAssets, RenderDevice};
-use asset::AssetHandle;
 use std::borrow::Cow;
 
 pub use wgpu::{
@@ -35,8 +34,8 @@ impl RenderPipeline {
         });
 
         let vertex_shader = match &desc.vertex.shader {
-            AssetHandle::Ref(id) => shaders.get(id.id())?,
-            AssetHandle::Asset(shader) => shader,
+            Handle::Ref(id) => shaders.get(id)?,
+            Handle::Owned(shader) => shader,
         };
 
         let vertex_buffer_layouts = desc
@@ -60,8 +59,8 @@ impl RenderPipeline {
         let fragment = match &desc.fragment {
             Some(state) => Some(wgpu::FragmentState {
                 module: match &state.shader {
-                    AssetHandle::Ref(id) => shaders.get(id.id())?.module(),
-                    AssetHandle::Asset(shader) => shader.module(),
+                    Handle::Ref(id) => shaders.get(id)?.module(),
+                    Handle::Owned(shader) => shader.module(),
                 },
                 entry_point: Some(&state.entry),
                 compilation_options: Default::default(),
@@ -122,13 +121,13 @@ impl VertexBufferLayout {
 }
 
 pub struct VertexState {
-    pub shader: AssetHandle<Shader>,
+    pub shader: Handle<Shader>,
     pub entry: Cow<'static, str>,
     pub buffers: Vec<VertexBufferLayout>,
 }
 
 pub struct FragmentState {
-    pub shader: AssetHandle<Shader>,
+    pub shader: Handle<Shader>,
     pub entry: Cow<'static, str>,
     pub targets: Vec<Option<ColorTargetState>>,
 }
@@ -146,7 +145,7 @@ pub struct RenderPipelineDesc<'a> {
 pub struct ComputePipelineDesc<'a> {
     pub label: Option<&'a str>,
     pub layout: Option<&'a [&'a BindGroupLayout]>,
-    pub shader: AssetHandle<Shader>,
+    pub shader: Handle<Shader>,
     pub entry: Cow<'static, str>,
 }
 
@@ -171,8 +170,8 @@ impl ComputePipeline {
         });
 
         let shader = match &desc.shader {
-            AssetHandle::Ref(id) => shaders.get(id.id())?,
-            AssetHandle::Asset(shader) => shader,
+            Handle::Ref(id) => shaders.get(id)?,
+            Handle::Owned(shader) => shader,
         };
 
         let desc = wgpu::ComputePipelineDescriptor {

@@ -7,7 +7,6 @@ pub struct RenderTargetTexture {
     width: u32,
     height: u32,
     format: TextureFormat,
-    depth_format: TextureFormat,
     filter_mode: FilterMode,
     wrap_mode: WrapMode,
     pixels: Vec<u8>,
@@ -18,24 +17,17 @@ impl RenderTargetTexture {
         width: u32,
         height: u32,
         format: TextureFormat,
-        depth_format: TextureFormat,
         filter_mode: FilterMode,
         wrap_mode: WrapMode,
-        pixels: Vec<u8>,
     ) -> Self {
         Self {
             wrap_mode,
             height,
             format,
             filter_mode,
-            depth_format,
             width,
-            pixels,
+            pixels: Vec::new(),
         }
-    }
-
-    pub fn depth_format(&self) -> TextureFormat {
-        self.depth_format
     }
 }
 

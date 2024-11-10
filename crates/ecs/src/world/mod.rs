@@ -155,6 +155,14 @@ impl World {
         self.non_send_resources.try_get_mut::<R>()
     }
 
+    pub fn has_resource<R: Resource>(&self) -> bool {
+        self.resources.contains::<R>()
+    }
+
+    pub fn has_non_send_resource<R: Resource>(&self) -> bool {
+        self.non_send_resources.contains::<R>()
+    }
+
     pub fn register<C: Component>(&mut self) -> &mut Self {
         self.archetypes.register_component::<C>();
         self.registry.register_component::<C>();
@@ -162,8 +170,7 @@ impl World {
     }
 
     pub fn register_event<E: Event>(&mut self) -> &mut Self {
-        let invoked = self.events.invoked();
-        self.resources.add(Events::<E>::new(invoked.clone()));
+        self.resources.add(Events::<E>::new(self.events.clone()));
         self
     }
 
@@ -250,6 +257,12 @@ impl World {
         self
     }
 
+    pub fn scoped_resource<R: Resource + Send>(&mut self, scope: impl FnOnce(&mut Self, &mut R)) {
+        let mut resource = self.remove_resource::<R>().expect("Resource not found");
+        scope(self, &mut resource);
+        self.add_resource(resource);
+    }
+
     pub fn run(&mut self, phase: impl Phase) {
         if !self.configs.is_empty() {
             self.systems.add_graphs(self.configs.build_graphs());
@@ -259,21 +272,17 @@ impl World {
     }
 
     pub fn flush(&mut self, phase: Option<PhaseId>) {
-        self.actions.drain().drain(..).for_each(|a| a.execute(self));
+        let mut actions = self.actions.take();
+        let mut invoked = self.take_invoked(phase);
+        while !actions.is_empty() || !invoked.is_empty() {
+            actions.drain(..).for_each(|a| a.execute(self));
 
-        let invoked = {
-            let invoked = self.events.invoked();
-            let mut invoked = invoked.lock().unwrap();
-            let mut invoked = invoked.drain(..).collect::<Vec<_>>();
-            if let Some(phases) = phase.and_then(|p| self.events.deferred(p)) {
-                invoked.extend(phases);
-            }
+            self.observers.build(self.mode());
+            self.observers.run(WorldCell::from(self as &Self), invoked);
 
-            invoked
-        };
-
-        self.observers.build(self.mode());
-        self.observers.run(WorldCell::from(self as &Self), invoked);
+            invoked = self.take_invoked(phase);
+            actions = self.actions.take();
+        }
     }
 
     pub fn flush_type(&mut self, ty: EventId) {
@@ -283,6 +292,21 @@ impl World {
             self.observers.build(self.mode());
             self.observers.run(WorldCell::from(self as &Self), vec![ty]);
         }
+    }
+
+    pub unsafe fn cell(&self) -> WorldCell {
+        WorldCell::from(self)
+    }
+
+    fn take_invoked(&self, phase: Option<PhaseId>) -> Vec<EventId> {
+        let invoked = self.events.invoked();
+        let mut invoked = invoked.lock().unwrap();
+        let mut invoked = invoked.drain(..).collect::<Vec<_>>();
+        if let Some(events) = phase.and_then(|p| self.events.deferred(p)) {
+            invoked.extend(events);
+        }
+
+        invoked
     }
 
     fn register_builtin(&mut self) {

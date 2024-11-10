@@ -199,39 +199,6 @@ impl<A: Asset> Into<Uuid> for AssetRef<A> {
     }
 }
 
-pub enum AssetHandle<A: Asset> {
-    Ref(AssetRef<A>),
-    Asset(A),
-}
-
-impl<A: Asset> AssetHandle<A> {
-    pub fn into_ref(self) -> Option<AssetRef<A>> {
-        match self {
-            Self::Ref(r) => Some(r),
-            Self::Asset(_) => None,
-        }
-    }
-
-    pub fn into_asset(self) -> Option<A> {
-        match self {
-            Self::Ref(_) => None,
-            Self::Asset(a) => Some(a),
-        }
-    }
-}
-
-impl<A: Asset> From<AssetRef<A>> for AssetHandle<A> {
-    fn from(r: AssetRef<A>) -> Self {
-        Self::Ref(r)
-    }
-}
-
-impl<A: Asset> From<A> for AssetHandle<A> {
-    fn from(asset: A) -> Self {
-        Self::Asset(asset)
-    }
-}
-
 pub struct AssetMetadata<A: Asset, S: Settings> {
     id: AssetId,
     settings: S,

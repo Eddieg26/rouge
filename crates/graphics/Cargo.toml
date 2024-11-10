@@ -16,4 +16,5 @@ uuid = { workspace = true }
 crc32fast = { workspace = true }
 downcast-rs = { workspace = true }
 bitflags = { workspace = true }
+pollster = { workspace = true }
 wgpu = { version = "23.0.0", features = ["spirv", "glsl"] }

@@ -3,7 +3,7 @@ use crate::core::{
     AssetUsage, Color, ReadWrite, RenderAsset, RenderAssetExtractor, RenderAssets, RenderDevice,
 };
 use asset::{Asset, AssetId};
-use ecs::system::{unlifetime::ReadRes, ArgItem, StaticSystemArg};
+use ecs::system::{unlifetime::ReadRes, ArgItem, StaticArg};
 use spatial::bounds::BoundingBox;
 use std::{hash::Hash, ops::Range};
 
@@ -609,7 +609,7 @@ impl RenderAsset for MeshBuffers {
 impl RenderAssetExtractor for Mesh {
     type Source = Mesh;
     type Asset = MeshBuffers;
-    type Arg = StaticSystemArg<'static, ReadRes<RenderDevice>>;
+    type Arg = StaticArg<'static, ReadRes<RenderDevice>>;
 
     fn extract(
         _: &AssetId,

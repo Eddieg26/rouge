@@ -1,5 +1,3 @@
-use std::{error::Error, sync::Arc};
-
 use crate::{
     app::{AppBuilders, AppTag, Apps, MainApp},
     phases::{Execute, PostExecute, PreExecute, Shutdown, Startup},
@@ -16,6 +14,7 @@ use ecs::{
         World,
     },
 };
+use std::{error::Error, sync::Arc};
 
 pub struct GameBuilder {
     apps: AppBuilders,
@@ -70,6 +69,14 @@ impl GameBuilder {
 
     pub fn try_non_send_resource_mut<R: Resource>(&mut self) -> Option<&mut R> {
         self.apps.main_world_mut().try_non_send_resource_mut::<R>()
+    }
+
+    pub fn has_resource<R: Resource + Send>(&self) -> bool {
+        self.apps.main_world().has_resource::<R>()
+    }
+
+    pub fn has_non_send_resource<R: Resource>(&self) -> bool {
+        self.apps.main_world().has_non_send_resource::<R>()
     }
 
     pub fn actions(&self) -> &WorldActions {
@@ -137,13 +144,15 @@ impl GameBuilder {
     }
 
     pub fn add_sub_app<A: AppTag>(&mut self) -> &mut SubApp {
-        self.add_resource(SubActions::<A>::new());
+        let sub_actions = {
+            let actions = self.actions().clone();
+            let app = self.apps.add::<A>();
+            app.add_resource(MainActions::new(actions));
+            app.actions().clone()
+        };
 
-        let actions = self.actions().clone();
-        let app = self.apps.add::<A>();
-        app.add_resource(MainActions::new(actions));
-
-        app
+        self.add_resource(SubActions::<A>::new(sub_actions));
+        self.apps.sub_mut::<A>().unwrap()
     }
 
     pub fn sub_app<A: AppTag>(&self) -> &SubApp {

@@ -10,6 +10,11 @@ impl Size {
         height: 0,
     };
 
+    pub const MAX: Self = Self {
+        width: u32::MAX,
+        height: u32::MAX,
+    };
+
     pub fn new(width: u32, height: u32) -> Self {
         Self { width, height }
     }
@@ -45,6 +50,13 @@ impl Size {
         Self {
             width: self.width.max(other.width),
             height: self.height.max(other.height),
+        }
+    }
+
+    pub fn min(&self, other: Self) -> Self {
+        Self {
+            width: self.width.min(other.width),
+            height: self.height.min(other.height),
         }
     }
 }

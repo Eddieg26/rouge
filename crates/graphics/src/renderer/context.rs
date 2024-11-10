@@ -43,10 +43,6 @@ impl<'a> RenderContext<'a> {
         self.target
     }
 
-    pub(crate) fn actions(&self) -> &[RenderNodeAction] {
-        &self.actions
-    }
-
     pub fn resource<R: Resource + Send>(&self) -> &R {
         self.world.resource::<R>()
     }

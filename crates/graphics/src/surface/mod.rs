@@ -3,18 +3,19 @@ use ecs::core::resource::Resource;
 use spatial::size::Size;
 use target::RenderTarget;
 use wgpu::{
-    rwh::{HasDisplayHandle, HasWindowHandle},
+    rwh::{HandleError, HasDisplayHandle, HasWindowHandle},
     SurfaceTargetUnsafe,
 };
 use window::Window;
 
 pub mod target;
 
+#[derive(Debug)]
 pub enum RenderSurfaceError {
     Create(wgpu::CreateSurfaceError),
     Adapter,
-    DisplayHandle(String),
-    WindowHandle(String),
+    DisplayHandle(HandleError),
+    WindowHandle(HandleError),
 }
 
 impl From<wgpu::CreateSurfaceError> for RenderSurfaceError {
@@ -22,6 +23,19 @@ impl From<wgpu::CreateSurfaceError> for RenderSurfaceError {
         Self::Create(error)
     }
 }
+
+impl std::fmt::Display for RenderSurfaceError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Create(e) => write!(f, "Failed to create surface: {}", e),
+            Self::Adapter => write!(f, "Failed to request adapter"),
+            Self::DisplayHandle(e) => write!(f, "{}", e),
+            Self::WindowHandle(e) => write!(f, "{}", e),
+        }
+    }
+}
+
+impl std::error::Error for RenderSurfaceError {}
 
 pub struct RenderSurface {
     inner: wgpu::Surface<'static>,
@@ -39,15 +53,15 @@ impl RenderSurface {
         window: &Window,
     ) -> Result<Self, RenderSurfaceError> {
         let surface = unsafe {
-            let display_handle = window
-                .inner()
-                .display_handle()
-                .map_err(|e| RenderSurfaceError::DisplayHandle(e.to_string()))?;
-
             let window_handle = window
                 .inner()
                 .window_handle()
-                .map_err(|e| RenderSurfaceError::WindowHandle(e.to_string()))?;
+                .map_err(|e| RenderSurfaceError::WindowHandle(e))?;
+
+            let display_handle = window
+                .inner()
+                .display_handle()
+                .map_err(|e| RenderSurfaceError::DisplayHandle(e))?;
 
             let target = SurfaceTargetUnsafe::RawHandle {
                 raw_display_handle: display_handle.into(),

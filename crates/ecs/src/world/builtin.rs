@@ -5,7 +5,7 @@ pub mod actions {
     };
     use crate::{
         archetype::table::Row,
-        core::{component::Component, entity::Entity},
+        core::{component::Component, entity::Entity, resource::Resource},
         event::Events,
         world::{action::WorldAction, cell::WorldCell, registry::ComponentExtension, World},
     };
@@ -153,6 +153,23 @@ pub mod actions {
 
             world.resource_mut::<Events<HierarchyUpdate>>().add(update);
 
+            Some(())
+        }
+    }
+
+    pub struct AddResource<R: Resource + Send> {
+        resource: R,
+    }
+
+    impl<R: Resource + Send> AddResource<R> {
+        pub fn new(resource: R) -> Self {
+            Self { resource }
+        }
+    }
+
+    impl<R: Resource + Send> WorldAction for AddResource<R> {
+        fn execute(self, world: &mut World) -> Option<()> {
+            world.add_resource(self.resource);
             Some(())
         }
     }

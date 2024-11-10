@@ -51,6 +51,7 @@ pub struct SystemConfig {
     name: Option<&'static str>,
     run: Box<dyn Fn(WorldCell) + Send + Sync>,
     access: fn() -> Vec<WorldAccess>,
+    custom: Vec<WorldAccess>,
     after: Option<SystemId>,
     is_send: bool,
 }
@@ -67,6 +68,7 @@ impl SystemConfig {
             name,
             run,
             access,
+            custom: Vec::new(),
             after: None,
             is_send,
         }
@@ -82,6 +84,10 @@ impl SystemConfig {
 
     pub fn access(&self) -> Vec<WorldAccess> {
         (self.access)()
+    }
+
+    pub fn add_custom(&mut self, access: WorldAccess) {
+        self.custom.push(access);
     }
 
     pub fn after(&self) -> Option<SystemId> {
@@ -172,6 +178,10 @@ pub enum WorldAccess {
         ty: ComponentId,
         access: AccessType,
     },
+    Other {
+        ty: Type,
+        access: AccessType,
+    },
     World,
 }
 
@@ -191,6 +201,11 @@ impl From<&WorldAccess> for WorldAccessMeta {
             },
             WorldAccess::Component { ty, access } => Self {
                 ty: ty.into(),
+                access: *access,
+                send: true,
+            },
+            WorldAccess::Other { ty, access } => Self {
+                ty: *ty,
                 access: *access,
                 send: true,
             },
@@ -244,6 +259,7 @@ impl WorldAccess {
         match self {
             WorldAccess::Resource { ty, .. } => ty.into(),
             WorldAccess::Component { ty, .. } => ty.into(),
+            WorldAccess::Other { ty, .. } => *ty,
             WorldAccess::World => Type::of::<World>(),
         }
     }
@@ -252,14 +268,16 @@ impl WorldAccess {
         match self {
             WorldAccess::Resource { access, .. } => *access,
             WorldAccess::Component { access, .. } => *access,
+            WorldAccess::Other { access, .. } => *access,
             WorldAccess::World => AccessType::Read,
         }
     }
 
     pub fn access_ty(&self) -> (Type, AccessType, bool) {
         match self {
-            WorldAccess::Resource { ty, access, send } => (ty.into(), *access, !send),
+            WorldAccess::Resource { ty, access, send } => (ty.into(), *access, *send),
             WorldAccess::Component { ty, access } => (ty.into(), *access, false),
+            WorldAccess::Other { ty, access } => (*ty, *access, false),
             WorldAccess::World => (Type::of::<World>(), AccessType::Read, true),
         }
     }
@@ -425,9 +443,9 @@ impl_into_system_configs!(A, B, C, D, E, F2, G, H);
 impl_into_system_configs!(A, B, C, D, E, F2, G, H, I);
 impl_into_system_configs!(A, B, C, D, E, F2, G, H, I, J);
 
-pub struct StaticSystemArg<'w, S: SystemArg>(ArgItem<'w, S>);
+pub struct StaticArg<'w, S: SystemArg>(ArgItem<'w, S>);
 
-impl<'w, S: SystemArg> std::ops::Deref for StaticSystemArg<'w, S> {
+impl<'w, S: SystemArg> std::ops::Deref for StaticArg<'w, S> {
     type Target = ArgItem<'w, S>;
 
     fn deref(&self) -> &Self::Target {
@@ -435,13 +453,13 @@ impl<'w, S: SystemArg> std::ops::Deref for StaticSystemArg<'w, S> {
     }
 }
 
-impl<'w, 's, S: SystemArg> std::ops::DerefMut for StaticSystemArg<'w, S> {
+impl<'w, 's, S: SystemArg> std::ops::DerefMut for StaticArg<'w, S> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
 }
 
-impl<'w, S: SystemArg> StaticSystemArg<'w, S> {
+impl<'w, S: SystemArg> StaticArg<'w, S> {
     pub fn into_inner(self) -> ArgItem<'w, S> {
         self.0
     }
@@ -455,11 +473,11 @@ impl<'w, S: SystemArg> StaticSystemArg<'w, S> {
     }
 }
 
-impl<S: SystemArg + 'static> SystemArg for StaticSystemArg<'_, S> {
-    type Item<'world> = StaticSystemArg<'world, S>;
+impl<S: SystemArg + 'static> SystemArg for StaticArg<'_, S> {
+    type Item<'world> = StaticArg<'world, S>;
 
     fn get<'a>(world: WorldCell<'a>) -> Self::Item<'a> {
-        StaticSystemArg(S::get(world))
+        StaticArg(S::get(world))
     }
 
     fn access() -> Vec<WorldAccess> {

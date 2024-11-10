@@ -1,12 +1,26 @@
-use asset::asset::{Asset, AssetId};
-use ecs::{
-    core::{resource::Resource, IndexMap},
-    system::{ArgItem, SystemArg},
+use asset::{
+    asset::{Asset, AssetId},
+    Assets,
 };
-use std::{hash::Hash, sync::Arc};
+use ecs::{
+    core::{
+        resource::{Res, ResMut, Resource, ResourceId},
+        IndexMap,
+    },
+    event::{Event, Events},
+    system::{
+        AccessType, ArgItem, IntoSystemConfigs, StaticArg, SystemArg, SystemConfig, WorldAccess,
+    },
+};
+use game::Main;
+use std::{collections::HashSet, hash::Hash, sync::Arc};
 
-pub trait RenderAsset: 'static {
-    type Id: Copy + Eq + Hash + 'static;
+pub trait RenderAsset: Send + 'static {
+    type Id: Copy + Eq + Hash + Send + 'static;
+
+    fn world() -> RenderAssetWorld {
+        RenderAssetWorld::Render
+    }
 }
 
 pub struct RenderAssets<R: RenderAsset> {
@@ -42,6 +56,14 @@ impl<R: RenderAsset> RenderAssets<R> {
 
     pub fn iter_mut(&mut self) -> impl Iterator<Item = (&R::Id, &mut R)> {
         self.assets.iter_mut()
+    }
+
+    pub fn values(&self) -> impl Iterator<Item = &R> {
+        self.assets.values()
+    }
+
+    pub fn values_mut(&mut self) -> impl Iterator<Item = &mut R> {
+        self.assets.values_mut()
     }
 
     pub fn contains(&self, id: R::Id) -> bool {
@@ -89,6 +111,45 @@ impl<R: RenderAsset> Default for RenderAssets<R> {
 
 impl<R: RenderAsset> Resource for RenderAssets<R> {}
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RenderAssetAction<A: Asset> {
+    Added { id: AssetId },
+    Modified { id: AssetId },
+    Removed { id: AssetId },
+
+    _Phantom(std::marker::PhantomData<A>),
+}
+
+pub struct RenderAssetActions<A: Asset> {
+    actions: Vec<RenderAssetAction<A>>,
+}
+
+impl<A: Asset> RenderAssetActions<A> {
+    pub fn new() -> Self {
+        Self {
+            actions: Vec::new(),
+        }
+    }
+
+    pub fn add(&mut self, action: RenderAssetAction<A>) {
+        self.actions.push(action);
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &RenderAssetAction<A>> {
+        self.actions.iter()
+    }
+
+    pub fn retain(&mut self, mut f: impl FnMut(&RenderAssetAction<A>) -> bool) {
+        self.actions.retain(&mut f);
+    }
+
+    pub fn clear(&mut self) {
+        self.actions.clear();
+    }
+}
+
+impl<A: Asset> Resource for RenderAssetActions<A> {}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum ReadWrite {
     Enabled,
@@ -112,19 +173,34 @@ pub enum ExtractError {
     MissingAsset,
     MissingDependency,
     DependencyFailed,
-    Error(Arc<dyn std::error::Error + 'static>),
+    Error(Arc<dyn std::error::Error + Send + Sync + 'static>),
 }
 
-impl<E: std::error::Error + 'static> From<E> for ExtractError {
-    fn from(error: E) -> Self {
+impl ExtractError {
+    pub fn from_error<E: std::error::Error + Send + Sync + 'static>(error: E) -> Self {
         Self::Error(Arc::new(error))
     }
 }
 
+impl std::fmt::Display for ExtractError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MissingAsset => write!(f, "Missing asset"),
+            Self::MissingDependency => write!(f, "Missing dependency"),
+            Self::DependencyFailed => write!(f, "Dependency failed"),
+            Self::Error(error) => write!(f, "{}", error),
+        }
+    }
+}
+
+impl std::error::Error for ExtractError {}
+
+impl Event for ExtractError {}
+
 #[allow(unused_variables)]
 pub trait RenderAssetExtractor: 'static {
     type Source: Asset;
-    type Asset: RenderAsset;
+    type Asset: RenderAsset<Id: From<AssetId>>;
     type Arg: SystemArg;
 
     fn extract(
@@ -149,8 +225,142 @@ pub trait RenderAssetExtractor: 'static {
     }
 }
 
+pub struct RenderAssetExtractors {
+    extractors: IndexMap<ResourceId, Vec<SystemConfig>>,
+    dependencies: IndexMap<ResourceId, HashSet<ResourceId>>,
+}
+
+impl RenderAssetExtractors {
+    pub fn new() -> Self {
+        Self {
+            extractors: IndexMap::new(),
+            dependencies: IndexMap::new(),
+        }
+    }
+
+    pub fn add<R: RenderAssetExtractor>(&mut self) {
+        let configs = match R::Asset::world() {
+            RenderAssetWorld::Main => Self::extract_render_asset_main::<R>.configs(),
+            RenderAssetWorld::Render => Self::extract_render_asset_render::<R>.configs(),
+        };
+
+        self.extractors
+            .entry(ResourceId::of::<RenderAssets<R::Asset>>())
+            .or_default()
+            .extend(configs);
+    }
+
+    pub fn add_dependency<R: RenderAssetExtractor, D: RenderAssetExtractor>(&mut self) {
+        self.dependencies
+            .entry(ResourceId::of::<RenderAssets<R::Asset>>())
+            .or_default()
+            .insert(ResourceId::of::<RenderAssets<D::Asset>>());
+    }
+
+    pub fn build(mut self) -> Vec<SystemConfig> {
+        for deps in self.dependencies.values() {
+            for dep in deps {
+                let configs = match self.extractors.get_mut(dep) {
+                    Some(configs) => configs,
+                    None => continue,
+                };
+
+                for config in configs {
+                    config.add_custom(WorldAccess::Resource {
+                        ty: *dep,
+                        access: AccessType::Read,
+                        send: true,
+                    });
+                }
+            }
+        }
+
+        self.extractors.into_values().flatten().collect()
+    }
+
+    fn extract_render_asset_main<R: RenderAssetExtractor>(
+        mut source_assets: Main<ResMut<Assets<R::Source>>>,
+        mut assets: Main<ResMut<RenderAssets<R::Asset>>>,
+        mut errors: Main<ResMut<Events<ExtractError>>>,
+        actions: Main<Res<RenderAssetActions<R::Source>>>,
+        arg: StaticArg<R::Arg>,
+    ) {
+        Self::extract_render_asset_inner::<R>(
+            &mut source_assets,
+            &mut assets,
+            &mut errors,
+            &actions,
+            arg,
+        );
+    }
+
+    fn extract_render_asset_render<R: RenderAssetExtractor>(
+        mut source_assets: Main<ResMut<Assets<R::Source>>>,
+        mut assets: ResMut<RenderAssets<R::Asset>>,
+        mut errors: Main<ResMut<Events<ExtractError>>>,
+        actions: Main<Res<RenderAssetActions<R::Source>>>,
+        arg: StaticArg<R::Arg>,
+    ) {
+        Self::extract_render_asset_inner::<R>(
+            &mut source_assets,
+            &mut assets,
+            &mut errors,
+            &actions,
+            arg,
+        );
+    }
+
+    fn extract_render_asset_inner<R: RenderAssetExtractor>(
+        source_assets: &mut Assets<R::Source>,
+        assets: &mut RenderAssets<R::Asset>,
+        errors: &mut Events<ExtractError>,
+        actions: &RenderAssetActions<R::Source>,
+        arg: StaticArg<R::Arg>,
+    ) {
+        let mut arg = arg.into_inner();
+
+        for action in actions.iter() {
+            match action {
+                RenderAssetAction::Added { id } => {
+                    let source = match source_assets.get_mut(id) {
+                        Some(source) => source,
+                        None => continue,
+                    };
+
+                    match R::extract(id, source, &mut arg) {
+                        Ok(asset) => {
+                            let id = <R::Asset as RenderAsset>::Id::from(*id);
+                            assets.add(id, asset);
+                        }
+                        Err(e) => errors.add(e),
+                    };
+                }
+                RenderAssetAction::Modified { id } => {
+                    let source = match source_assets.get_mut(id) {
+                        Some(source) => source,
+                        None => continue,
+                    };
+
+                    let asset = match assets.get_mut(&<R::Asset as RenderAsset>::Id::from(*id)) {
+                        Some(asset) => asset,
+                        None => continue,
+                    };
+
+                    if let Err(e) = R::update(id, source, asset, &mut arg) {
+                        errors.add(e);
+                    }
+                }
+                RenderAssetAction::Removed { id } => R::remove(id, assets, &mut arg),
+                _ => continue,
+            }
+        }
+    }
+}
+
+impl Resource for RenderAssetExtractors {}
+
 pub trait RenderResourceExtractor: 'static {
-    type Resource: Resource;
+    type Resource: Resource + Send;
     type Arg: SystemArg;
 
     fn extract(arg: ArgItem<Self::Arg>) -> Result<Self::Resource, ExtractError>;

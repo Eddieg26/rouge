@@ -4,24 +4,25 @@ use crate::{
         texture::{
             render::RenderTargetTexture,
             sampler::{Sampler, SamplerDesc},
-            RenderTexture, Texture, TextureDesc, TextureFormat,
+            RenderTexture, Texture, TextureFormat,
         },
         Id,
     },
 };
 use asset::AssetId;
-use ecs::system::{
-    unlifetime::{ReadRes, WriteRes},
-    StaticSystemArg,
+use ecs::{
+    event::{Event, Events},
+    system::{
+        unlifetime::{ReadRes, WriteRes},
+        StaticArg,
+    },
 };
 use spatial::size::Size;
 
 pub struct RenderTarget {
     pub size: Size,
     pub format: TextureFormat,
-    pub depth_format: TextureFormat,
     pub color: Id<RenderTexture>,
-    pub depth: Id<RenderTexture>,
     pub sampler: Id<Sampler>,
 }
 
@@ -32,12 +33,13 @@ impl RenderAsset for RenderTarget {
 impl RenderAssetExtractor for RenderTarget {
     type Source = RenderTargetTexture;
     type Asset = RenderTarget;
-    type Arg = StaticSystemArg<
+    type Arg = StaticArg<
         'static,
         (
             ReadRes<RenderDevice>,
             WriteRes<RenderAssets<RenderTexture>>,
             WriteRes<RenderAssets<Sampler>>,
+            WriteRes<Events<RenderTargetsUpdated>>,
         ),
     >;
 
@@ -46,25 +48,9 @@ impl RenderAssetExtractor for RenderTarget {
         source: &mut Self::Source,
         arg: &mut ecs::system::ArgItem<Self::Arg>,
     ) -> Result<Self::Asset, crate::core::ExtractError> {
-        let (device, textures, samplers) = arg.inner_mut();
+        let (device, textures, samplers, updates) = arg.inner_mut();
 
         let color = RenderTexture::create(device, source);
-        let depth = RenderTexture::from_desc(
-            device,
-            &TextureDesc {
-                label: None,
-                width: source.width(),
-                height: source.height(),
-                depth: source.depth(),
-                mipmaps: source.mipmaps(),
-                format: source.depth_format(),
-                dimension: source.dimension(),
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                    | wgpu::TextureUsages::TEXTURE_BINDING
-                    | wgpu::TextureUsages::COPY_DST,
-                pixels: vec![],
-            },
-        );
         let sampler = Sampler::create(
             device,
             &SamplerDesc {
@@ -76,19 +62,16 @@ impl RenderAssetExtractor for RenderTarget {
         );
 
         let color_id = Id::<RenderTexture>::from(id);
-        let depth_id = Id::<RenderTexture>::generate();
         let sampler_id = Id::<Sampler>::from(id);
 
         textures.add(color_id, color);
-        textures.add(depth_id, depth);
         samplers.add(sampler_id, sampler);
+        updates.add(RenderTargetsUpdated);
 
         Ok(RenderTarget {
             size: Size::new(source.width(), source.height()),
             format: source.format(),
-            depth_format: source.depth_format(),
             color: color_id,
-            depth: depth_id,
             sampler: sampler_id,
         })
     }
@@ -98,11 +81,28 @@ impl RenderAssetExtractor for RenderTarget {
         assets: &mut crate::core::RenderAssets<Self::Asset>,
         arg: &mut ecs::system::ArgItem<Self::Arg>,
     ) {
-        let (.., textures, samplers) = arg.inner_mut();
+        let (.., textures, samplers, updates) = arg.inner_mut();
         if let Some(target) = assets.remove(&id.into()) {
             textures.remove(&target.color);
-            textures.remove(&target.depth);
             samplers.remove(&target.sampler);
+            updates.add(RenderTargetsUpdated);
         }
     }
 }
+
+impl RenderAssets<RenderTarget> {
+    pub fn max_size(&self) -> Size {
+        self.iter()
+            .map(|(_, target)| target.size)
+            .fold(Size::ZERO, |acc, size| acc.max(size))
+    }
+
+    pub fn min_size(&self) -> Size {
+        self.iter()
+            .map(|(_, target)| target.size)
+            .fold(Size::MAX, |acc, size| acc.min(size))
+    }
+}
+
+pub struct RenderTargetsUpdated;
+impl Event for RenderTargetsUpdated {}

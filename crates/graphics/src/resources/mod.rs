@@ -103,3 +103,54 @@ impl<T> Id<T> {
         self.id
     }
 }
+
+pub enum Handle<T> {
+    Ref(Id<T>),
+    Owned(T),
+}
+
+impl<T> Handle<T> {
+    pub fn id(&self) -> Option<&Id<T>> {
+        match self {
+            Handle::Ref(id) => Some(id),
+            _ => None,
+        }
+    }
+
+    pub fn owned(&self) -> Option<&T> {
+        match self {
+            Handle::Owned(value) => Some(value),
+            _ => None,
+        }
+    }
+}
+
+impl<T: std::fmt::Debug> std::fmt::Debug for Handle<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Handle::Ref(id) => write!(f, "{:?}", id),
+            Handle::Owned(value) => write!(f, "{:?}", value),
+        }
+    }
+}
+
+impl<T: std::fmt::Display> std::fmt::Display for Handle<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Handle::Ref(id) => write!(f, "{:?}", id),
+            Handle::Owned(value) => write!(f, "{}", value),
+        }
+    }
+}
+
+impl<T> From<Id<T>> for Handle<T> {
+    fn from(value: Id<T>) -> Self {
+        Handle::Ref(value)
+    }
+}
+
+impl<T> From<T> for Handle<T> {
+    fn from(value: T) -> Self {
+        Handle::Owned(value)
+    }
+}

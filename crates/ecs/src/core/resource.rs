@@ -214,3 +214,63 @@ impl<'a, R: Resource> std::ops::DerefMut for ResMut<'a, R> {
         &mut self.ptr
     }
 }
+
+pub struct Cloned<R: Resource> {
+    value: R,
+}
+
+impl<R: Resource> Cloned<R> {
+    pub fn new(value: R) -> Self {
+        Self { value }
+    }
+}
+
+impl<R: Resource> std::ops::Deref for Cloned<R> {
+    type Target = R;
+
+    fn deref(&self) -> &Self::Target {
+        &self.value
+    }
+}
+
+impl<R: Resource> std::ops::DerefMut for Cloned<R> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.value
+    }
+}
+
+pub struct NonSend<'a, R: Resource> {
+    ptr: &'a R,
+}
+
+impl<'a, R: Resource> NonSend<'a, R> {
+    pub fn new(ptr: &'a R) -> Self {
+        Self { ptr }
+    }
+}
+
+impl<'a, R: Resource> std::ops::Deref for NonSend<'a, R> {
+    type Target = R;
+
+    fn deref(&self) -> &Self::Target {
+        &self.ptr
+    }
+}
+
+pub struct NonSendMut<'a, R: Resource> {
+    ptr: &'a mut R,
+}
+
+impl<'a, R: Resource> NonSendMut<'a, R> {
+    pub fn new(ptr: &'a mut R) -> Self {
+        Self { ptr }
+    }
+}
+
+impl<'a, R: Resource> std::ops::Deref for NonSendMut<'a, R> {
+    type Target = R;
+
+    fn deref(&self) -> &Self::Target {
+        &self.ptr
+    }
+}

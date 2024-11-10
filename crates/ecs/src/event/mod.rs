@@ -8,7 +8,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-pub trait Event: Send +  'static {}
+pub trait Event: Send + 'static {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct EventId(Type);
@@ -31,11 +31,11 @@ impl Into<Type> for EventId {
 
 pub struct Events<E: Event> {
     events: Vec<E>,
-    invoked: Arc<Mutex<IndexSet<EventId>>>,
+    invoked: InvokedEvents,
 }
 
 impl<E: Event> Events<E> {
-    pub fn new(invoked: Arc<Mutex<IndexSet<EventId>>>) -> Self {
+    pub fn new(invoked: InvokedEvents) -> Self {
         Self {
             events: Vec::new(),
             invoked,
@@ -44,12 +44,28 @@ impl<E: Event> Events<E> {
 
     pub fn add(&mut self, event: E) {
         self.events.push(event);
-        self.invoked.lock().unwrap().insert(EventId::of::<E>());
+        self.invoked
+            .invoked
+            .lock()
+            .unwrap()
+            .insert(EventId::of::<E>());
     }
 
     pub fn extend(&mut self, events: impl IntoIterator<Item = E>) {
         self.events.extend(events);
-        self.invoked.lock().unwrap().insert(EventId::of::<E>());
+        self.invoked
+            .invoked
+            .lock()
+            .unwrap()
+            .insert(EventId::of::<E>());
+    }
+
+    pub fn first(&self) -> Option<&E> {
+        self.events.first()
+    }
+
+    pub fn last(&self) -> Option<&E> {
+        self.events.last()
     }
 
     pub fn get(&self, index: usize) -> Option<&E> {
@@ -58,6 +74,10 @@ impl<E: Event> Events<E> {
 
     pub fn iter(&self) -> impl Iterator<Item = &E> {
         self.events.iter()
+    }
+
+    pub fn len(&self) -> usize {
+        self.events.len()
     }
 
     pub fn drain(&mut self) -> impl Iterator<Item = E> + '_ {
@@ -92,6 +112,7 @@ impl<'a, E: Event> IntoIterator for &'a Events<E> {
     }
 }
 
+#[derive(Clone)]
 pub struct InvokedEvents {
     invoked: Arc<Mutex<IndexSet<EventId>>>,
     deferred: Arc<Mutex<IndexMap<PhaseId, IndexSet<EventId>>>>,

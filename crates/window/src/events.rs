@@ -1,7 +1,10 @@
-use crate::{keyboard::KeyCode, winit::{
-    AxisId, DeviceId, ElementState, Force, KeyLocation, Modifiers, MouseButton, PhysicalPosition,
-    PhysicalSize, SmolStr, TouchPhase, WindowId,
-}};
+use crate::{
+    keyboard::KeyCode,
+    winit::{
+        AxisId, DeviceId, ElementState, Force, KeyLocation, Modifiers, MouseButton,
+        PhysicalPosition, PhysicalSize, SmolStr, TouchPhase, WindowId,
+    },
+};
 use ecs::event::Event;
 use std::path::PathBuf;
 
@@ -77,6 +80,7 @@ impl WindowFocused {
 
 impl Event for WindowFocused {}
 
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct WindowResized {
     pub size: PhysicalSize<u32>,
 }

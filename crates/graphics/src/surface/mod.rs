@@ -171,6 +171,7 @@ impl RenderSurfaceTexture {
     }
 
     pub fn set(&mut self, texture: wgpu::SurfaceTexture) {
+        assert!(self.0.is_none());
         self.0 = Some(texture);
     }
 

@@ -16,6 +16,7 @@ use ecs::{
         unlifetime::{ReadRes, WriteRes},
         StaticArg,
     },
+    world::action::WorldAction,
 };
 use spatial::size::Size;
 
@@ -39,7 +40,6 @@ impl RenderAssetExtractor for RenderTarget {
             ReadRes<RenderDevice>,
             WriteRes<RenderAssets<RenderTexture>>,
             WriteRes<RenderAssets<Sampler>>,
-            WriteRes<Events<RenderTargetsUpdated>>,
         ),
     >;
 
@@ -48,7 +48,7 @@ impl RenderAssetExtractor for RenderTarget {
         source: &mut Self::Source,
         arg: &mut ecs::system::ArgItem<Self::Arg>,
     ) -> Result<Self::Asset, crate::core::ExtractError> {
-        let (device, textures, samplers, updates) = arg.inner_mut();
+        let (device, textures, samplers) = arg.inner_mut();
 
         let color = RenderTexture::create(device, source);
         let sampler = Sampler::create(
@@ -66,7 +66,6 @@ impl RenderAssetExtractor for RenderTarget {
 
         textures.add(color_id, color);
         samplers.add(sampler_id, sampler);
-        updates.add(RenderTargetsUpdated);
 
         Ok(RenderTarget {
             size: Size::new(source.width(), source.height()),
@@ -81,11 +80,10 @@ impl RenderAssetExtractor for RenderTarget {
         assets: &mut crate::core::RenderAssets<Self::Asset>,
         arg: &mut ecs::system::ArgItem<Self::Arg>,
     ) {
-        let (.., textures, samplers, updates) = arg.inner_mut();
+        let (.., textures, samplers) = arg.inner_mut();
         if let Some(target) = assets.remove(&id.into()) {
             textures.remove(&target.color);
             samplers.remove(&target.sampler);
-            updates.add(RenderTargetsUpdated);
         }
     }
 }
@@ -104,5 +102,10 @@ impl RenderAssets<RenderTarget> {
     }
 }
 
-pub struct RenderTargetsUpdated;
-impl Event for RenderTargetsUpdated {}
+pub struct ResizeRenderGraph;
+impl Event for ResizeRenderGraph {}
+impl WorldAction for ResizeRenderGraph {
+    fn execute(self, world: &mut ecs::world::World) -> Option<()> {
+        Some(world.resource_mut::<Events<Self>>().add(self))
+    }
+}

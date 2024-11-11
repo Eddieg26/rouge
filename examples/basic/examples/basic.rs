@@ -15,8 +15,8 @@ use asset::{
     AsyncReadExt, AsyncWriteExt,
 };
 use graphics::{
-    core::Color,
-    plugin::RenderPlugin,
+    core::{Color, ExtractError},
+    plugin::{RenderApp, RenderPlugin},
     renderer::{
         graph::{RenderGraphBuilder, RenderGraphNode},
         pass::{Attachment, LoadOp, Operations, RenderPass, StoreOp},
@@ -104,6 +104,15 @@ fn main() {
         .add_plugin(RenderPlugin)
         .scoped_resource::<RenderGraphBuilder>(|_, builder| {
             builder.add_node(BasicRenderNode::new());
+            builder.add_node(NoopNode);
+            builder.add_edge::<BasicRenderNode, NoopNode>();
+        })
+        .scoped_sub_app::<RenderApp>(|_, app| {
+            app.observe::<ExtractError, _>(|errors: Res<Events<ExtractError>>| {
+                for error in errors.iter() {
+                    println!("Extract Error: {:?}", error);
+                }
+            });
         })
         .register_asset::<PlainText>()
         .add_importer::<PlainText>()
@@ -156,4 +165,14 @@ impl RenderGraphNode for BasicRenderNode {
 
         ctx.submit(encoder);
     }
+}
+
+pub struct NoopNode;
+
+impl RenderGraphNode for NoopNode {
+    fn name(&self) -> &str {
+        "Noop"
+    }
+
+    fn run(&mut self, _: &mut graphics::renderer::context::RenderContext) {}
 }

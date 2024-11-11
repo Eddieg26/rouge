@@ -272,6 +272,14 @@ impl AppBuilders {
         self.apps.get_mut(&ty).unwrap()
     }
 
+    pub fn remove<A: AppTag>(&mut self) -> Option<SubApp> {
+        self.apps.shift_remove(&Type::of::<A>())
+    }
+
+    pub fn insert(&mut self, tag: Type, app: SubApp) {
+        self.apps.insert(tag, app);
+    }
+
     pub fn into_apps(&mut self) -> Apps {
         Apps {
             main: std::mem::take(&mut self.main),

@@ -65,8 +65,10 @@ pub struct BatchEvents<E: Event> {
 }
 
 impl<E: Event> BatchEvents<E> {
-    pub fn new(events: Vec<E>) -> Self {
-        Self { events }
+    pub fn new(events: impl IntoIterator<Item = E>) -> Self {
+        Self {
+            events: events.into_iter().collect(),
+        }
     }
 
     pub fn into_inner(self) -> Vec<E> {

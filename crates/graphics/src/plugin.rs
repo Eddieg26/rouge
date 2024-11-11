@@ -8,14 +8,20 @@ use crate::{
     resources::{
         mesh::Mesh,
         shader::Shader,
-        texture::{sampler::Sampler, texture2d::Texture2d, RenderTexture},
+        texture::{
+            render::RenderTargetTexture,
+            sampler::{Sampler, SamplerDesc},
+            texture2d::Texture2d,
+            RenderTexture,
+        },
     },
     surface::{
-        target::{RenderTarget, RenderTargetsUpdated},
+        target::{RenderTarget, ResizeRenderGraph},
         RenderSurface, RenderSurfaceError, RenderSurfaceTexture,
     },
 };
 use asset::{
+    database::events::AssetEvent,
     future::block_on,
     plugin::{AssetExt, AssetPlugin},
     Assets,
@@ -23,10 +29,9 @@ use asset::{
 use ecs::{
     core::resource::{NonSend, Res, ResMut},
     event::{Event, Events},
-    system::{unlifetime::ReadRes, StaticArg},
+    system::StaticArg,
     world::{
-        access::Removed,
-        action::{WorldAction, WorldActions},
+        action::{BatchEvents, WorldAction, WorldActions},
         builtin::actions::AddResource,
         World,
     },
@@ -53,6 +58,18 @@ impl Plugin for RenderPlugin {
             .add_resource(RenderAssetExtractors::new())
             .add_resource(RenderGraphBuilder::new())
             .observe::<WindowCreated, _>(create_render_surface)
+            .observe::<WindowResized, _>(extract_resize_events)
+            .observe::<AssetEvent<RenderTargetTexture>, _>(
+                |events: Res<Events<AssetEvent<RenderTargetTexture>>>,
+                 actions: SubActions<RenderApp>| {
+                    if events
+                        .iter()
+                        .any(|event| !matches!(event, AssetEvent::Imported { .. }))
+                    {
+                        actions.add(ResizeRenderGraph);
+                    }
+                },
+            )
             .add_sub_app::<RenderApp>()
             .add_resource(RenderSurfaceTexture::default())
             .add_phase::<PreRender>()
@@ -65,10 +82,10 @@ impl Plugin for RenderPlugin {
             .add_systems(Present, present_surface_texture)
             .register_event::<WindowResized>()
             .register_event::<SurfaceCreated>()
-            .register_event::<RenderTargetsUpdated>()
+            .register_event::<ResizeRenderGraph>()
             .register_event::<ExtractError>()
             .observe::<WindowResized, _>(on_window_resized)
-            .observe::<RenderTargetsUpdated, _>(on_render_targets_updated);
+            .observe::<ResizeRenderGraph, _>(on_resize_render_graph);
 
         game.register_render_asset::<Sampler>();
         game.add_render_asset_extractor::<Mesh>();
@@ -158,12 +175,18 @@ impl WorldAction for AddRenderSurface {
             sampler: RenderSurface::ID.to(),
         };
 
+        let sampler = Sampler::create(&device, &SamplerDesc::default());
+
         world.get_mut().add_resource(surface);
         world.get_mut().add_resource(device);
 
         world
+            .resource_mut::<RenderAssets<Sampler>>()
+            .add(target.sampler, sampler);
+
+        world
             .resource_mut::<RenderAssets<RenderTarget>>()
-            .add(RenderSurface::ID.to(), target);
+            .add(RenderSurface::ID, target);
 
         world
             .resource_mut::<Events<SurfaceCreated>>()
@@ -228,12 +251,16 @@ fn present_surface_texture(mut surface_texture: ResMut<RenderSurfaceTexture>) {
     surface_texture.present();
 }
 
+fn extract_resize_events(events: Res<Events<WindowResized>>, actions: SubActions<RenderApp>) {
+    actions.add(BatchEvents::new(events.iter().copied()));
+}
+
 fn on_window_resized(
     events: Res<Events<WindowResized>>,
     device: Res<RenderDevice>,
     mut surface: ResMut<RenderSurface>,
     mut targets: ResMut<RenderAssets<RenderTarget>>,
-    mut updates: ResMut<Events<RenderTargetsUpdated>>,
+    mut updates: ResMut<Events<ResizeRenderGraph>>,
 ) {
     if let Some(event) = events.last() {
         let size = Size::new(event.size.width, event.size.height);
@@ -241,7 +268,7 @@ fn on_window_resized(
 
         if let Some(target) = targets.get_mut(&RenderSurface::ID) {
             target.size = size;
-            updates.add(RenderTargetsUpdated);
+            updates.add(ResizeRenderGraph);
         }
     }
 }
@@ -249,28 +276,7 @@ fn on_window_resized(
 pub struct SurfaceCreated;
 impl Event for SurfaceCreated {}
 
-impl RenderResourceExtractor for RenderGraph {
-    type Resource = RenderGraph;
-    type Arg = StaticArg<
-        'static,
-        (
-            ReadRes<RenderDevice>,
-            ReadRes<RenderAssets<RenderTarget>>,
-            Removed<RenderGraphBuilder>,
-        ),
-    >;
-
-    fn extract(arg: ecs::system::ArgItem<Self::Arg>) -> Result<Self::Resource, ExtractError> {
-        let (device, targets, builder) = arg.into_inner();
-        if let Some(builder) = builder.into_inner() {
-            Ok(builder.build(&device, targets.max_size()))
-        } else {
-            Ok(RenderGraph::default())
-        }
-    }
-}
-
-fn on_render_targets_updated(
+fn on_resize_render_graph(
     targets: Res<RenderAssets<RenderTarget>>,
     device: Res<RenderDevice>,
     mut graph: ResMut<RenderGraph>,
@@ -350,7 +356,12 @@ impl RenderAppExt for GameBuilder {
                 let arg = arg.into_inner();
                 match R::extract(arg) {
                     Ok(resource) => actions.add(AddResource::new(resource)),
-                    Err(error) => errors.add(error),
+                    Err(error) => {
+                        errors.add(error);
+                        if let Some(default) = R::default() {
+                            actions.add(AddResource::new(default));
+                        }
+                    }
                 }
             },
         );

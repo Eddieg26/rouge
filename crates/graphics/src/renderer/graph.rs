@@ -1,19 +1,16 @@
 use super::{
     context::{RenderContext, RenderNodeAction},
-    resources::{
-        BufferDesc, GraphResource, GraphResourceId, GraphResources, RenderGraphBuffer,
-        RenderGraphTexture, TextureDesc,
-    },
+    resources::{BufferDesc, GraphResources, RenderGraphBuffer, RenderGraphTexture, TextureDesc},
 };
 use crate::{
-    core::{RenderAssets, RenderDevice},
+    core::{ExtractError, RenderAssets, RenderDevice, RenderResourceExtractor},
     resources::Id,
     surface::{target::RenderTarget, RenderSurface},
 };
 use ecs::{
     core::{resource::Resource, IndexMap},
-    system::AccessType,
-    world::World,
+    system::{unlifetime::ReadRes, StaticArg},
+    world::{access::Removed, World},
 };
 use spatial::size::Size;
 use std::{any::TypeId, collections::HashMap};
@@ -28,41 +25,13 @@ impl NodeId {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum EdgeSlot {
-    Read {
-        node: NodeId,
-        resource: GraphResourceId,
-    },
-    Write {
-        node: NodeId,
-        resource: GraphResourceId,
-    },
-}
-
-impl EdgeSlot {
-    pub fn read<T: RenderGraphNode, R: GraphResource>(resource: &str) -> Self {
-        Self::Read {
-            node: NodeId::new::<T>(),
-            resource: R::id(resource),
-        }
-    }
-
-    pub fn write<T: RenderGraphNode, R: GraphResource>(resource: &str) -> Self {
-        Self::Write {
-            node: NodeId::new::<T>(),
-            resource: R::id(resource),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct NodeEdge {
-    pub from: EdgeSlot,
-    pub to: EdgeSlot,
+    pub from: NodeId,
+    pub to: NodeId,
 }
 
-impl From<(EdgeSlot, EdgeSlot)> for NodeEdge {
-    fn from((from, to): (EdgeSlot, EdgeSlot)) -> Self {
+impl From<(NodeId, NodeId)> for NodeEdge {
+    fn from((from, to): (NodeId, NodeId)) -> Self {
         Self { from, to }
     }
 }
@@ -115,11 +84,10 @@ impl RenderGraphBuilder {
         self.nodes.insert(NodeId::new::<T>(), Box::new(node));
     }
 
-    pub fn add_edge(&mut self, from: impl Into<EdgeSlot>, to: impl Into<EdgeSlot>) {
-        self.edges.push(NodeEdge {
-            from: from.into(),
-            to: to.into(),
-        });
+    pub fn add_edge<From: RenderGraphNode, To: RenderGraphNode>(&mut self) {
+        let from = NodeId::new::<From>();
+        let to = NodeId::new::<To>();
+        self.edges.push(NodeEdge { from, to });
     }
 
     pub fn create_texture(&mut self, name: &str, desc: TextureDesc) -> Id<RenderGraphTexture> {
@@ -150,15 +118,24 @@ impl RenderGraphBuilder {
         self.surface = surface;
     }
 
-    pub fn build(mut self, device: &RenderDevice, size: Size) -> RenderGraph {
+    pub fn build(
+        mut self,
+        device: &RenderDevice,
+        size: Size,
+    ) -> Result<RenderGraph, RenderGraphError> {
         self.resources.build(device);
         self.resources.resize(device, size);
 
-        let order = self.build_order();
-        RenderGraph::new(self.surface, self.resources, self.nodes, order)
+        let order = self.build_order()?;
+        Ok(RenderGraph::new(
+            self.surface,
+            self.resources,
+            self.nodes,
+            order,
+        ))
     }
 
-    fn build_order(&self) -> Vec<Vec<usize>> {
+    fn build_order(&self) -> Result<Vec<Vec<usize>>, RenderGraphError> {
         let mut order = Vec::new();
         let mut dependencies = self
             .nodes
@@ -167,24 +144,10 @@ impl RenderGraphBuilder {
             .collect::<HashMap<_, _>>();
 
         for edge in &self.edges {
-            let (node, resource, access) = match &edge.from {
-                EdgeSlot::Read { node, resource } => (node, resource, AccessType::Read),
-                EdgeSlot::Write { node, resource } => (node, resource, AccessType::Write),
-            };
-
-            let (to_node, to_resource, to_access) = match &edge.to {
-                EdgeSlot::Read { node, resource } => (node, resource, AccessType::Read),
-                EdgeSlot::Write { node, resource } => (node, resource, AccessType::Write),
-            };
-
-            if (access == AccessType::Write || to_access == AccessType::Write)
-                && resource == to_resource
-            {
-                dependencies
-                    .entry(to_node)
-                    .or_insert_with(Vec::new)
-                    .push(node);
-            }
+            dependencies
+                .entry(&edge.to)
+                .or_insert_with(Vec::new)
+                .push(&edge.from);
         }
 
         while !dependencies.is_empty() {
@@ -196,14 +159,14 @@ impl RenderGraphBuilder {
             }
 
             if group.is_empty() {
-                panic!("Cyclic dependency detected");
+                return Err(RenderGraphError::CyclicDependency);
             }
 
             dependencies.retain(|&node, _| !group.contains(&node));
             order.push(group);
         }
 
-        order
+        Ok(order
             .iter()
             .map(|group| {
                 group
@@ -211,11 +174,28 @@ impl RenderGraphBuilder {
                     .map(|id| self.nodes.get_index_of(*id).unwrap())
                     .collect::<Vec<_>>()
             })
-            .collect()
+            .collect())
     }
 }
 
 impl Resource for RenderGraphBuilder {}
+
+#[derive(Debug, Clone)]
+pub enum RenderGraphError {
+    CyclicDependency,
+}
+
+impl std::fmt::Display for RenderGraphError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            Self::CyclicDependency => {
+                write!(f, "RenderGraphError: Cyclic dependency detected")
+            }
+        }
+    }
+}
+
+impl std::error::Error for RenderGraphError {}
 
 pub struct RenderGraph {
     resources: GraphResources,
@@ -320,3 +300,31 @@ impl Default for RenderGraph {
 }
 
 impl Resource for RenderGraph {}
+
+impl RenderResourceExtractor for RenderGraph {
+    type Resource = RenderGraph;
+    type Arg = StaticArg<
+        'static,
+        (
+            ReadRes<RenderDevice>,
+            ReadRes<RenderAssets<RenderTarget>>,
+            Removed<RenderGraphBuilder>,
+        ),
+    >;
+
+    fn extract(arg: ecs::system::ArgItem<Self::Arg>) -> Result<Self::Resource, ExtractError> {
+        let (device, targets, builder) = arg.into_inner();
+        if let Some(builder) = builder.into_inner() {
+            match builder.build(&device, targets.max_size()) {
+                Ok(graph) => Ok(graph),
+                Err(error) => Err(ExtractError::from_error(error)),
+            }
+        } else {
+            Ok(Default::default())
+        }
+    }
+
+    fn default() -> Option<Self::Resource> {
+        Some(Default::default())
+    }
+}

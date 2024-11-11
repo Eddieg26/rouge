@@ -364,4 +364,8 @@ pub trait RenderResourceExtractor: 'static {
     type Arg: SystemArg;
 
     fn extract(arg: ArgItem<Self::Arg>) -> Result<Self::Resource, ExtractError>;
+
+    fn default() -> Option<Self::Resource> {
+        None
+    }
 }

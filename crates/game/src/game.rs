@@ -5,7 +5,7 @@ use crate::{
     MainActions, SubActions, SubApp,
 };
 use ecs::{
-    core::{component::Component, resource::Resource},
+    core::{component::Component, resource::Resource, Type},
     event::{Event, EventId, Events},
     system::{schedule::Phase, IntoSystemConfigs},
     task::TaskPool,
@@ -191,6 +191,16 @@ impl GameBuilder {
 
     pub fn try_sub_app_mut<A: AppTag>(&mut self) -> Option<&mut SubApp> {
         self.apps.sub_mut::<A>()
+    }
+
+    pub fn scoped_sub_app<A: AppTag>(
+        &mut self,
+        scope: impl FnOnce(&mut Self, &mut SubApp),
+    ) -> &mut Self {
+        let mut sub_app = self.apps.remove::<A>().unwrap();
+        scope(self, &mut sub_app);
+        self.apps.insert(Type::of::<A>(), sub_app);
+        self
     }
 
     pub fn add_systems<M>(

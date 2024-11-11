@@ -12,7 +12,6 @@ use ecs::{
     system::{unlifetime::ReadRes, StaticArg},
     world::{access::Removed, World},
 };
-use spatial::size::Size;
 use std::{any::TypeId, collections::HashMap};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -121,10 +120,11 @@ impl RenderGraphBuilder {
     pub fn build(
         mut self,
         device: &RenderDevice,
-        size: Size,
+        width: u32,
+        height: u32,
     ) -> Result<RenderGraph, RenderGraphError> {
         self.resources.build(device);
-        self.resources.resize(device, size);
+        self.resources.resize(device, width, height);
 
         let order = self.build_order()?;
         Ok(RenderGraph::new(
@@ -247,8 +247,8 @@ impl RenderGraph {
         self.resources.remove_buffer(handle);
     }
 
-    pub fn resize(&mut self, device: &RenderDevice, size: Size) {
-        self.resources.resize(device, size);
+    pub fn resize(&mut self, device: &RenderDevice, width: u32, height: u32) {
+        self.resources.resize(device, width, height);
     }
 
     pub fn run(&mut self, world: &World) {
@@ -315,7 +315,8 @@ impl RenderResourceExtractor for RenderGraph {
     fn extract(arg: ecs::system::ArgItem<Self::Arg>) -> Result<Self::Resource, ExtractError> {
         let (device, targets, builder) = arg.into_inner();
         if let Some(builder) = builder.into_inner() {
-            match builder.build(&device, targets.max_size()) {
+            let (width, height) = targets.max_size();
+            match builder.build(&device, width, height) {
                 Ok(graph) => Ok(graph),
                 Err(error) => Err(ExtractError::from_error(error)),
             }

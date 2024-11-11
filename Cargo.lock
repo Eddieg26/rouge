@@ -1032,6 +1032,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "graphics3d"
+version = "0.1.0"
+dependencies = [
+ "asset",
+ "ecs",
+ "game",
+ "spatial",
+]
+
+[[package]]
 name = "hashbrown"
 version = "0.14.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"

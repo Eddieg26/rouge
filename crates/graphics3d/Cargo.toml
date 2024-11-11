@@ -1,0 +1,10 @@
+[package]
+name = "graphics3d"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ecs = { path = "../ecs" }
+game = { path = "../game" }
+asset = { path = "../asset" }
+spatial = { path = "../spatial" }

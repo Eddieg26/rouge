@@ -38,7 +38,6 @@ use ecs::{
 };
 use game::{AppTag, ExitGame, Extract, GameBuilder, Main, Plugin, SubActions};
 use render_phases::PostExtract;
-use spatial::size::Size;
 use window::{
     events::{WindowCreated, WindowResized},
     plugin::WindowPlugin,
@@ -169,7 +168,8 @@ impl WorldAction for AddRenderSurface {
         let device = self.device;
 
         let target = RenderTarget {
-            size: Size::new(surface.width(), surface.height()),
+            width: surface.width(),
+            height: surface.height(),
             format: surface.format(),
             color: RenderSurface::ID.to(),
             sampler: RenderSurface::ID.to(),
@@ -263,11 +263,11 @@ fn on_window_resized(
     mut updates: ResMut<Events<ResizeRenderGraph>>,
 ) {
     if let Some(event) = events.last() {
-        let size = Size::new(event.size.width, event.size.height);
-        surface.resize(&device, size);
+        surface.resize(&device, event.size.width, event.size.height);
 
         if let Some(target) = targets.get_mut(&RenderSurface::ID) {
-            target.size = size;
+            target.width = event.size.width;
+            target.height = event.size.height;
             updates.add(ResizeRenderGraph);
         }
     }
@@ -281,7 +281,8 @@ fn on_resize_render_graph(
     device: Res<RenderDevice>,
     mut graph: ResMut<RenderGraph>,
 ) {
-    graph.resize(&device, targets.max_size());
+    let (width, height) = targets.max_size();
+    graph.resize(&device, width, height);
 }
 
 pub trait RenderAppExt {

@@ -2,7 +2,6 @@ use crate::{
     core::RenderDevice,
     resources::{texture::TextureFormat, Id},
 };
-use spatial::size::Size;
 use std::collections::HashMap;
 
 pub use wgpu::{BufferUsages, TextureUsages};
@@ -107,7 +106,8 @@ impl From<Id<RenderGraphBuffer>> for GraphResourceId {
 }
 
 pub struct GraphResources {
-    size: Size,
+    width: u32,
+    height: u32,
     texture_descs: HashMap<Id<RenderGraphTexture>, TextureDesc>,
     buffer_descs: HashMap<Id<RenderGraphBuffer>, BufferDesc>,
     textures: HashMap<Id<RenderGraphTexture>, RenderGraphTexture>,
@@ -117,7 +117,8 @@ pub struct GraphResources {
 impl GraphResources {
     pub fn new() -> Self {
         Self {
-            size: Size::ZERO,
+            width: 0,
+            height: 0,
             texture_descs: HashMap::new(),
             buffer_descs: HashMap::new(),
             textures: HashMap::new(),
@@ -173,12 +174,12 @@ impl GraphResources {
         self.buffers.remove(&handle);
     }
 
-    pub fn resize(&mut self, device: &RenderDevice, size: Size) {
-        self.size = size;
+    pub fn resize(&mut self, device: &RenderDevice, width: u32, height: u32) {
+        self.width = width;
+        self.height = height;
         for (handle, desc) in self.texture_descs.iter() {
             if !self.textures.contains_key(handle) {
-                let texture =
-                    RenderGraphTexture::create(device, desc, self.size.width, self.size.height);
+                let texture = RenderGraphTexture::create(device, desc, width, height);
                 self.textures.insert(*handle, texture);
             }
         }

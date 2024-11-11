@@ -1,6 +1,5 @@
 use crate::resources::{texture::TextureFormat, Id};
 use ecs::core::resource::Resource;
-use spatial::size::Size;
 use target::RenderTarget;
 use wgpu::{
     rwh::{HandleError, HasDisplayHandle, HasWindowHandle},
@@ -113,9 +112,9 @@ impl RenderSurface {
         })
     }
 
-    pub fn resize(&mut self, device: &wgpu::Device, size: Size) {
-        self.config.width = size.width;
-        self.config.height = size.height;
+    pub fn resize(&mut self, device: &wgpu::Device, width: u32, height: u32) {
+        self.config.width = width;
+        self.config.height = height;
         self.inner.configure(device, &self.config);
     }
 

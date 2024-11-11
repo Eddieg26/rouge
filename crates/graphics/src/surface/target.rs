@@ -18,10 +18,10 @@ use ecs::{
     },
     world::action::WorldAction,
 };
-use spatial::size::Size;
 
 pub struct RenderTarget {
-    pub size: Size,
+    pub width: u32,
+    pub height: u32,
     pub format: TextureFormat,
     pub color: Id<RenderTexture>,
     pub sampler: Id<Sampler>,
@@ -68,7 +68,8 @@ impl RenderAssetExtractor for RenderTarget {
         samplers.add(sampler_id, sampler);
 
         Ok(RenderTarget {
-            size: Size::new(source.width(), source.height()),
+            width: source.width(),
+            height: source.height(),
             format: source.format(),
             color: color_id,
             sampler: sampler_id,
@@ -89,16 +90,16 @@ impl RenderAssetExtractor for RenderTarget {
 }
 
 impl RenderAssets<RenderTarget> {
-    pub fn max_size(&self) -> Size {
+    pub fn max_size(&self) -> (u32, u32) {
         self.iter()
-            .map(|(_, target)| target.size)
-            .fold(Size::ZERO, |acc, size| acc.max(size))
+            .map(|(_, target)| (target.width, target.height))
+            .fold((0, 0), |acc, size| acc.max(size))
     }
 
-    pub fn min_size(&self) -> Size {
+    pub fn min_size(&self) -> (u32, u32) {
         self.iter()
-            .map(|(_, target)| target.size)
-            .fold(Size::MAX, |acc, size| acc.min(size))
+            .map(|(_, target)| (target.width, target.height))
+            .fold((0, 0), |acc, size| acc.min(size))
     }
 }
 

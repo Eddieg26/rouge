@@ -9,7 +9,7 @@ use crate::{
     importer::{ImportError, LoadError},
     io::{
         cache::{
-            ArtifactMeta, AssetCache, AssetInfo, AssetLoadPath, ErasedLoadedAsset, SharedLibrary,
+            ArtifactMeta, AssetCache, AssetInfo, LoadPath, ErasedLoadedAsset, SharedLibrary,
         },
         source::{AssetPath, AssetSource},
     },
@@ -294,7 +294,7 @@ impl ImportedAsset {
 pub struct AssetLoader;
 
 impl AssetLoader {
-    pub async fn load(&self, mut paths: Vec<AssetLoadPath>, database: &AssetDatabase) {
+    pub async fn load(&self, mut paths: Vec<LoadPath>, database: &AssetDatabase) {
         let config = &database.config;
         let library = &database.library;
         let states = &database.states;
@@ -337,7 +337,7 @@ impl AssetLoader {
                             let state = states.get(id).unwrap();
                             for dep in state.dependencies() {
                                 if states.get_load_state(*dep).is_unloaded_or_failed() {
-                                    dependencies.insert(AssetLoadPath::Id(*dep));
+                                    dependencies.insert(LoadPath::Id(*dep));
                                 }
                             }
 
@@ -346,7 +346,7 @@ impl AssetLoader {
                                 .parent
                                 .filter(|p| states.get_load_state(*p).is_unloaded_or_failed())
                             {
-                                dependencies.insert(AssetLoadPath::Id(parent));
+                                dependencies.insert(LoadPath::Id(parent));
                             }
 
                             deps_loaded.insert(*id);
@@ -392,14 +392,14 @@ impl AssetLoader {
 
     async fn load_asset(
         &self,
-        load_path: &AssetLoadPath,
+        load_path: &LoadPath,
         config: &AssetConfig,
         library: &SharedLibrary,
         states: &SharedStates,
     ) -> Result<Option<ErasedLoadedAsset>, LoadError> {
         let id = match load_path {
-            AssetLoadPath::Id(id) => *id,
-            AssetLoadPath::Path(path) => match library.read().await.get_id(path) {
+            LoadPath::Id(id) => *id,
+            LoadPath::Path(path) => match library.read().await.get_id(path) {
                 Some(id) => id,
                 None => return Err(LoadError::NotFound { path: path.clone() }),
             },

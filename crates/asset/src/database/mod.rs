@@ -1,5 +1,5 @@
 use crate::io::{
-    cache::{AssetLoadPath, SharedLibrary},
+    cache::{LoadPath, SharedLibrary},
     source::AssetPath,
     AssetIoError,
 };
@@ -26,7 +26,7 @@ pub enum DatabaseState {
 pub enum DatabaseEvent {
     Import(Vec<AssetPath>),
     Refresh(RefreshMode),
-    Load(Vec<AssetLoadPath>),
+    Load(Vec<LoadPath>),
 }
 
 pub enum DatabaseInitError {
@@ -104,7 +104,7 @@ impl AssetDatabase {
         }
     }
 
-    pub fn load(&self, paths: impl IntoIterator<Item = impl Into<AssetLoadPath>>) {
+    pub fn load(&self, paths: impl IntoIterator<Item = impl Into<LoadPath>>) {
         let paths = paths.into_iter().map(Into::into).collect::<Vec<_>>();
         if !paths.is_empty() {
             self.events

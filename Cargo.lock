@@ -1036,8 +1036,10 @@ name = "graphics3d"
 version = "0.1.0"
 dependencies = [
  "asset",
+ "crc32fast",
  "ecs",
  "game",
+ "graphics",
  "spatial",
 ]
 

@@ -1,7 +1,7 @@
 use crate::{
     asset::{Asset, AssetId, AssetMetadata, AssetType, Settings},
     io::{
-        cache::{Artifact, ArtifactMeta, AssetCache, AssetInfo, AssetLoadPath, LoadedAsset},
+        cache::{Artifact, ArtifactMeta, AssetCache, AssetInfo, LoadPath, LoadedAsset},
         source::{AssetPath, AssetSource},
         AssetIoError, AssetReader,
     },
@@ -233,12 +233,12 @@ pub enum LoadError {
     },
     NotRegistered {
         ty: AssetType,
-        path: AssetLoadPath,
+        path: LoadPath,
     },
     Io {
         id: AssetId,
         error: AssetIoError,
-        path: AssetLoadPath,
+        path: LoadPath,
     },
 }
 

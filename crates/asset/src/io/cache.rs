@@ -386,19 +386,19 @@ impl AssetLibrary {
 pub type SharedLibrary = Arc<RwLock<AssetLibrary>>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum AssetLoadPath {
+pub enum LoadPath {
     Id(AssetId),
     Path(AssetPath),
 }
 
-impl From<AssetId> for AssetLoadPath {
+impl From<AssetId> for LoadPath {
     fn from(id: AssetId) -> Self {
-        AssetLoadPath::Id(id)
+        LoadPath::Id(id)
     }
 }
 
-impl<I: Into<AssetPath>> From<I> for AssetLoadPath {
+impl<I: Into<AssetPath>> From<I> for LoadPath {
     fn from(path: I) -> Self {
-        AssetLoadPath::Path(path.into())
+        LoadPath::Path(path.into())
     }
 }

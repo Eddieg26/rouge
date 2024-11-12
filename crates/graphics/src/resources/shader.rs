@@ -230,3 +230,200 @@ impl RenderAssetExtractor for Shader {
         AssetUsage::Discard
     }
 }
+
+pub mod meta {
+    use std::borrow::Cow;
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub enum ShaderValue {
+        Float,
+        UInt,
+        SInt,
+        Bool,
+        Vec2,
+        Vec3,
+        Vec4,
+        Color,
+        Mat2,
+        Mat3,
+        Mat4,
+    }
+
+    impl ShaderValue {
+        /// Size in bytes
+        pub fn size(&self) -> usize {
+            match self {
+                Self::Float => 4,
+                Self::UInt => 4,
+                Self::SInt => 4,
+                Self::Bool => 1,
+                Self::Vec2 => 8,
+                Self::Vec3 => 12,
+                Self::Vec4 => 16,
+                Self::Color => 16,
+                Self::Mat2 => 16,
+                Self::Mat3 => 36,
+                Self::Mat4 => 64,
+            }
+        }
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct BufferLayout {
+        values: Vec<ShaderValue>,
+    }
+
+    impl BufferLayout {
+        pub fn new() -> Self {
+            Self { values: Vec::new() }
+        }
+
+        pub fn add(&mut self, value: ShaderValue) {
+            self.values.push(value);
+        }
+
+        pub fn iter(&self) -> impl Iterator<Item = &ShaderValue> {
+            self.values.iter()
+        }
+
+        pub fn len(&self) -> usize {
+            self.values.len()
+        }
+
+        pub fn size(&self) -> usize {
+            self.values.iter().map(|v| v.size()).sum()
+        }
+
+        pub fn aligned_size(&self, alignment: usize) -> usize {
+            let size = self.size();
+            let remainder = size % alignment;
+            if remainder == 0 {
+                size
+            } else {
+                size + alignment - remainder
+            }
+        }
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub enum ShaderBinding {
+        Texture2D,
+        Texture2DArray,
+        Texture3D,
+        Texture3DArray,
+        TextureCube,
+        Sampler,
+        Uniform {
+            layout: BufferLayout,
+        },
+        Storage {
+            layout: BufferLayout,
+            read_write: bool,
+        },
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum BuiltinValue {
+        VertexIndex,
+        InstanceIndex,
+        Position,
+        FrontFacing,
+        FragDepth,
+        SampleIndex,
+        SampleMask,
+        LocalInvocationId,
+        LocalInvocationIndex,
+        GlobalInvocationId,
+        WorkGroupId,
+        NumWorkGroups,
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum ShaderAttribute {
+        Align(u32),
+        Binding(u32),
+        BlendSrc(bool),
+        Builtin(BuiltinValue),
+        Group(u32),
+        Id(u32),
+        Location(u32),
+        Size(u32),
+        WorkGroupSize {
+            x: u32,
+            y: Option<u32>,
+            z: Option<u32>,
+        },
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct ShaderInput {
+        pub value: ShaderValue,
+        pub attribute: ShaderAttribute,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct ShaderOuput(ShaderInput);
+    impl std::ops::Deref for ShaderOuput {
+        type Target = ShaderInput;
+        fn deref(&self) -> &Self::Target {
+            &self.0
+        }
+    }
+
+    impl std::ops::DerefMut for ShaderOuput {
+        fn deref_mut(&mut self) -> &mut Self::Target {
+            &mut self.0
+        }
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct ShaderMeta {
+        entry: Cow<'static, str>,
+        inputs: Vec<ShaderInput>,
+        outputs: Vec<ShaderOuput>,
+        bindings: Vec<ShaderBinding>,
+    }
+
+    impl ShaderMeta {
+        pub fn new(entry: &'static str) -> Self {
+            Self {
+                entry: Cow::Borrowed(entry),
+                inputs: Vec::new(),
+                outputs: Vec::new(),
+                bindings: Vec::new(),
+            }
+        }
+
+        pub fn entry(&self) -> &str {
+            &self.entry
+        }
+
+        pub fn inputs(&self) -> &[ShaderInput] {
+            &self.inputs
+        }
+
+        pub fn outputs(&self) -> &[ShaderOuput] {
+            &self.outputs
+        }
+
+        pub fn bindings(&self) -> &[ShaderBinding] {
+            &self.bindings
+        }
+
+        pub fn add_input(&mut self, value: ShaderValue, attribute: ShaderAttribute) -> &mut Self {
+            self.inputs.push(ShaderInput { value, attribute });
+            self
+        }
+
+        pub fn add_output(&mut self, value: ShaderValue, attribute: ShaderAttribute) -> &mut Self {
+            self.outputs
+                .push(ShaderOuput(ShaderInput { value, attribute }));
+            self
+        }
+
+        pub fn add_binding(&mut self, binding: ShaderBinding) -> &mut Self {
+            self.bindings.push(binding);
+            self
+        }
+    }
+}

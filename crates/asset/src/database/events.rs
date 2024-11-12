@@ -2,7 +2,7 @@ use super::{state::AssetState, AssetDatabase};
 use crate::{
     asset::{Asset, AssetId, Assets},
     importer::LoadError,
-    io::{cache::AssetLoadPath, source::AssetPath},
+    io::{cache::LoadPath, source::AssetPath},
 };
 use ecs::{
     core::resource::{Res, ResMut, Resource},
@@ -323,7 +323,7 @@ impl WorldAction for ReloadAssets {
 
         let reloads = self.ids.drain(..).filter_map(|id| {
             let state = states.get_load_state(id);
-            (state.is_loaded() || state.is_failed()).then_some(AssetLoadPath::Id(id))
+            (state.is_loaded() || state.is_failed()).then_some(LoadPath::Id(id))
         });
 
         database.load(reloads);

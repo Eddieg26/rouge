@@ -139,12 +139,12 @@ impl std::ops::Deref for BindGroupLayout {
 }
 
 #[derive(Debug, Clone)]
-pub struct BindGroup<D: Send + Sync + Clone + 'static = ()> {
+pub struct BindGroup<D: Send + Sync + 'static = ()> {
     binding: Arc<wgpu::BindGroup>,
     data: D,
 }
 
-impl<D: Send + Sync + Clone + 'static> BindGroup<D> {
+impl<D: Send + Sync + 'static> BindGroup<D> {
     pub fn create(
         device: &RenderDevice,
         layout: &BindGroupLayout,
@@ -192,7 +192,7 @@ impl<D: Send + Sync + Clone + 'static> std::ops::Deref for BindGroup<D> {
 
 pub trait CreateBindGroup {
     type Arg: SystemArg + 'static;
-    type Data: Send + Sync + Clone + 'static;
+    type Data: Send + Sync + 'static;
 
     fn label() -> Option<&'static str> {
         None

@@ -1,5 +1,5 @@
 use asset::{io::cache::LoadPath, Asset, AssetId};
-use ecs::core::{IndexMap, Type};
+use ecs::core::{resource::Resource, IndexMap, Type};
 use graphics::{
     core::RenderAsset,
     resources::{
@@ -7,9 +7,9 @@ use graphics::{
         shader::meta::ShaderMeta,
     },
 };
+use std::collections::HashSet;
 
 pub mod pipeline;
-pub mod registry;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShaderModel {
@@ -51,58 +51,98 @@ impl RenderAsset for MaterialInstance {
     type Id = AssetId;
 }
 
-pub struct MaterialLayout {
-    pub layout: BindGroupLayout,
-    pub ref_count: usize,
+pub struct MaterialMeta {
+    pub model: ShaderModel,
+    pub mode: BlendMode,
+    pub meta: ShaderMeta,
+    pub shader: LoadPath,
 }
 
+impl MaterialMeta {
+    pub fn new<M: Material>() -> Self {
+        Self {
+            model: M::model(),
+            mode: M::mode(),
+            meta: M::meta(),
+            shader: M::shader().into(),
+        }
+    }
+}
+
+pub struct MaterialRegistry {
+    materials: IndexMap<MaterialType, MaterialMeta>,
+}
+
+impl MaterialRegistry {
+    pub fn new() -> Self {
+        Self {
+            materials: IndexMap::new(),
+        }
+    }
+
+    pub fn register<M: Material>(&mut self) {
+        self.materials.insert(
+            MaterialType::of::<M>(),
+            MaterialMeta {
+                model: M::model(),
+                mode: M::mode(),
+                meta: M::meta(),
+                shader: M::shader().into(),
+            },
+        );
+    }
+
+    pub fn get(&self, ty: MaterialType) -> Option<&MaterialMeta> {
+        self.materials.get(&ty)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&MaterialType, &MaterialMeta)> {
+        self.materials.iter()
+    }
+}
+
+impl Resource for MaterialRegistry {}
+
 pub struct MaterialLayouts {
-    layouts: IndexMap<MaterialType, MaterialLayout>,
+    layouts: IndexMap<MaterialType, BindGroupLayout>,
+    dependencies: IndexMap<MaterialType, HashSet<AssetId>>,
 }
 
 impl MaterialLayouts {
     pub fn new() -> Self {
         Self {
             layouts: IndexMap::new(),
+            dependencies: IndexMap::new(),
         }
     }
 
     pub fn get(&self, ty: &MaterialType) -> Option<&BindGroupLayout> {
-        self.layouts.get(ty).map(|layout| &layout.layout)
+        self.layouts.get(ty)
     }
 
     pub fn has(&self, ty: &MaterialType) -> bool {
         self.layouts.contains_key(ty)
     }
 
-    pub fn add(&mut self, ty: MaterialType, layout: BindGroupLayout) {
-        self.layouts.insert(
-            ty,
-            MaterialLayout {
-                layout,
-                ref_count: 1,
-            },
-        );
+    pub fn add_layout(&mut self, ty: MaterialType, layout: BindGroupLayout) {
+        self.layouts.insert(ty, layout);
     }
 
-    pub fn reference(&mut self, ty: &MaterialType) {
-        if let Some(layout) = self.layouts.get_mut(ty) {
-            layout.ref_count += 1;
-        }
+    pub fn add_dependency(&mut self, ty: MaterialType, id: AssetId) {
+        self.dependencies.entry(ty).or_default().insert(id);
     }
 
-    pub fn remove(&mut self, ty: &MaterialType) -> Option<BindGroupLayout> {
-        let remove = match self.layouts.get_mut(ty) {
-            Some(layout) => {
-                layout.ref_count -= 1;
-                layout.ref_count == 0
+    pub fn remove_dependency(&mut self, ty: MaterialType, id: AssetId) {
+        let removed = match self.dependencies.get_mut(&ty) {
+            Some(dependencies) => {
+                dependencies.remove(&id);
+                dependencies.is_empty()
             }
             None => false,
         };
 
-        match remove {
-            true => self.layouts.shift_remove(ty).map(|layout| layout.layout),
-            false => None,
+        if removed {
+            self.layouts.shift_remove(&ty);
         }
     }
 
@@ -114,3 +154,5 @@ impl MaterialLayouts {
         self.layouts.clear();
     }
 }
+
+impl Resource for MaterialLayouts {}

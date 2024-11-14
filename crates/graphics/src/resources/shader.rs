@@ -8,7 +8,7 @@ use std::{borrow::Cow, sync::Arc};
 
 use crate::core::{
     device::RenderDevice,
-    render_asset::{AssetUsage, ExtractError, RenderAsset, RenderAssetExtractor, RenderAssets},
+    asset::{AssetUsage, ExtractError, RenderAsset, RenderAssetExtractor, RenderAssets},
 };
 
 use super::Id;

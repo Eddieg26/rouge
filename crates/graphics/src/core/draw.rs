@@ -3,15 +3,18 @@ use ecs::core::{entity::Entity, IndexMap};
 use std::hash::Hash;
 
 pub trait Draw: Sized + Send + Sync + 'static {
+    const SORT: bool;
+    const CULL: bool;
+    
     type Depth: Ord + 'static;
+    type Bounds: 'static;
 
     fn entity(&self) -> Entity;
     fn depth(&self) -> Self::Depth;
-    fn sort() -> bool;
 }
 
 pub trait BatchDraw: Draw {
-    type Key: Copy + Eq + Hash + 'static;
+    type Key: Copy + Eq + Hash + Send + Sync + 'static;
     type BatchData: 'static;
     type InstanceData: Pod + 'static;
 
@@ -21,16 +24,14 @@ pub trait BatchDraw: Draw {
     fn can_batch(&self) -> bool;
 }
 
+pub trait RenderView: 'static {}
+
 pub struct DrawCalls<D: Draw> {
     calls: Vec<D>,
 }
 
-pub struct Batch<D: BatchDraw> {
-    data: D::BatchData,
-    instances: Vec<D::InstanceData>,
-}
-
 pub struct BatchDrawCalls<D: BatchDraw> {
-    batches: IndexMap<D::Key, Batch<D>>,
-    calls: Vec<D>,
+    batches: IndexMap<usize, D::Key>,
+    batched: Vec<D>,
+    unbatched: Vec<D>,
 }

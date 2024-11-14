@@ -1,4 +1,4 @@
-use crate::core::{device::RenderDevice, render_asset::RenderAsset};
+use crate::core::{device::RenderDevice, asset::RenderAsset};
 
 pub mod format;
 pub mod render;

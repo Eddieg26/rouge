@@ -1,4 +1,4 @@
-use super::{binding::BindGroupLayout, mesh::MeshAttributeKind, shader::Shader, Handle};
+use super::{binding::BindGroupLayout, mesh::MeshAttributeKind, shader::Shader, AtomicId, Handle};
 use crate::core::{RenderAssets, RenderDevice};
 use std::borrow::Cow;
 
@@ -6,12 +6,18 @@ pub use wgpu::{
     ColorTargetState, DepthStencilState, MultisampleState, PrimitiveState, VertexStepMode,
 };
 
-pub struct RenderPipeline(wgpu::RenderPipeline);
+type RenderPipelineId = AtomicId<RenderPipeline>;
+
+pub struct RenderPipeline {
+    inner: wgpu::RenderPipeline,
+    id: RenderPipelineId,
+}
+
 impl std::ops::Deref for RenderPipeline {
     type Target = wgpu::RenderPipeline;
 
     fn deref(&self) -> &Self::Target {
-        &self.0
+        &self.inner
     }
 }
 
@@ -81,17 +87,27 @@ impl RenderPipeline {
             cache: None,
         };
 
-        Some(RenderPipeline(device.create_render_pipeline(&desc)))
+        Some(RenderPipeline {
+            inner: device.create_render_pipeline(&desc),
+            id: RenderPipelineId::new(),
+        })
+    }
+
+    pub fn id(&self) -> RenderPipelineId {
+        self.id
     }
 
     pub fn inner(&self) -> &wgpu::RenderPipeline {
-        &self.0
+        &self.inner
     }
 }
 
 impl From<wgpu::RenderPipeline> for RenderPipeline {
     fn from(pipeline: wgpu::RenderPipeline) -> Self {
-        Self(pipeline)
+        Self {
+            inner: pipeline,
+            id: RenderPipelineId::new(),
+        }
     }
 }
 

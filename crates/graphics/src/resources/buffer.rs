@@ -2,9 +2,79 @@ use crate::core::device::RenderDevice;
 use std::num::NonZero;
 use wgpu::util::DeviceExt;
 
+use super::AtomicId;
+
 pub trait BufferData: bytemuck::Pod {}
 
 impl<T: bytemuck::Pod> BufferData for T {}
+
+type BufferId = AtomicId<Buffer>;
+
+pub struct Buffer {
+    buffer: wgpu::Buffer,
+    id: BufferId,
+}
+
+impl Buffer {
+    pub fn new(device: &RenderDevice, size: u64, flags: BufferFlags) -> Self {
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size,
+            usage: flags.usages(BufferKind::Storage),
+            mapped_at_creation: false,
+        });
+
+        Self {
+            buffer,
+            id: BufferId::new(),
+        }
+    }
+
+    pub fn with_data(device: &RenderDevice, data: &[u8], flags: BufferFlags) -> Self {
+        let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: None,
+            contents: data,
+            usage: flags.usages(BufferKind::Storage),
+        });
+
+        Self {
+            buffer,
+            id: BufferId::new(),
+        }
+    }
+
+    pub fn id(&self) -> BufferId {
+        self.id
+    }
+
+    pub fn inner(&self) -> &wgpu::Buffer {
+        &self.buffer
+    }
+
+    pub fn map(&self) -> wgpu::BufferSlice {
+        self.buffer.slice(..)
+    }
+
+    pub fn map_range(&self, range: std::ops::Range<u64>) -> wgpu::BufferSlice {
+        self.buffer.slice(range)
+    }
+
+    pub fn unmap(&self) {
+        self.buffer.unmap();
+    }
+
+    pub fn update(&self, device: &RenderDevice, offset: u64, data: &[u8]) {
+        device.queue.write_buffer(&self.buffer, offset, data);
+    }
+}
+
+impl std::ops::Deref for Buffer {
+    type Target = wgpu::Buffer;
+
+    fn deref(&self) -> &Self::Target {
+        &self.buffer
+    }
+}
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub enum Indices {
@@ -178,12 +248,13 @@ impl VertexBuffer {
         if self.flags.is_write() {
             let len = vertices.len() as u64;
             if offset + len > self.len {
-                self.buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                let buffer = device.create_buffer(&wgpu::BufferDescriptor {
                     label: None,
                     size: len * std::mem::size_of::<V>() as u64,
                     usage: self.flags.usages(BufferKind::Vertex),
                     mapped_at_creation: false,
                 });
+                self.buffer = buffer;
                 self.len = len + offset
             }
 

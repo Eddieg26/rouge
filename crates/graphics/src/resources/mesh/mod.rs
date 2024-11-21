@@ -1,4 +1,3 @@
-use super::buffer::{BufferFlags, IndexBuffer, Indices, Vertex, VertexBuffer};
 use crate::core::{
     AssetUsage, Color, ReadWrite, RenderAsset, RenderAssetExtractor, RenderAssets, RenderDevice,
 };
@@ -6,6 +5,9 @@ use asset::{Asset, AssetId};
 use ecs::system::{unlifetime::ReadRes, ArgItem, StaticArg};
 use spatial::bounds::BoundingBox;
 use std::{hash::Hash, ops::Range};
+use wgpu::BufferUsages;
+
+use super::buffer::{IndexBuffer, Indices, Vertex, VertexBuffer};
 
 #[derive(
     Copy, Clone, Debug, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize,
@@ -215,7 +217,7 @@ impl Asset for SubMesh {}
 pub struct Mesh {
     topology: MeshTopology,
     attributes: Vec<MeshAttribute>,
-    indices: Option<Indices>,
+    indices: Option<Indices<u32>>,
     bounds: BoundingBox,
     read_write: ReadWrite,
     sub_meshes: Vec<SubMesh>,
@@ -276,11 +278,11 @@ impl Mesh {
         self.dirty
     }
 
-    pub fn indices(&self) -> Option<&Indices> {
+    pub fn indices(&self) -> Option<&Indices<u32>> {
         self.indices.as_ref()
     }
 
-    pub fn indices_mut(&mut self) -> Option<&mut Indices> {
+    pub fn indices_mut(&mut self) -> Option<&mut Indices<u32>> {
         let indices = self.indices.as_mut();
 
         if indices.is_some() {
@@ -318,12 +320,12 @@ impl Mesh {
         removed
     }
 
-    pub fn set_indices(&mut self, indices: Indices) {
+    pub fn set_indices(&mut self, indices: Indices<u32>) {
         self.indices = Some(indices);
         self.dirty |= MeshDirty::INDICES;
     }
 
-    pub fn add_indices(&mut self, indices: Indices) {
+    pub fn add_indices(&mut self, indices: Indices<u32>) {
         match self.indices {
             Some(ref mut i) => i.extend(indices),
             None => self.indices = Some(indices),
@@ -409,8 +411,8 @@ impl Mesh {
         let count = self.vertex_count();
 
         let flags = match self.read_write {
-            ReadWrite::Enabled => BufferFlags::COPY_DST | BufferFlags::MAP_WRITE,
-            ReadWrite::Disabled => BufferFlags::empty(),
+            ReadWrite::Enabled => BufferUsages::COPY_DST | BufferUsages::MAP_WRITE,
+            ReadWrite::Disabled => BufferUsages::empty(),
         };
 
         for attribute in self.attributes() {
@@ -429,7 +431,7 @@ impl Mesh {
 
         let index_buffer = match indices {
             Some(indices) => {
-                let buffer = IndexBuffer::new(device, indices, flags);
+                let buffer = IndexBuffer::new(device, indices, flags, None);
                 Some(Box::new(buffer))
             }
             None => None,
@@ -539,7 +541,7 @@ impl<'a> IntoIterator for &'a MeshLayout {
 pub struct MeshBuffers {
     layout: MeshLayout,
     vertex_buffers: Box<[VertexBuffer]>,
-    index_buffer: Option<Box<IndexBuffer>>,
+    index_buffer: Option<Box<IndexBuffer<u32>>>,
     vertex_count: usize,
 }
 
@@ -577,11 +579,11 @@ impl MeshBuffers {
         self.vertex_count
     }
 
-    pub fn index_buffer(&self) -> Option<&IndexBuffer> {
+    pub fn index_buffer(&self) -> Option<&IndexBuffer<u32>> {
         self.index_buffer.as_ref().map(|b| b.as_ref())
     }
 
-    pub fn index_buffer_mut(&mut self) -> Option<&mut IndexBuffer> {
+    pub fn index_buffer_mut(&mut self) -> Option<&mut IndexBuffer<u32>> {
         self.index_buffer.as_mut().map(|b| b.as_mut())
     }
 
@@ -589,15 +591,15 @@ impl MeshBuffers {
         device: &RenderDevice,
         attribute: &MeshAttribute,
         count: usize,
-        flags: BufferFlags,
+        usage: BufferUsages,
     ) -> VertexBuffer {
         match attribute {
-            MeshAttribute::Position(v) => VertexBuffer::new(device, &v[..count], flags),
-            MeshAttribute::Normal(v) => VertexBuffer::new(device, &v[..count], flags),
-            MeshAttribute::TexCoord0(v) => VertexBuffer::new(device, &v[..count], flags),
-            MeshAttribute::TexCoord1(v) => VertexBuffer::new(device, &v[..count], flags),
-            MeshAttribute::Tangent(v) => VertexBuffer::new(device, &v[..count], flags),
-            MeshAttribute::Color(v) => VertexBuffer::new(device, &v[..count], flags),
+            MeshAttribute::Position(v) => VertexBuffer::new(device, &v[..count], usage, None),
+            MeshAttribute::Normal(v) => VertexBuffer::new(device, &v[..count], usage, None),
+            MeshAttribute::TexCoord0(v) => VertexBuffer::new(device, &v[..count], usage, None),
+            MeshAttribute::TexCoord1(v) => VertexBuffer::new(device, &v[..count], usage, None),
+            MeshAttribute::Tangent(v) => VertexBuffer::new(device, &v[..count], usage, None),
+            MeshAttribute::Color(v) => VertexBuffer::new(device, &v[..count], usage, None),
         }
     }
 }

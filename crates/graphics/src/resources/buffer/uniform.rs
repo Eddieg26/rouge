@@ -2,21 +2,21 @@ use super::{Buffer, BufferArrayIndex, BufferData, BufferId, Label, StaticArray};
 use crate::core::RenderDevice;
 use encase::{
     internal::{CreateFrom, Reader, WriteInto},
-    DynamicUniformBuffer, ShaderType,
+    DynamicUniformBuffer, ShaderType, UniformBuffer as EncaseUniformBuffer,
 };
 use std::{marker::PhantomData, num::NonZero};
 use wgpu::{BindingResource, BufferUsages};
 
 pub struct UniformBuffer<B: BufferData> {
     value: B,
-    data: encase::UniformBuffer<Vec<u8>>,
+    data: EncaseUniformBuffer<Vec<u8>>,
     buffer: Buffer,
     is_dirty: bool,
 }
 
 impl<B: BufferData> UniformBuffer<B> {
     pub fn new(device: &RenderDevice, value: B, usage: Option<BufferUsages>, label: Label) -> Self {
-        let mut data = encase::UniformBuffer::new(vec![]);
+        let mut data = EncaseUniformBuffer::new(vec![]);
         data.write(&value).unwrap();
 
         let usage = match usage {

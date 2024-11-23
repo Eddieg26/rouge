@@ -9,8 +9,8 @@ pub use wgpu::{
 type RenderPipelineId = AtomicId<RenderPipeline>;
 
 pub struct RenderPipeline {
-    inner: wgpu::RenderPipeline,
     id: RenderPipelineId,
+    inner: wgpu::RenderPipeline,
 }
 
 impl std::ops::Deref for RenderPipeline {

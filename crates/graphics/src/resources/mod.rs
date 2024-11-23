@@ -158,6 +158,7 @@ impl<T> From<T> for Handle<T> {
     }
 }
 
+#[derive(Debug)]
 pub struct AtomicId<T> {
     id: u32,
     _marker: std::marker::PhantomData<T>,

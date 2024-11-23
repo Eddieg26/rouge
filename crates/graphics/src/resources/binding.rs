@@ -1,8 +1,14 @@
-use super::texture::{TextureDimension, TextureFormat};
+use super::{
+    texture::{TextureDimension, TextureFormat},
+    AtomicId,
+};
 use crate::core::device::RenderDevice;
 use ecs::system::{ArgItem, SystemArg};
 use std::sync::Arc;
 use wgpu::BindGroupLayoutEntry;
+
+pub type BindGroupId = AtomicId<BindGroup>;
+pub type BindGroupLayoutId = AtomicId<BindGroupLayout>;
 
 pub use wgpu::{
     BindGroupEntry, BindingType, BufferBindingType, SamplerBindingType, ShaderStages,
@@ -108,6 +114,7 @@ impl BindGroupLayoutBuilder {
         });
 
         BindGroupLayout {
+            id: BindGroupLayoutId::new(),
             layout: Arc::new(layout),
         }
     }
@@ -115,14 +122,20 @@ impl BindGroupLayoutBuilder {
 
 #[derive(Debug, Clone)]
 pub struct BindGroupLayout {
+    id: BindGroupLayoutId,
     layout: Arc<wgpu::BindGroupLayout>,
 }
 
 impl BindGroupLayout {
     pub fn new(layout: wgpu::BindGroupLayout) -> Self {
         Self {
+            id: BindGroupLayoutId::new(),
             layout: Arc::new(layout),
         }
+    }
+
+    pub fn id(&self) -> BindGroupLayoutId {
+        self.id
     }
 
     pub fn inner(&self) -> &wgpu::BindGroupLayout {
@@ -140,6 +153,7 @@ impl std::ops::Deref for BindGroupLayout {
 
 #[derive(Debug, Clone)]
 pub struct BindGroup<D: Send + Sync + 'static = ()> {
+    id: BindGroupId,
     binding: Arc<wgpu::BindGroup>,
     data: D,
 }
@@ -158,9 +172,14 @@ impl<D: Send + Sync + 'static> BindGroup<D> {
         });
 
         Self {
+            id: BindGroupId::new(),
             binding: Arc::new(binding),
             data,
         }
+    }
+
+    pub fn id(&self) -> BindGroupId {
+        self.id
     }
 
     #[inline]
@@ -176,6 +195,7 @@ impl<D: Send + Sync + 'static> BindGroup<D> {
 impl From<wgpu::BindGroup> for BindGroup<()> {
     fn from(binding: wgpu::BindGroup) -> Self {
         Self {
+            id: BindGroupId::new(),
             binding: Arc::new(binding),
             data: (),
         }

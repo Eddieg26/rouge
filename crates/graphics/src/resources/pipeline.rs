@@ -1,16 +1,17 @@
 use super::{binding::BindGroupLayout, mesh::MeshAttributeKind, shader::Shader, AtomicId, Handle};
 use crate::core::{RenderAssets, RenderDevice};
-use std::borrow::Cow;
+use std::{borrow::Cow, num::NonZeroU32};
 
 pub use wgpu::{
     ColorTargetState, DepthStencilState, MultisampleState, PrimitiveState, VertexStepMode,
 };
 
-type RenderPipelineId = AtomicId<RenderPipeline>;
+pub type RenderPipelineId = AtomicId<RenderPipeline>;
 
 pub struct RenderPipeline {
     id: RenderPipelineId,
     inner: wgpu::RenderPipeline,
+    instances: Option<NonZeroU32>,
 }
 
 impl std::ops::Deref for RenderPipeline {
@@ -75,6 +76,8 @@ impl RenderPipeline {
             None => None,
         };
 
+        let instances = desc.instances;
+
         let desc = wgpu::RenderPipelineDescriptor {
             label: desc.label,
             layout: layout.as_ref(),
@@ -90,7 +93,13 @@ impl RenderPipeline {
         Some(RenderPipeline {
             inner: device.create_render_pipeline(&desc),
             id: RenderPipelineId::new(),
+            instances,
         })
+    }
+
+    pub fn with_instances(mut self, instances: NonZeroU32) -> Self {
+        self.instances = Some(instances);
+        self
     }
 
     pub fn id(&self) -> RenderPipelineId {
@@ -100,6 +109,10 @@ impl RenderPipeline {
     pub fn inner(&self) -> &wgpu::RenderPipeline {
         &self.inner
     }
+
+    pub fn instances(&self) -> Option<NonZeroU32> {
+        self.instances
+    }
 }
 
 impl From<wgpu::RenderPipeline> for RenderPipeline {
@@ -107,6 +120,7 @@ impl From<wgpu::RenderPipeline> for RenderPipeline {
         Self {
             inner: pipeline,
             id: RenderPipelineId::new(),
+            instances: None,
         }
     }
 }
@@ -156,6 +170,7 @@ pub struct RenderPipelineDesc<'a> {
     pub primitive: PrimitiveState,
     pub depth_state: Option<DepthStencilState>,
     pub multisample: MultisampleState,
+    pub instances: Option<NonZeroU32>,
 }
 
 pub struct ComputePipelineDesc<'a> {

@@ -158,7 +158,6 @@ impl<T> From<T> for Handle<T> {
     }
 }
 
-#[derive(Debug)]
 pub struct AtomicId<T> {
     id: u32,
     _marker: std::marker::PhantomData<T>,
@@ -203,6 +202,12 @@ impl<T> Clone for AtomicId<T> {
             id: self.id,
             _marker: std::marker::PhantomData,
         }
+    }
+}
+
+impl<T> std::fmt::Debug for AtomicId<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:x}", self.id)
     }
 }
 

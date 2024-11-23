@@ -1,10 +1,16 @@
+use crate::resources::{
+    binding::{BindGroup, BindGroupId},
+    buffer::{BufferSlice, BufferSliceId, IndexSlice},
+    pipeline::{RenderPipeline, RenderPipelineId},
+};
 use bytemuck::{Pod, Zeroable};
 use ecs::{
     core::{entity::Entity, IndexMap},
     system::SystemArg,
 };
 use glam::{Mat4, Vec4};
-use std::hash::Hash;
+use std::{collections::HashMap, hash::Hash};
+use wgpu::IndexFormat;
 
 pub trait Draw: Sized + Send + Sync + 'static {
     fn entity(&self) -> Entity;
@@ -155,10 +161,89 @@ impl<D: BatchDraw + Ord> BatchDrawCalls<D> {
     }
 }
 
-
-
 pub struct RenderState<'a> {
     pass: &'a mut wgpu::RenderPass<'a>,
+    vertex_buffers: HashMap<u32, BufferSliceId>,
+    index_buffer: Option<BufferSliceId>,
+    bind_groups: HashMap<u32, (BindGroupId, Vec<u32>)>,
+    pipeline: Option<RenderPipelineId>,
+}
+
+impl<'a> RenderState<'a> {
+    pub fn new(pass: &'a mut wgpu::RenderPass<'a>) -> Self {
+        Self {
+            pass,
+            vertex_buffers: HashMap::new(),
+            index_buffer: None,
+            bind_groups: HashMap::new(),
+            pipeline: None,
+        }
+    }
+
+    pub fn set_vertex_buffer(&mut self, slot: u32, slice: BufferSlice<'_>) {
+        match self.vertex_buffers.get(&slot) {
+            Some(id) if id != &slice.id() => {
+                self.pass.set_vertex_buffer(slot, *slice);
+                self.vertex_buffers.insert(slot, slice.id());
+            }
+            None => {
+                self.pass.set_vertex_buffer(slot, *slice);
+                self.vertex_buffers.insert(slot, slice.id());
+            }
+            _ => (),
+        }
+    }
+
+    pub fn set_index_buffer(&mut self, slice: IndexSlice<'_>) {
+        match self.index_buffer.as_ref() {
+            Some(id) if id != &slice.id() => {
+                self.pass.set_index_buffer(*slice, IndexFormat::Uint32);
+                self.index_buffer = Some(slice.id());
+            }
+            None => {
+                self.pass.set_index_buffer(*slice, IndexFormat::Uint32);
+                self.index_buffer = Some(slice.id());
+            }
+            _ => (),
+        }
+    }
+
+    pub fn set_bind_group<D: Send + Sync + 'static>(
+        &mut self,
+        group: u32,
+        bind_group: &BindGroup<D>,
+        offset: &[u32],
+    ) {
+        match self.bind_groups.get(&group) {
+            Some((id, bindings)) if id != &bind_group.id() || bindings.as_slice() == offset => {
+                self.pass
+                    .set_bind_group(group, Some(bind_group.inner()), offset);
+                self.bind_groups
+                    .insert(group, (bind_group.id(), offset.to_vec()));
+            }
+            None => {
+                self.pass
+                    .set_bind_group(group, Some(bind_group.inner()), offset);
+                self.bind_groups
+                    .insert(group, (bind_group.id(), offset.to_vec()));
+            }
+            _ => (),
+        }
+    }
+
+    pub fn set_pipeline(&mut self, pipeline: &RenderPipeline) {
+        if self.pipeline.as_ref() != Some(&pipeline.id()) {
+            self.pass.set_pipeline(pipeline);
+            self.pipeline = Some(pipeline.id());
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.vertex_buffers.clear();
+        self.index_buffer = None;
+        self.bind_groups.clear();
+        self.pipeline = None;
+    }
 }
 
 pub trait DrawSystem {

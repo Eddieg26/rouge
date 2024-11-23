@@ -1,8 +1,8 @@
-use super::{Buffer, Label};
+use super::{Buffer, BufferId, BufferSlice, BufferSliceId, Label};
 use crate::core::RenderDevice;
 use bytemuck::{Pod, Zeroable};
-use std::marker::PhantomData;
-use wgpu::BufferUsages;
+use std::{marker::PhantomData, ops::RangeBounds};
+use wgpu::{BufferUsages, IndexFormat};
 
 pub trait Index:
     Copy + Clone + Pod + Zeroable + serde::Serialize + for<'a> serde::Deserialize<'a> + 'static
@@ -99,6 +99,13 @@ impl<I: Index> IndexBuffer<I> {
         &self.buffer
     }
 
+    pub fn slice<S: RangeBounds<u64>>(&self, bounds: S) -> IndexSlice {
+        IndexSlice {
+            format: I::format(),
+            slice: self.buffer.slice(bounds),
+        }
+    }
+
     pub fn len(&self) -> u64 {
         self.len
     }
@@ -110,5 +117,36 @@ impl<I: Index> IndexBuffer<I> {
     pub fn update(&mut self, device: &RenderDevice, offset: u64, indices: &Indices<I>) {
         let data = bytemuck::cast_slice(indices);
         self.buffer.update(device, offset, data);
+    }
+}
+
+pub struct IndexSlice<'a> {
+    format: IndexFormat,
+    slice: BufferSlice<'a>,
+}
+
+impl<'a> IndexSlice<'a> {
+    pub fn buffer_id(&self) -> BufferId {
+        self.slice.buffer_id()
+    }
+
+    pub fn id(&self) -> BufferSliceId {
+        self.slice.id()
+    }
+
+    pub fn format(&self) -> IndexFormat {
+        self.format
+    }
+
+    pub fn slice(&self) -> &BufferSlice<'a> {
+        &self.slice
+    }
+}
+
+impl<'a> std::ops::Deref for IndexSlice<'a> {
+    type Target = wgpu::BufferSlice<'a>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.slice.slice()
     }
 }

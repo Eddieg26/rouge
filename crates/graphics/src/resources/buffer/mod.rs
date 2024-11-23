@@ -5,7 +5,11 @@ use encase::{
     private::{ArrayMetadata, Metadata, RuntimeSizedArray},
     ShaderSize, ShaderType,
 };
-use std::{marker::PhantomData, num::NonZero, ops::Deref};
+use std::{
+    marker::PhantomData,
+    num::NonZero,
+    ops::{Deref, RangeBounds},
+};
 use wgpu::{util::DeviceExt, BindingResource, BufferUsages};
 
 pub mod array;
@@ -74,6 +78,10 @@ impl Buffer {
         &self.inner
     }
 
+    pub fn slice<S: RangeBounds<u64>>(&self, bounds: S) -> BufferSlice {
+        BufferSlice::new(self, bounds)
+    }
+
     pub fn resize(&mut self, device: &RenderDevice, size: u64) {
         if size != self.inner.size() {
             self.inner = device.create_buffer(&wgpu::BufferDescriptor {
@@ -98,6 +106,75 @@ impl Deref for Buffer {
 
     fn deref(&self) -> &Self::Target {
         &self.inner
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct BufferSliceId {
+    pub id: BufferId,
+    pub start: u64,
+    pub end: u64,
+}
+
+pub struct BufferSlice<'a> {
+    id: BufferId,
+    start: u64,
+    end: u64,
+    slice: wgpu::BufferSlice<'a>,
+}
+
+impl<'a> BufferSlice<'a> {
+    fn new<S: RangeBounds<u64>>(buffer: &'a Buffer, bounds: S) -> Self {
+        let start = match bounds.start_bound() {
+            std::ops::Bound::Included(start) => *start,
+            std::ops::Bound::Excluded(start) => start + 1,
+            std::ops::Bound::Unbounded => 0,
+        };
+
+        let end = match bounds.end_bound() {
+            std::ops::Bound::Included(end) => *end + 1,
+            std::ops::Bound::Excluded(end) => *end,
+            std::ops::Bound::Unbounded => buffer.size(),
+        };
+
+        Self {
+            id: buffer.id(),
+            start,
+            end,
+            slice: buffer.inner.slice(bounds),
+        }
+    }
+
+    pub fn buffer_id(&self) -> BufferId {
+        self.id
+    }
+
+    pub fn id(&self) -> BufferSliceId {
+        BufferSliceId {
+            id: self.id,
+            start: self.start,
+            end: self.end,
+        }
+    }
+
+    pub fn start(&self) -> u64 {
+        self.start
+    }
+
+    pub fn end(&self) -> u64 {
+        self.end
+    }
+
+    pub fn slice(&self) -> &wgpu::BufferSlice<'a> {
+        &self.slice
+    }
+}
+
+impl<'a> Deref for BufferSlice<'a> {
+    type Target = wgpu::BufferSlice<'a>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.slice
     }
 }
 

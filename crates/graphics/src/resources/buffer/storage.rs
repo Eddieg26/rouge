@@ -2,26 +2,26 @@ use super::{Buffer, BufferArrayIndex, BufferData, BufferId, Label, StaticArray};
 use crate::core::RenderDevice;
 use encase::{
     internal::{CreateFrom, Reader, WriteInto},
-    DynamicUniformBuffer, ShaderType,
+    DynamicStorageBuffer, ShaderType,
 };
 use std::{marker::PhantomData, num::NonZero};
 use wgpu::{BindingResource, BufferUsages};
 
-pub struct UniformBuffer<B: BufferData> {
+pub struct StorageBuffer<B: BufferData> {
     value: B,
-    data: encase::UniformBuffer<Vec<u8>>,
+    data: encase::StorageBuffer<Vec<u8>>,
     buffer: Buffer,
     is_dirty: bool,
 }
 
-impl<B: BufferData> UniformBuffer<B> {
+impl<B: BufferData> StorageBuffer<B> {
     pub fn new(device: &RenderDevice, value: B, usage: Option<BufferUsages>, label: Label) -> Self {
-        let mut data = encase::UniformBuffer::new(vec![]);
+        let mut data = encase::StorageBuffer::new(vec![]);
         data.write(&value).unwrap();
 
         let usage = match usage {
-            Some(usage) => usage | BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-            None => BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+            Some(usage) => usage | BufferUsages::STORAGE | BufferUsages::COPY_DST,
+            None => BufferUsages::STORAGE | BufferUsages::COPY_DST,
         };
         let buffer = Buffer::with_data(device, data.as_ref(), usage, label);
 
@@ -76,22 +76,22 @@ impl<B: BufferData> UniformBuffer<B> {
     }
 }
 
-pub struct UniformBufferArray<B: ShaderType> {
+pub struct StorageBufferArray<B: ShaderType> {
     label: Label,
     buffer: Option<Buffer>,
-    data: DynamicUniformBuffer<Vec<u8>>,
+    data: DynamicStorageBuffer<Vec<u8>>,
     usage: BufferUsages,
     is_dirty: bool,
     _phantom: PhantomData<B>,
 }
 
-impl<B: ShaderType> UniformBufferArray<B> {
+impl<B: ShaderType> StorageBufferArray<B> {
     pub fn new() -> Self {
         Self {
             label: None,
             buffer: None,
-            data: DynamicUniformBuffer::new(vec![]),
-            usage: BufferUsages::COPY_DST | BufferUsages::UNIFORM,
+            data: DynamicStorageBuffer::new(vec![]),
+            usage: BufferUsages::COPY_DST | BufferUsages::STORAGE,
             is_dirty: false,
             _phantom: Default::default(),
         }
@@ -101,8 +101,8 @@ impl<B: ShaderType> UniformBufferArray<B> {
         Self {
             label: None,
             buffer: None,
-            data: DynamicUniformBuffer::new_with_alignment(vec![], alignment),
-            usage: BufferUsages::COPY_DST | BufferUsages::UNIFORM,
+            data: DynamicStorageBuffer::new_with_alignment(vec![], alignment),
+            usage: BufferUsages::COPY_DST | BufferUsages::STORAGE,
             is_dirty: false,
             _phantom: Default::default(),
         }
@@ -180,7 +180,7 @@ impl<B: ShaderType> UniformBufferArray<B> {
     }
 }
 
-impl<B: ShaderType + WriteInto> UniformBufferArray<B> {
+impl<B: ShaderType + WriteInto> StorageBufferArray<B> {
     pub fn push(&mut self, value: &B) {
         self.data.write(value).unwrap();
         self.is_dirty = true;
@@ -199,7 +199,7 @@ impl<B: ShaderType + WriteInto> UniformBufferArray<B> {
     }
 }
 
-impl<B: ShaderType + CreateFrom> UniformBufferArray<B> {
+impl<B: ShaderType + CreateFrom> StorageBufferArray<B> {
     pub fn get(&self, index: usize) -> B {
         let offset = index * B::min_size().get() as usize;
         let mut reader = Reader::new::<B>(self.data.as_ref(), offset).unwrap();
@@ -207,107 +207,22 @@ impl<B: ShaderType + CreateFrom> UniformBufferArray<B> {
     }
 }
 
-pub struct StaticUniformBufferArray<B: BufferData, const N: usize> {
+pub struct BatchedStorageBuffer<B: BufferData> {
     label: Label,
-    buffer: Option<Buffer>,
-    values: [B; N],
-    data: Vec<u8>,
-    usage: BufferUsages,
-    is_dirty: bool,
-}
-
-impl<B: BufferData, const N: usize> StaticUniformBufferArray<B, N> {
-    pub fn new(values: [B; N]) -> Self {
-        Self {
-            label: None,
-            buffer: None,
-            values,
-            data: vec![],
-            usage: BufferUsages::COPY_DST | BufferUsages::UNIFORM,
-            is_dirty: false,
-        }
-    }
-
-    pub fn with_label(mut self, label: Label) -> Self {
-        self.label = label;
-        self
-    }
-
-    pub fn with_usage(mut self, usage: BufferUsages) -> Self {
-        self.usage = usage;
-        self
-    }
-
-    pub fn label(&self) -> &Label {
-        &self.label
-    }
-
-    pub fn buffer(&self) -> Option<&Buffer> {
-        self.buffer.as_ref()
-    }
-
-    pub fn data(&self) -> &[u8] {
-        &self.data
-    }
-
-    pub fn usage(&self) -> BufferUsages {
-        self.usage
-    }
-
-    pub fn is_dirty(&self) -> bool {
-        self.is_dirty
-    }
-
-    pub fn len(&self) -> usize {
-        N
-    }
-
-    pub fn get(&self, index: usize) -> &B {
-        &self.values[index]
-    }
-
-    pub fn set(&mut self, index: usize, value: B) {
-        self.values[index] = value;
-        self.is_dirty = true;
-    }
-
-    pub fn binding(&self) -> Option<BindingResource> {
-        self.buffer.as_ref().map(|b| b.as_entire_binding())
-    }
-
-    pub fn update(&mut self, device: &RenderDevice) {
-        match &self.buffer {
-            Some(buffer) => {
-                if self.is_dirty {
-                    buffer.update(device, 0, &self.data);
-                    self.is_dirty = false;
-                }
-            }
-            None => {
-                let buffer = Buffer::with_data(device, &self.data, self.usage, self.label.clone());
-                self.buffer = Some(buffer);
-                self.is_dirty = false;
-            }
-        }
-    }
-}
-
-pub struct BatchedUniformBuffer<B: BufferData> {
-    label: Label,
-    buffer: UniformBufferArray<StaticArray<Vec<B>>>,
+    buffer: StorageBufferArray<StaticArray<Vec<B>>>,
     batch: StaticArray<Vec<B>>,
     offset: u64,
     dynamic_offset_alignment: u32,
 }
 
-impl<B: BufferData> BatchedUniformBuffer<B> {
+impl<B: BufferData> BatchedStorageBuffer<B> {
     pub fn new(device: &RenderDevice) -> Self {
-        let alignment = device.limits().min_uniform_buffer_offset_alignment;
+        let alignment = device.limits().min_storage_buffer_offset_alignment;
         let batch_size = alignment as u64 / B::min_size().get();
 
         Self {
             label: None,
-            buffer: UniformBufferArray::with_alignment(alignment as u64),
+            buffer: StorageBufferArray::with_alignment(alignment as u64),
             batch: StaticArray::new(vec![], NonZero::new(batch_size).unwrap()),
             offset: 0,
             dynamic_offset_alignment: alignment,
@@ -330,18 +245,6 @@ impl<B: BufferData> BatchedUniformBuffer<B> {
 
     pub fn size(&self) -> NonZero<u64> {
         self.batch.size()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.batch.is_empty()
-    }
-
-    pub fn usage(&self) -> BufferUsages {
-        self.buffer.usage
-    }
-
-    pub fn buffer(&self) -> Option<&Buffer> {
-        self.buffer.buffer()
     }
 
     pub fn binding(&self) -> Option<BindingResource> {

@@ -1,3 +1,4 @@
+use super::buffer::{IndexBuffer, Indices, Vertex, VertexBuffer};
 use crate::core::{
     AssetUsage, Color, ReadWrite, RenderAsset, RenderAssetExtractor, RenderAssets, RenderDevice,
 };
@@ -6,8 +7,6 @@ use ecs::system::{unlifetime::ReadRes, ArgItem, StaticArg};
 use spatial::bounds::BoundingBox;
 use std::{hash::Hash, ops::Range};
 use wgpu::BufferUsages;
-
-use super::buffer::{IndexBuffer, Indices, Vertex, VertexBuffer};
 
 #[derive(
     Copy, Clone, Debug, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize,

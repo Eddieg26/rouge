@@ -18,3 +18,4 @@ downcast-rs = { workspace = true }
 bitflags = { workspace = true }
 pollster = { workspace = true }
 wgpu = { version = "23.0.0", features = ["spirv", "glsl"] }
+encase = { version = "0.10.0", features = ["glam"] }

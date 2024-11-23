@@ -1,5 +1,8 @@
 use asset::AssetId;
-use std::hash::{Hash, Hasher};
+use std::{
+    borrow::Cow,
+    hash::{Hash, Hasher},
+};
 
 pub mod binding;
 pub mod buffer;
@@ -229,3 +232,5 @@ impl<T> Ord for AtomicId<T> {
         self.id.cmp(&other.id)
     }
 }
+
+pub type Label = Option<Cow<'static, str>>;

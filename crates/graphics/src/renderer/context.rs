@@ -1,8 +1,10 @@
 use super::resources::{GraphResources, RenderGraphBuffer, RenderGraphTexture};
 use crate::{
     core::{RenderAssets, RenderDevice},
-    resources::{texture::RenderTexture, Id},
-    surface::target::RenderTarget,
+    resources::{
+        texture::{target::RenderTarget, RenderTexture},
+        Id,
+    },
 };
 use ecs::{core::resource::Resource, world::World};
 

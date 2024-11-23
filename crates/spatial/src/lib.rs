@@ -1,6 +1,7 @@
 pub mod bounds;
 pub mod circle;
 pub mod plugin;
+pub mod point;
 pub mod rect;
 pub mod size;
 pub mod sphere;

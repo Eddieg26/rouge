@@ -11,14 +11,12 @@ use crate::{
         texture::{
             render::RenderTargetTexture,
             sampler::{Sampler, SamplerDesc},
+            target::{RenderTarget, ResizeRenderGraph},
             texture2d::Texture2d,
             RenderTexture,
         },
     },
-    surface::{
-        target::{RenderTarget, ResizeRenderGraph},
-        RenderSurface, RenderSurfaceError, RenderSurfaceTexture,
-    },
+    surface::{RenderSurface, RenderSurfaceError, RenderSurfaceTexture},
 };
 use asset::{
     database::events::AssetEvent,

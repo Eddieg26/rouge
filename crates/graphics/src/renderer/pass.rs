@@ -1,5 +1,8 @@
 use super::{context::RenderContext, resources::RenderGraphTexture};
-use crate::{core::Color, resources::Id, surface::target::RenderTarget};
+use crate::{
+    core::Color,
+    resources::{texture::target::RenderTarget, Id},
+};
 use std::hash::Hash;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

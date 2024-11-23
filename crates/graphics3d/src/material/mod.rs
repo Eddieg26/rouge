@@ -4,12 +4,11 @@ use graphics::{
     core::RenderAsset,
     resources::{
         binding::{BindGroup, BindGroupLayout, CreateBindGroup},
+        pipeline::PrimitiveState,
         shader::meta::ShaderMeta,
     },
 };
-use std::collections::HashSet;
-
-pub mod pipeline;
+use std::{collections::HashSet, num::NonZeroU32};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShaderModel {
@@ -23,7 +22,25 @@ pub enum BlendMode {
     Transparent,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum DepthWrite {
+    On,
+    Off,
+}
+
+pub trait Surface: 'static {
+    fn depth_write() -> DepthWrite;
+    fn primitive() -> PrimitiveState;
+    fn shader() -> impl Into<LoadPath>;
+    fn meta() -> ShaderMeta;
+    fn instances() -> Option<NonZeroU32> {
+        None
+    }
+}
+
 pub trait Material: Asset + Clone + Sized + CreateBindGroup + 'static {
+    type Surface: Surface;
+
     fn mode() -> BlendMode;
     fn model() -> ShaderModel;
     fn meta() -> ShaderMeta;

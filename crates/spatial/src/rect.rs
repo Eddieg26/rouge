@@ -16,6 +16,22 @@ impl Rect {
         Self { position, size }
     }
 
+    pub fn x(&self) -> f32 {
+        self.position.x
+    }
+
+    pub fn y(&self) -> f32 {
+        self.position.y
+    }
+
+    pub fn width(&self) -> f32 {
+        self.size.x
+    }
+
+    pub fn height(&self) -> f32 {
+        self.size.y
+    }
+
     pub fn mid(&self) -> Vec2 {
         self.position + self.size / 2.0
     }

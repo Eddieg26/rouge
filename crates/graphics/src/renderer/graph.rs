@@ -4,8 +4,8 @@ use super::{
 };
 use crate::{
     core::{ExtractError, RenderAssets, RenderDevice, RenderResourceExtractor},
-    resources::Id,
-    surface::{target::RenderTarget, RenderSurface},
+    resources::{texture::target::RenderTarget, Id},
+    surface::RenderSurface,
 };
 use ecs::{
     core::{resource::Resource, IndexMap},

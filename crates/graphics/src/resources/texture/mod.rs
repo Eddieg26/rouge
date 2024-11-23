@@ -1,8 +1,9 @@
-use crate::core::{device::RenderDevice, asset::RenderAsset};
+use crate::core::{asset::RenderAsset, device::RenderDevice};
 
 pub mod format;
 pub mod render;
 pub mod sampler;
+pub mod target;
 pub mod texture2d;
 
 pub use format::*;

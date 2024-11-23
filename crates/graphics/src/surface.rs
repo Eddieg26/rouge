@@ -1,13 +1,13 @@
-use crate::resources::{texture::TextureFormat, Id};
+use crate::resources::{
+    texture::{target::RenderTarget, TextureFormat},
+    Id,
+};
 use ecs::core::resource::Resource;
-use target::RenderTarget;
 use wgpu::{
     rwh::{HandleError, HasDisplayHandle, HasWindowHandle},
     SurfaceTargetUnsafe,
 };
 use window::Window;
-
-pub mod target;
 
 #[derive(Debug)]
 pub enum RenderSurfaceError {

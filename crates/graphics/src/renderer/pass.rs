@@ -1,7 +1,7 @@
 use super::{context::RenderContext, resources::RenderGraphTexture};
 use crate::{
     core::Color,
-    resources::{texture::target::RenderTarget, Id},
+    resource::{texture::target::RenderTarget, Id},
 };
 use std::hash::Hash;
 

@@ -1,6 +1,6 @@
 use crate::{
     core::{RenderAsset, RenderAssetExtractor, RenderAssets, RenderDevice},
-    resources::{
+    resource::{
         texture::{
             render::RenderTargetTexture,
             sampler::{Sampler, SamplerDesc},

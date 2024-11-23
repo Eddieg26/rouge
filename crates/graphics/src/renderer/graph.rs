@@ -4,7 +4,7 @@ use super::{
 };
 use crate::{
     core::{ExtractError, RenderAssets, RenderDevice, RenderResourceExtractor},
-    resources::{texture::target::RenderTarget, Id},
+    resource::{texture::target::RenderTarget, Id},
     surface::RenderSurface,
 };
 use ecs::{

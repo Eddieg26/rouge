@@ -1,5 +1,5 @@
 use super::Color;
-use crate::resources::{
+use crate::resource::{
     binding::{BindGroup, BindGroupId},
     buffer::{Buffer, BufferSlice, BufferSliceId, IndexSlice},
     pipeline::{RenderPipeline, RenderPipelineId},

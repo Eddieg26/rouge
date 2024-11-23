@@ -1,6 +1,6 @@
 use crate::{
     core::RenderDevice,
-    resources::{texture::TextureFormat, Id},
+    resource::{texture::TextureFormat, Id},
 };
 use std::collections::HashMap;
 

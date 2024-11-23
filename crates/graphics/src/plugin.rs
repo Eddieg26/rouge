@@ -5,7 +5,7 @@ use crate::{
         RenderResourceExtractor,
     },
     renderer::graph::{RenderGraph, RenderGraphBuilder},
-    resources::{
+    resource::{
         mesh::Mesh,
         shader::Shader,
         texture::{

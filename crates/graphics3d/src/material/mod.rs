@@ -2,7 +2,7 @@ use asset::{io::cache::LoadPath, Asset, AssetId};
 use ecs::core::{resource::Resource, IndexMap, Type};
 use graphics::{
     core::RenderAsset,
-    resources::{
+    resource::{
         binding::{BindGroup, BindGroupLayout, CreateBindGroup},
         pipeline::PrimitiveState,
         shader::meta::ShaderMeta,

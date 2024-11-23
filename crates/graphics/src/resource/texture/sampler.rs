@@ -1,5 +1,5 @@
 use super::{FilterMode, WrapMode};
-use crate::{core::RenderAsset, resources::Id};
+use crate::{core::RenderAsset, resource::Id};
 
 pub use wgpu::{CompareFunction, SamplerBorderColor};
 

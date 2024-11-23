@@ -1,7 +1,7 @@
 use super::resources::{GraphResources, RenderGraphBuffer, RenderGraphTexture};
 use crate::{
     core::{RenderAssets, RenderDevice},
-    resources::{
+    resource::{
         texture::{target::RenderTarget, RenderTexture},
         Id,
     },

@@ -1,4 +1,4 @@
-use crate::resources::{
+use crate::resource::{
     texture::{target::RenderTarget, TextureFormat},
     Id,
 };

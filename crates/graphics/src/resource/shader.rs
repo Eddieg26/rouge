@@ -32,18 +32,43 @@ impl Into<wgpu::naga::ShaderStage> for ShaderStage {
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum ShaderSource {
-    Spirv(Cow<'static, [u32]>),
+    Spirv {
+        data: Cow<'static, [u32]>,
+        meta: ShaderMeta,
+    },
     Glsl {
-        shader: Cow<'static, str>,
+        data: Cow<'static, str>,
         stage: ShaderStage,
     },
-    Wgsl(Cow<'static, str>),
+    Wgsl {
+        data: Cow<'static, str>,
+        meta: ShaderMeta,
+    },
 }
 
 #[derive(Debug)]
 pub enum ShaderLoadError {
     Io(AssetIoError),
+    InvalidExt(String),
     Parse(String),
+}
+
+impl From<wgpu::naga::front::wgsl::ParseError> for ShaderLoadError {
+    fn from(err: wgpu::naga::front::wgsl::ParseError) -> Self {
+        Self::Parse(err.to_string())
+    }
+}
+
+impl From<wgpu::naga::front::spv::Error> for ShaderLoadError {
+    fn from(err: wgpu::naga::front::spv::Error) -> Self {
+        Self::Parse(err.to_string())
+    }
+}
+
+impl From<wgpu::naga::front::glsl::Error> for ShaderLoadError {
+    fn from(err: wgpu::naga::front::glsl::Error) -> Self {
+        Self::Parse(err.to_string())
+    }
 }
 
 impl From<AssetIoError> for ShaderLoadError {
@@ -56,7 +81,8 @@ impl std::fmt::Display for ShaderLoadError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Io(err) => write!(f, "IO error: {}", err),
-            Self::Parse(err) => write!(f, "Parse error: {}", err),
+            Self::InvalidExt(err) => write!(f, "Parse error: {}", err),
+            Self::Parse(err) => write!(f, "WGSL parse error: {}", err),
         }
     }
 }
@@ -85,6 +111,8 @@ impl Importer for ShaderSource {
         ctx: &mut ImportContext<'_, Self::Asset, Self::Settings>,
         reader: &mut dyn AssetReader,
     ) -> Result<Self::Asset, Self::Error> {
+        use wgpu::naga::{front::*, valid::*};
+
         let ext = ctx.path().ext();
 
         match ext {
@@ -94,9 +122,19 @@ impl Importer for ShaderSource {
                     .read_to_end(&mut buffer)
                     .await
                     .map_err(ShaderLoadError::from)?;
-                Ok(ShaderSource::Spirv(Cow::Owned(
-                    buffer.iter().map(|b| *b as u32).collect(),
-                )))
+
+                let module =
+                    spv::parse_u8_slice(&buffer, &wgpu::naga::front::spv::Options::default())
+                        .map_err(ShaderLoadError::from)?;
+                let mut validator = Validator::new(ValidationFlags::all(), Capabilities::all());
+                validator
+                    .validate(&module)
+                    .map_err(|e| ShaderLoadError::Parse(e.to_string()))?;
+
+                let meta = ShaderMeta::from(&module);
+                let data = Cow::Owned(buffer.iter().map(|b| *b as u32).collect());
+
+                Ok(ShaderSource::Spirv { data, meta })
             }
             Some("wgsl") => {
                 let mut data = String::new();
@@ -104,7 +142,17 @@ impl Importer for ShaderSource {
                     .read_to_string(&mut data)
                     .await
                     .map_err(ShaderLoadError::from)?;
-                Ok(ShaderSource::Wgsl(Cow::Owned(data)))
+
+                let module = wgsl::parse_str(&data).map_err(ShaderLoadError::from)?;
+                let mut validator = Validator::new(ValidationFlags::all(), Capabilities::all());
+                validator
+                    .validate(&module)
+                    .map_err(|e| ShaderLoadError::Parse(e.to_string()))?;
+
+                let meta = ShaderMeta::from(&module);
+                let data = Cow::Owned(data);
+
+                Ok(ShaderSource::Wgsl { data, meta })
             }
             Some("vert") => {
                 let mut data = String::new();
@@ -113,7 +161,7 @@ impl Importer for ShaderSource {
                     .await
                     .map_err(ShaderLoadError::from)?;
                 Ok(ShaderSource::Glsl {
-                    shader: Cow::Owned(data),
+                    data: Cow::Owned(data),
                     stage: ShaderStage::Vertex,
                 })
             }
@@ -124,7 +172,7 @@ impl Importer for ShaderSource {
                     .await
                     .map_err(ShaderLoadError::from)?;
                 Ok(ShaderSource::Glsl {
-                    shader: Cow::Owned(data),
+                    data: Cow::Owned(data),
                     stage: ShaderStage::Fragment,
                 })
             }
@@ -135,11 +183,11 @@ impl Importer for ShaderSource {
                     .await
                     .map_err(ShaderLoadError::from)?;
                 Ok(ShaderSource::Glsl {
-                    shader: Cow::Owned(data),
+                    data: Cow::Owned(data),
                     stage: ShaderStage::Compute,
                 })
             }
-            _ => Err(ShaderLoadError::Parse(format!(
+            _ => Err(ShaderLoadError::InvalidExt(format!(
                 "Invalid extension: {:?}",
                 ext
             ))),
@@ -151,6 +199,9 @@ impl Importer for ShaderSource {
 pub struct Shader {
     #[serde(skip)]
     module: Arc<wgpu::ShaderModule>,
+
+    #[serde(skip)]
+    meta: Option<ShaderMeta>,
 }
 
 impl<'de> serde::Deserialize<'de> for Shader {
@@ -164,36 +215,56 @@ impl<'de> serde::Deserialize<'de> for Shader {
 
 impl Shader {
     pub fn create(device: &RenderDevice, source: &ShaderSource) -> Self {
-        let module = match source {
-            ShaderSource::Spirv(data) => {
-                device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        match source {
+            ShaderSource::Spirv { data, meta } => {
+                let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
                     label: None,
                     source: wgpu::ShaderSource::SpirV(data.clone()),
-                })
+                });
+
+                Self {
+                    module: Arc::new(module),
+                    meta: Some(meta.clone()),
+                }
             }
-            ShaderSource::Glsl { shader, stage } => {
-                device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            ShaderSource::Glsl {
+                data: shader,
+                stage,
+            } => {
+                let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
                     label: None,
                     source: wgpu::ShaderSource::Glsl {
                         shader: shader.clone(),
                         stage: (*stage).into(),
                         defines: Default::default(),
                     },
-                })
-            }
-            ShaderSource::Wgsl(data) => device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: None,
-                source: wgpu::ShaderSource::Wgsl(data.clone()),
-            }),
-        };
+                });
 
-        Self {
-            module: Arc::new(module),
+                Self {
+                    module: Arc::new(module),
+                    meta: None,
+                }
+            }
+            ShaderSource::Wgsl { data, meta } => {
+                let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                    label: None,
+                    source: wgpu::ShaderSource::Wgsl(data.clone()),
+                });
+
+                Self {
+                    module: Arc::new(module),
+                    meta: Some(meta.clone()),
+                }
+            }
         }
     }
 
     pub fn module(&self) -> &wgpu::ShaderModule {
         &self.module
+    }
+
+    pub fn meta(&self) -> Option<&ShaderMeta> {
+        self.meta.as_ref()
     }
 }
 
@@ -234,9 +305,7 @@ impl RenderAssetExtractor for Shader {
 pub mod meta {
     use std::{borrow::Cow, num::NonZeroU32};
 
-    use asset::io::cache::LoadPath;
-
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
     pub enum ShaderValue {
         Float,
         UInt,
@@ -249,6 +318,9 @@ pub mod meta {
         Mat2,
         Mat3,
         Mat4,
+        Array(Box<ShaderValue>, Option<NonZeroU32>),
+        Struct(Vec<ShaderValue>),
+        Other,
     }
 
     impl ShaderValue {
@@ -266,11 +338,24 @@ pub mod meta {
                 Self::Mat2 => 16,
                 Self::Mat3 => 36,
                 Self::Mat4 => 64,
+                Self::Array(value, count) => match count {
+                    Some(count) => value.size() * count.get() as usize,
+                    None => 0,
+                },
+                Self::Struct(values) => values.iter().map(|v| v.size()).sum(),
+                Self::Other => 0,
+            }
+        }
+
+        pub fn count(&self) -> Option<NonZeroU32> {
+            match self {
+                Self::Array(_, count) => *count,
+                _ => None,
             }
         }
     }
 
-    #[derive(Debug, Clone, PartialEq, Eq)]
+    #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
     pub struct BufferLayout {
         values: Vec<ShaderValue>,
     }
@@ -307,24 +392,41 @@ pub mod meta {
         }
     }
 
-    #[derive(Debug, Clone, PartialEq, Eq)]
-    pub enum ShaderBinding {
+    #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+    pub enum ShaderBindingKind {
+        Texture1D,
         Texture2D,
         Texture2DArray,
         Texture3D,
         Texture3DArray,
         TextureCube,
-        Sampler,
+        Sampler {
+            compare: bool,
+        },
         Uniform {
             layout: BufferLayout,
+            count: Option<NonZeroU32>,
         },
         Storage {
             layout: BufferLayout,
-            read_write: bool,
+            access: StorageAccess,
+            count: Option<NonZeroU32>,
         },
     }
 
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+    pub struct ShaderBinding {
+        pub binding: u32,
+        pub kind: ShaderBindingKind,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+    pub struct ShaderBindGroup {
+        group: u32,
+        bindings: Vec<ShaderBinding>,
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
     pub enum BuiltinValue {
         VertexIndex,
         InstanceIndex,
@@ -340,7 +442,7 @@ pub mod meta {
         NumWorkGroups,
     }
 
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
     pub enum ShaderAttribute {
         Align(u32),
         Binding(u32),
@@ -357,13 +459,34 @@ pub mod meta {
         },
     }
 
-    #[derive(Debug, Clone, PartialEq, Eq)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+    pub enum StorageAccess {
+        Read,
+        Write,
+        ReadWrite,
+    }
+
+    impl From<wgpu::naga::StorageAccess> for StorageAccess {
+        fn from(access: wgpu::naga::StorageAccess) -> Self {
+            let load = access.contains(wgpu::naga::StorageAccess::LOAD);
+            let store = access.contains(wgpu::naga::StorageAccess::STORE);
+
+            match (load, store) {
+                (true, true) => Self::ReadWrite,
+                (true, false) => Self::Read,
+                (false, true) => Self::Write,
+                _ => Self::Read,
+            }
+        }
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
     pub struct ShaderInput {
         pub value: ShaderValue,
         pub attribute: ShaderAttribute,
     }
 
-    #[derive(Debug, Clone, PartialEq, Eq)]
+    #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
     pub struct ShaderOuput(ShaderInput);
     impl std::ops::Deref for ShaderOuput {
         type Target = ShaderInput;
@@ -378,21 +501,19 @@ pub mod meta {
         }
     }
 
-    #[derive(Debug, Clone, PartialEq, Eq)]
+    #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
     pub struct ShaderMeta {
-        path: LoadPath,
         entry: Cow<'static, str>,
         inputs: Vec<ShaderInput>,
         outputs: Vec<ShaderOuput>,
-        bindings: Vec<ShaderBinding>,
+        bindings: Vec<ShaderBindGroup>,
         instances: Option<NonZeroU32>,
     }
 
     impl ShaderMeta {
-        pub fn new(path: impl Into<LoadPath>, entry: &'static str) -> Self {
+        pub fn new(entry: impl Into<Cow<'static, str>>) -> Self {
             Self {
-                path: path.into(),
-                entry: Cow::Borrowed(entry),
+                entry: entry.into(),
                 inputs: Vec::new(),
                 outputs: Vec::new(),
                 bindings: Vec::new(),
@@ -400,23 +521,14 @@ pub mod meta {
             }
         }
 
-        pub fn with_instances(
-            path: impl Into<LoadPath>,
-            entry: &'static str,
-            instances: NonZeroU32,
-        ) -> Self {
+        pub fn with_instances(entry: impl Into<Cow<'static, str>>, instances: NonZeroU32) -> Self {
             Self {
-                path: path.into(),
-                entry: Cow::Borrowed(entry),
+                entry: entry.into(),
                 inputs: Vec::new(),
                 outputs: Vec::new(),
                 bindings: Vec::new(),
                 instances: Some(instances),
             }
-        }
-
-        pub fn path(&self) -> &LoadPath {
-            &self.path
         }
 
         pub fn entry(&self) -> &str {
@@ -431,7 +543,7 @@ pub mod meta {
             &self.outputs
         }
 
-        pub fn bindings(&self) -> &[ShaderBinding] {
+        pub fn bindings(&self) -> &[ShaderBindGroup] {
             &self.bindings
         }
 
@@ -450,14 +562,287 @@ pub mod meta {
             self
         }
 
-        pub fn add_binding(&mut self, binding: ShaderBinding) -> &mut Self {
-            self.bindings.push(binding);
+        pub fn add_binding(
+            &mut self,
+            group: u32,
+            binding: u32,
+            kind: ShaderBindingKind,
+        ) -> &mut Self {
+            match self.bindings.iter_mut().find(|b| b.group == group) {
+                Some(bind_group) => bind_group.bindings.push(ShaderBinding { binding, kind }),
+                None => self.bindings.push(ShaderBindGroup {
+                    group,
+                    bindings: vec![ShaderBinding { binding, kind }],
+                }),
+            }
+
             self
         }
 
         pub fn set_instances(&mut self, instances: NonZeroU32) -> &mut Self {
             self.instances = Some(instances);
             self
+        }
+    }
+
+    impl From<wgpu::naga::ScalarKind> for BufferLayout {
+        fn from(value: wgpu::naga::ScalarKind) -> Self {
+            let mut layout = BufferLayout::new();
+            match value {
+                wgpu::naga::ScalarKind::Sint => layout.add(ShaderValue::SInt),
+                wgpu::naga::ScalarKind::Uint => layout.add(ShaderValue::UInt),
+                wgpu::naga::ScalarKind::Float => layout.add(ShaderValue::Float),
+                wgpu::naga::ScalarKind::Bool => layout.add(ShaderValue::Bool),
+                wgpu::naga::ScalarKind::AbstractInt => layout.add(ShaderValue::Other),
+                wgpu::naga::ScalarKind::AbstractFloat => layout.add(ShaderValue::Other),
+            }
+
+            layout
+        }
+    }
+
+    impl From<wgpu::naga::ScalarKind> for ShaderValue {
+        fn from(value: wgpu::naga::ScalarKind) -> Self {
+            match value {
+                wgpu::naga::ScalarKind::Sint => Self::SInt,
+                wgpu::naga::ScalarKind::Uint => Self::UInt,
+                wgpu::naga::ScalarKind::Float => Self::Float,
+                wgpu::naga::ScalarKind::Bool => Self::Bool,
+                wgpu::naga::ScalarKind::AbstractInt => Self::Other,
+                wgpu::naga::ScalarKind::AbstractFloat => Self::Other,
+            }
+        }
+    }
+
+    impl From<&wgpu::naga::VectorSize> for BufferLayout {
+        fn from(value: &wgpu::naga::VectorSize) -> Self {
+            let mut layout = BufferLayout::new();
+            layout.add(ShaderValue::from(value));
+            layout
+        }
+    }
+
+    impl From<&wgpu::naga::VectorSize> for ShaderValue {
+        fn from(value: &wgpu::naga::VectorSize) -> Self {
+            match value {
+                wgpu::naga::VectorSize::Bi => Self::Vec2,
+                wgpu::naga::VectorSize::Tri => Self::Vec3,
+                wgpu::naga::VectorSize::Quad => Self::Vec4,
+            }
+        }
+    }
+
+    impl From<(&wgpu::naga::VectorSize, &wgpu::naga::VectorSize)> for ShaderValue {
+        fn from(value: (&wgpu::naga::VectorSize, &wgpu::naga::VectorSize)) -> Self {
+            match (value.0, value.1) {
+                (wgpu::naga::VectorSize::Bi, wgpu::naga::VectorSize::Bi) => Self::Mat2,
+                (wgpu::naga::VectorSize::Tri, wgpu::naga::VectorSize::Tri) => Self::Mat3,
+                (wgpu::naga::VectorSize::Quad, wgpu::naga::VectorSize::Quad) => Self::Mat4,
+                _ => Self::Other,
+            }
+        }
+    }
+
+    impl ShaderValue {
+        fn from_array(
+            module: &wgpu::naga::Module,
+            ty: &wgpu::naga::Handle<wgpu::naga::Type>,
+            size: &wgpu::naga::ArraySize,
+        ) -> Option<ShaderValue> {
+            let ty_inner = &module.types[*ty].inner;
+
+            let count = match size {
+                wgpu::naga::ArraySize::Dynamic => None,
+                wgpu::naga::ArraySize::Constant(count) => Some(*count),
+            };
+
+            let kind = match ty_inner {
+                wgpu::naga::TypeInner::Scalar(scalar) => Some(ShaderValue::from(scalar.kind)),
+                wgpu::naga::TypeInner::Vector { size, .. } => Some(ShaderValue::from(size)),
+                wgpu::naga::TypeInner::Matrix { columns, rows, .. } => {
+                    Some(ShaderValue::from((columns, rows)))
+                }
+                wgpu::naga::TypeInner::Array { base, size, .. } => {
+                    ShaderValue::from_array(module, base, size)
+                }
+                wgpu::naga::TypeInner::Struct { members, .. } => {
+                    ShaderValue::from_struct(module, members)
+                }
+                _ => None,
+            }?;
+
+            Some(ShaderValue::Array(Box::new(kind), count))
+        }
+
+        fn from_struct(
+            module: &wgpu::naga::Module,
+            members: &[wgpu::naga::StructMember],
+        ) -> Option<ShaderValue> {
+            let mut value = Vec::new();
+
+            for member in members {
+                match &module.types[member.ty].inner {
+                    wgpu::naga::TypeInner::Scalar(scalar) => {
+                        value.push(ShaderValue::from(scalar.kind))
+                    }
+                    wgpu::naga::TypeInner::Vector { size, .. } => {
+                        value.push(ShaderValue::from(size))
+                    }
+                    wgpu::naga::TypeInner::Matrix { columns, rows, .. } => {
+                        value.push(ShaderValue::from((columns, rows)))
+                    }
+                    wgpu::naga::TypeInner::Array { base, size, .. } => {
+                        value.push(ShaderValue::from_array(module, base, size)?)
+                    }
+                    wgpu::naga::TypeInner::Struct { members, .. } => {
+                        value.push(ShaderValue::from_struct(module, members)?)
+                    }
+                    _ => continue,
+                }
+            }
+
+            Some(ShaderValue::Struct(value))
+        }
+    }
+
+    impl From<&wgpu::naga::Module> for ShaderMeta {
+        fn from(module: &wgpu::naga::Module) -> Self {
+            let entry = module.entry_points[0].name.clone();
+
+            let mut meta = ShaderMeta::new(entry);
+
+            for (_, value) in module.global_variables.iter() {
+                if let Some(binding) = &value.binding {
+                    let kind = match &module.types[value.ty].inner {
+                        wgpu::naga::TypeInner::Scalar(scalar) => match value.space {
+                            wgpu::naga::AddressSpace::Uniform => ShaderBindingKind::Uniform {
+                                layout: scalar.kind.into(),
+                                count: None,
+                            },
+                            wgpu::naga::AddressSpace::Storage { access } => {
+                                let access = access.into();
+                                ShaderBindingKind::Storage {
+                                    layout: scalar.kind.into(),
+                                    access,
+                                    count: None,
+                                }
+                            }
+                            _ => continue,
+                        },
+                        wgpu::naga::TypeInner::Vector { size, .. } => match value.space {
+                            wgpu::naga::AddressSpace::Uniform => ShaderBindingKind::Uniform {
+                                layout: size.into(),
+                                count: None,
+                            },
+                            wgpu::naga::AddressSpace::Storage { access } => {
+                                let access = access.into();
+                                ShaderBindingKind::Storage {
+                                    layout: size.into(),
+                                    access,
+                                    count: None,
+                                }
+                            }
+                            _ => continue,
+                        },
+                        wgpu::naga::TypeInner::Matrix { columns, rows, .. } => match value.space {
+                            wgpu::naga::AddressSpace::Uniform => {
+                                let mut layout = BufferLayout::new();
+                                layout.add((columns, rows).into());
+                                ShaderBindingKind::Uniform {
+                                    layout,
+                                    count: None,
+                                }
+                            }
+                            wgpu::naga::AddressSpace::Storage { access } => {
+                                let mut layout = BufferLayout::new();
+                                layout.add((columns, rows).into());
+                                let access = access.into();
+                                ShaderBindingKind::Storage {
+                                    layout,
+                                    access,
+                                    count: None,
+                                }
+                            }
+                            _ => continue,
+                        },
+                        wgpu::naga::TypeInner::Array { base, size, .. } => match value.space {
+                            wgpu::naga::AddressSpace::Uniform => {
+                                let mut layout = BufferLayout::new();
+                                let mut count = None;
+                                if let Some(value) = ShaderValue::from_array(module, base, size) {
+                                    count = value.count();
+                                    layout.add(value);
+                                }
+
+                                ShaderBindingKind::Uniform { layout, count }
+                            }
+                            wgpu::naga::AddressSpace::Storage { access } => {
+                                let mut layout = BufferLayout::new();
+                                let mut count = None;
+                                if let Some(value) = ShaderValue::from_array(module, base, size) {
+                                    count = value.count();
+                                    layout.add(value);
+                                }
+                                let access = access.into();
+                                ShaderBindingKind::Storage {
+                                    layout,
+                                    access,
+                                    count,
+                                }
+                            }
+                            _ => continue,
+                        },
+                        wgpu::naga::TypeInner::Struct { members, .. } => match value.space {
+                            wgpu::naga::AddressSpace::Uniform => {
+                                let mut layout = BufferLayout::new();
+                                let mut count = None;
+                                if let Some(value) = ShaderValue::from_struct(module, &members) {
+                                    count = value.count();
+                                    layout.add(value);
+                                }
+                                ShaderBindingKind::Uniform { layout, count }
+                            }
+                            wgpu::naga::AddressSpace::Storage { access } => {
+                                let mut layout = BufferLayout::new();
+                                let mut count = None;
+                                if let Some(value) = ShaderValue::from_struct(module, &members) {
+                                    count = value.count();
+                                    layout.add(value);
+                                }
+                                let access = access.into();
+                                ShaderBindingKind::Storage {
+                                    layout,
+                                    access,
+                                    count,
+                                }
+                            }
+                            _ => continue,
+                        },
+                        wgpu::naga::TypeInner::Image { dim, arrayed, .. } => match dim {
+                            wgpu::naga::ImageDimension::D1 => ShaderBindingKind::Texture1D,
+                            wgpu::naga::ImageDimension::D2 => match arrayed {
+                                true => ShaderBindingKind::Texture2DArray,
+                                false => ShaderBindingKind::Texture2D,
+                            },
+                            wgpu::naga::ImageDimension::D3 => ShaderBindingKind::Texture3D,
+                            wgpu::naga::ImageDimension::Cube => match arrayed {
+                                true => ShaderBindingKind::TextureCube,
+                                false => ShaderBindingKind::Texture2D,
+                            },
+                        },
+                        wgpu::naga::TypeInner::Sampler { comparison } => {
+                            ShaderBindingKind::Sampler {
+                                compare: *comparison,
+                            }
+                        }
+                        _ => continue,
+                    };
+
+                    meta.add_binding(binding.group, binding.binding, kind);
+                }
+            }
+
+            meta
         }
     }
 }

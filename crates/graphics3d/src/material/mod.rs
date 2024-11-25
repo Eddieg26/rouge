@@ -182,9 +182,8 @@ mod t {
     use graphics::{
         encase::ShaderType,
         resource::{
-            BindGroup, BindGroupLayout, BuiltinValue, CreateBindGroup, Id, IntoBindGroupData,
-            IntoBufferData, IntoOptionalId, Mesh, RenderTexture, ShaderAttribute, ShaderMeta,
-            ShaderValue,
+            BindGroup, BindGroupLayout, BuiltinValue, Id, IntoBindGroupData, IntoBufferData,
+            IntoOptionalId, Mesh, RenderTexture, ShaderAttribute, ShaderMeta, ShaderValue,
         },
         wgpu::PrimitiveState,
         Color, CreateBindGroup, RenderDevice,
@@ -196,7 +195,7 @@ mod t {
         }
 
         fn shader() -> ShaderMeta {
-            let mut meta = ShaderMeta::new("", "vs_main");
+            let mut meta = ShaderMeta::new("vs_main");
             meta.add_input(ShaderValue::Vec3, ShaderAttribute::Location(0));
             meta.add_input(ShaderValue::Vec2, ShaderAttribute::Location(1));
             meta.add_output(

@@ -1,39 +1,46 @@
-use super::{Buffer, BufferArrayIndex, BufferData, BufferId, Label, StaticArray};
-use crate::core::RenderDevice;
-use encase::{
-    internal::{CreateFrom, Reader, WriteInto},
-    DynamicStorageBuffer, ShaderType, StorageBuffer as EncaseStorageBuffer,
+use super::{Buffer, BufferArrayIndex, BufferData, Label, StaticArray};
+use crate::{
+    core::RenderDevice,
+    encase::{
+        internal::{CreateFrom, Reader, WriteInto},
+        DynamicStorageBuffer, ShaderType, StorageBuffer as EncaseStorageBuffer,
+    },
+    wgpu::{BindingResource, BufferUsages},
 };
 use std::{marker::PhantomData, num::NonZero};
-use wgpu::{BindingResource, BufferUsages};
 
-pub struct StorageBuffer<B: BufferData> {
-    value: B,
+pub struct StorageBuffer<T: ShaderType> {
+    label: Label,
+    value: T,
     data: EncaseStorageBuffer<Vec<u8>>,
-    buffer: Buffer,
+    buffer: Option<Buffer>,
+    usage: BufferUsages,
     is_dirty: bool,
 }
 
-impl<B: BufferData> StorageBuffer<B> {
-    pub fn new(device: &RenderDevice, value: B, usage: Option<BufferUsages>, label: Label) -> Self {
-        let mut data = EncaseStorageBuffer::new(vec![]);
-        data.write(&value).unwrap();
-
-        let usage = match usage {
-            Some(usage) => usage | BufferUsages::STORAGE | BufferUsages::COPY_DST,
-            None => BufferUsages::STORAGE | BufferUsages::COPY_DST,
-        };
-        let buffer = Buffer::with_data(device, data.as_ref(), usage, label);
-
+impl<T: ShaderType> StorageBuffer<T> {
+    pub fn new(value: T) -> Self {
         Self {
+            label: None,
             value,
-            data,
-            buffer,
+            data: EncaseStorageBuffer::new(vec![]),
+            buffer: None,
+            usage: BufferUsages::COPY_DST | BufferUsages::STORAGE,
             is_dirty: false,
         }
     }
 
-    pub fn value(&self) -> &B {
+    pub fn with_label(mut self, label: Label) -> Self {
+        self.label = label;
+        self
+    }
+
+    pub fn with_usage(mut self, usage: BufferUsages) -> Self {
+        self.usage = usage;
+        self
+    }
+
+    pub fn value(&self) -> &T {
         &self.value
     }
 
@@ -41,45 +48,48 @@ impl<B: BufferData> StorageBuffer<B> {
         self.data.as_ref().as_slice()
     }
 
-    pub fn id(&self) -> BufferId {
-        self.buffer.id
-    }
-
-    pub fn buffer(&self) -> &Buffer {
-        &self.buffer
+    pub fn buffer(&self) -> Option<&Buffer> {
+        self.buffer.as_ref()
     }
 
     pub fn is_dirty(&self) -> bool {
         self.is_dirty
     }
 
-    pub fn binding(&self) -> BindingResource {
-        self.buffer.as_entire_binding()
+    pub fn binding(&self) -> Option<BindingResource> {
+        self.buffer.as_ref().map(|b| b.as_entire_binding())
     }
+}
 
-    pub fn set(&mut self, value: B) {
+impl<T: ShaderType + WriteInto> StorageBuffer<T> {
+    pub fn set(&mut self, value: T) {
         self.value = value;
         self.is_dirty = true;
     }
 
-    pub fn get_mut(&mut self) -> &mut B {
-        self.is_dirty = true;
-        &mut self.value
-    }
-
     pub fn update(&mut self, device: &RenderDevice) {
-        if self.is_dirty {
-            self.data.write(&self.value).unwrap();
-            self.buffer.update(device, 0, self.data.as_ref());
-            self.is_dirty = false;
+        match &self.buffer {
+            Some(buffer) if self.is_dirty => {
+                self.data.write(&self.value).unwrap();
+                buffer.update(device, 0, self.data.as_ref());
+                self.is_dirty = false;
+            }
+            None => {
+                self.data.write(&self.value).unwrap();
+                let buffer =
+                    Buffer::with_data(device, self.data.as_ref(), self.usage, self.label.clone());
+                self.buffer = Some(buffer);
+                self.is_dirty = false;
+            }
+            _ => {}
         }
     }
 }
 
 pub struct StorageBufferArray<B: ShaderType> {
     label: Label,
-    buffer: Option<Buffer>,
     data: DynamicStorageBuffer<Vec<u8>>,
+    buffer: Option<Buffer>,
     usage: BufferUsages,
     is_dirty: bool,
     _phantom: PhantomData<B>,
@@ -149,6 +159,25 @@ impl<B: ShaderType> StorageBufferArray<B> {
     pub fn binding(&self) -> Option<BindingResource> {
         self.buffer.as_ref().map(|b| b.as_entire_binding())
     }
+}
+
+impl<B: ShaderType + WriteInto> StorageBufferArray<B> {
+    pub fn push(&mut self, value: &B) {
+        self.data.write(value).unwrap();
+        self.is_dirty = true;
+    }
+
+    pub fn set(&mut self, index: usize, value: B) {
+        self.data.set_offset(index as u64 * B::min_size().get());
+        self.data.write(&value).unwrap();
+        self.data.set_offset(self.data.as_ref().len() as u64);
+        self.is_dirty = true;
+    }
+
+    pub fn clear(&mut self) {
+        self.data.as_mut().clear();
+        self.data.set_offset(0);
+    }
 
     pub fn update(&mut self, device: &RenderDevice) {
         match &self.buffer {
@@ -177,25 +206,6 @@ impl<B: ShaderType> StorageBufferArray<B> {
                 self.is_dirty = false;
             }
         }
-    }
-}
-
-impl<B: ShaderType + WriteInto> StorageBufferArray<B> {
-    pub fn push(&mut self, value: &B) {
-        self.data.write(value).unwrap();
-        self.is_dirty = true;
-    }
-
-    pub fn set(&mut self, index: usize, value: B) {
-        self.data.set_offset(index as u64 * B::min_size().get());
-        self.data.write(&value).unwrap();
-        self.data.set_offset(self.data.as_ref().len() as u64);
-        self.is_dirty = true;
-    }
-
-    pub fn clear(&mut self) {
-        self.data.as_mut().clear();
-        self.data.set_offset(0);
     }
 }
 

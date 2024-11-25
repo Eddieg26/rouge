@@ -1,8 +1,10 @@
 use super::{Buffer, BufferId, BufferSlice, BufferSliceId, Label};
-use crate::core::RenderDevice;
+use crate::{
+    wgpu::{BufferUsages, IndexFormat},
+    RenderDevice,
+};
 use bytemuck::{Pod, Zeroable};
 use std::{marker::PhantomData, ops::RangeBounds};
-use wgpu::{BufferUsages, IndexFormat};
 
 pub trait Index:
     Copy + Clone + Pod + Zeroable + serde::Serialize + for<'a> serde::Deserialize<'a> + 'static

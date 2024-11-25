@@ -1,5 +1,6 @@
 [workspace]
-members = ["examples/*", "crates/*"]
+members = ["examples/*", "crates/*", "crates/macros/*"]
+exclude = ["crates/macros/src"]
 
 [workspace.dependencies]
 crc32fast = "1.4.2"

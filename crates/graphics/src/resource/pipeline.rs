@@ -1,10 +1,9 @@
 use super::{binding::BindGroupLayout, mesh::MeshAttributeKind, shader::Shader, AtomicId, Handle};
-use crate::core::{RenderAssets, RenderDevice};
-use std::{borrow::Cow, num::NonZeroU32};
-
-pub use wgpu::{
-    ColorTargetState, DepthStencilState, MultisampleState, PrimitiveState, VertexStepMode,
+use crate::{
+    wgpu::{ColorTargetState, DepthStencilState, MultisampleState, PrimitiveState, VertexStepMode},
+    RenderAssets, RenderDevice,
 };
+use std::{borrow::Cow, num::NonZeroU32};
 
 pub type RenderPipelineId = AtomicId<RenderPipeline>;
 

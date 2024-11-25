@@ -1,19 +1,17 @@
-use super::{
-    texture::{TextureDimension, TextureFormat},
-    AtomicId,
+use super::{sampler::Sampler, texture::TextureDimension, AtomicId, Id, RenderTexture};
+use crate::{
+    wgpu::{
+        BindGroupEntry, BindGroupLayoutEntry, BindingType, BufferBindingType, SamplerBindingType,
+        ShaderStages, StorageTextureAccess, TextureFormat, TextureSampleType,
+    },
+    RenderDevice,
 };
-use crate::core::device::RenderDevice;
 use ecs::system::{ArgItem, SystemArg};
-use std::sync::Arc;
-use wgpu::BindGroupLayoutEntry;
+use encase::ShaderType;
+use std::{error::Error, num::NonZeroU32, sync::Arc};
 
 pub type BindGroupId = AtomicId<BindGroup>;
 pub type BindGroupLayoutId = AtomicId<BindGroupLayout>;
-
-pub use wgpu::{
-    BindGroupEntry, BindingType, BufferBindingType, SamplerBindingType, ShaderStages,
-    StorageTextureAccess, TextureSampleType,
-};
 
 pub struct BindGroupLayoutBuilder {
     entries: Vec<BindGroupLayoutEntry>,
@@ -50,12 +48,55 @@ impl BindGroupLayoutBuilder {
         self
     }
 
-    pub fn with_texture(
+    pub fn with_uniform_buffer(
         mut self,
         binding: u32,
         visibility: ShaderStages,
+        dynamic: bool,
+        min_binding_size: Option<wgpu::BufferSize>,
+        count: Option<NonZeroU32>,
+    ) -> Self {
+        self.entries.push(BindGroupLayoutEntry {
+            binding,
+            visibility,
+            ty: BindingType::Buffer {
+                ty: BufferBindingType::Uniform,
+                has_dynamic_offset: dynamic,
+                min_binding_size,
+            },
+            count,
+        });
+        self
+    }
+
+    pub fn with_storage_buffer(
+        mut self,
+        binding: u32,
+        visibility: ShaderStages,
+        dynamic: bool,
+        read_only: bool,
+        min_binding_size: Option<wgpu::BufferSize>,
+        count: Option<NonZeroU32>,
+    ) -> Self {
+        self.entries.push(BindGroupLayoutEntry {
+            binding,
+            visibility,
+            ty: BindingType::Buffer {
+                ty: BufferBindingType::Storage { read_only },
+                has_dynamic_offset: dynamic,
+                min_binding_size,
+            },
+            count,
+        });
+        self
+    }
+
+    pub fn with_texture(
+        mut self,
+        binding: u32,
         texture: TextureSampleType,
         dimension: TextureDimension,
+        visibility: ShaderStages,
         multisampled: bool,
     ) -> Self {
         self.entries.push(BindGroupLayoutEntry {
@@ -95,8 +136,8 @@ impl BindGroupLayoutBuilder {
     pub fn with_sampler(
         mut self,
         binding: u32,
-        visibility: ShaderStages,
         sampler: SamplerBindingType,
+        visibility: ShaderStages,
     ) -> Self {
         self.entries.push(BindGroupLayoutEntry {
             binding,
@@ -148,6 +189,66 @@ impl std::ops::Deref for BindGroupLayout {
 
     fn deref(&self) -> &Self::Target {
         &self.layout
+    }
+}
+
+pub struct BindGroupEntries<'a> {
+    entries: Vec<BindGroupEntry<'a>>,
+}
+
+impl<'a> BindGroupEntries<'a> {
+    pub fn new() -> Self {
+        Self {
+            entries: Vec::new(),
+        }
+    }
+
+    pub fn with_entry(mut self, entry: BindGroupEntry<'a>) -> Self {
+        self.entries.push(entry);
+        self
+    }
+
+    pub fn add_buffer(
+        &mut self,
+        binding: u32,
+        buffer: &'a wgpu::Buffer,
+        offset: wgpu::BufferAddress,
+        size: Option<wgpu::BufferSize>,
+    ) {
+        self.entries.push(BindGroupEntry {
+            binding,
+            resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                buffer,
+                offset,
+                size,
+            }),
+        });
+    }
+
+    pub fn add_texture(&mut self, binding: u32, view: &'a wgpu::TextureView) {
+        self.entries.push(BindGroupEntry {
+            binding,
+            resource: wgpu::BindingResource::TextureView(view),
+        });
+    }
+
+    pub fn add_sampler(&mut self, binding: u32, sampler: &'a wgpu::Sampler) {
+        self.entries.push(BindGroupEntry {
+            binding,
+            resource: wgpu::BindingResource::Sampler(sampler),
+        });
+    }
+
+    pub fn entries(&self) -> &[BindGroupEntry] {
+        &self.entries
+    }
+}
+
+impl<'a> std::ops::Deref for BindGroupEntries<'a> {
+    type Target = [BindGroupEntry<'a>];
+
+    fn deref(&self) -> &Self::Target {
+        &self.entries
     }
 }
 
@@ -210,6 +311,33 @@ impl<D: Send + Sync + Clone + 'static> std::ops::Deref for BindGroup<D> {
     }
 }
 
+#[derive(Debug, Clone)]
+pub enum CreateBindGroupError {
+    Error(Arc<dyn Error + Send + Sync + 'static>),
+    InvalidLayout,
+    MissingTexture { id: Id<RenderTexture> },
+    MissingSampler { id: Id<Sampler> },
+    MissingBuffer,
+}
+
+impl std::fmt::Display for CreateBindGroupError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Error(error) => write!(f, "{}", error),
+            Self::InvalidLayout => write!(f, "Invalid bind group layout"),
+            Self::MissingTexture { id } => write!(f, "Missing texture: {:?}", id),
+            Self::MissingSampler { id } => write!(f, "Missing sampler: {:?}", id),
+            Self::MissingBuffer => write!(f, "Missing buffer"),
+        }
+    }
+}
+
+impl<E: Error + Send + Sync + 'static> From<E> for CreateBindGroupError {
+    fn from(error: E) -> Self {
+        Self::Error(Arc::new(error))
+    }
+}
+
 pub trait CreateBindGroup {
     type Arg: SystemArg + 'static;
     type Data: Send + Sync + 'static;
@@ -223,6 +351,34 @@ pub trait CreateBindGroup {
         device: &RenderDevice,
         layout: &BindGroupLayout,
         arg: &ArgItem<Self::Arg>,
-    ) -> Option<BindGroup<Self::Data>>;
+    ) -> Result<BindGroup<Self::Data>, CreateBindGroupError>;
     fn bind_group_layout(device: &RenderDevice) -> BindGroupLayout;
+}
+
+pub trait IntoBufferData<T: ShaderType> {
+    fn into_buffer_data(&self) -> T;
+}
+
+impl<T: ShaderType, I> IntoBufferData<T> for I
+where
+    for<'a> &'a I: Into<T>,
+{
+    #[inline]
+    fn into_buffer_data(&self) -> T {
+        self.into()
+    }
+}
+
+pub trait IntoBindGroupData<T: Send + Sync + 'static> {
+    fn into_bind_group_data(&self) -> T;
+}
+
+impl<T: Send + Sync + 'static, I> IntoBindGroupData<T> for I
+where
+    for<'a> &'a I: Into<T>,
+{
+    #[inline]
+    fn into_bind_group_data(&self) -> T {
+        self.into()
+    }
 }

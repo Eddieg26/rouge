@@ -1,7 +1,9 @@
 use super::{FilterMode, WrapMode};
-use crate::{core::RenderAsset, resource::Id};
-
-pub use wgpu::{CompareFunction, SamplerBorderColor};
+use crate::{
+    resource::Id,
+    wgpu::{CompareFunction, SamplerBorderColor},
+    RenderAsset,
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SamplerDesc<'a> {

@@ -1,10 +1,9 @@
 use crate::{
-    core::RenderDevice,
-    resource::{texture::TextureFormat, Id},
+    resource::Id,
+    wgpu::{BufferUsages, TextureFormat, TextureUsages},
+    RenderDevice,
 };
 use std::collections::HashMap;
-
-pub use wgpu::{BufferUsages, TextureUsages};
 
 pub trait GraphResource: Sized + 'static {
     fn id(value: &str) -> GraphResourceId;

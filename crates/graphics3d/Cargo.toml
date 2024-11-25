@@ -10,3 +10,4 @@ asset = { path = "../asset" }
 spatial = { path = "../spatial" }
 graphics = { path = "../graphics" }
 crc32fast = { workspace = true }
+serde = { workspace = true }

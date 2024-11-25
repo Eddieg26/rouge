@@ -11,6 +11,14 @@ pub mod pipeline;
 pub mod shader;
 pub mod texture;
 
+pub use binding::*;
+pub use buffer::*;
+pub use mesh::*;
+pub use pipeline::*;
+pub use shader::*;
+pub use texture::*;
+
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct Id<T> {
     id: u128,
     _marker: std::marker::PhantomData<T>,

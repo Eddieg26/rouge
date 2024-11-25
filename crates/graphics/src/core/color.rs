@@ -1,3 +1,5 @@
+use encase::ShaderType;
+
 #[derive(
     Debug,
     Clone,
@@ -7,6 +9,7 @@
     serde::Deserialize,
     bytemuck::Pod,
     bytemuck::Zeroable,
+    ShaderType,
 )]
 #[repr(C)]
 pub struct Color {

@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 ecs = { path = "../ecs" }
 game = { path = "../game" }
+asset-macros = { path = "../macros/asset" }
 futures = { workspace = true }
 crc32fast = { workspace = true }
 downcast-rs = { workspace = true }

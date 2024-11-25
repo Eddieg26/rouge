@@ -9,6 +9,8 @@ game = { path = "../game" }
 asset = { path = "../asset" }
 window = { path = "../window" }
 spatial = { path = "../spatial" }
+graphics-macros = { path = "../macros/graphics" }
+encase-macros = { path = "../macros/encase" }
 glam = { workspace = true, features = ["serde", "bytemuck"] }
 bytemuck = { workspace = true }
 serde = { workspace = true }
@@ -17,5 +19,5 @@ crc32fast = { workspace = true }
 downcast-rs = { workspace = true }
 bitflags = { workspace = true }
 pollster = { workspace = true }
-wgpu = { version = "23.0.0", features = ["spirv", "glsl"] }
+wgpu = { version = "23.0.0", features = ["spirv", "glsl", "serde"] }
 encase = { version = "0.10.0", features = ["glam"] }

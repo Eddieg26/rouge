@@ -1,16 +1,19 @@
 use super::{AtomicId, Label};
-use crate::core::RenderDevice;
-use encase::{
-    internal::{BufferMut, WriteInto, Writer},
-    private::{ArrayMetadata, Metadata, RuntimeSizedArray},
-    ShaderSize, ShaderType,
+use crate::{
+    encase::{
+        internal::{BufferMut, WriteInto, Writer},
+        private::{ArrayMetadata, Metadata, RuntimeSizedArray},
+        ShaderSize, ShaderType,
+    },
+    wgpu::{BindingResource, BufferUsages},
+    RenderDevice,
 };
 use std::{
     marker::PhantomData,
     num::NonZero,
     ops::{Deref, RangeBounds},
 };
-use wgpu::{util::DeviceExt, BindingResource, BufferUsages};
+use wgpu::util::DeviceExt;
 
 pub mod array;
 pub mod index;

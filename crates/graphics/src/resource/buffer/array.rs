@@ -1,6 +1,9 @@
 use super::{BatchedUniformBuffer, Buffer, BufferArray, BufferArrayIndex, BufferData};
-use crate::{core::RenderDevice, resource::Label};
-use wgpu::{BindingResource, BufferUsages};
+use crate::{
+    resource::Label,
+    wgpu::{BindingResource, BufferUsages},
+    RenderDevice,
+};
 
 pub enum RenderBufferArray<B: BufferData> {
     Uniform(BatchedUniformBuffer<B>),

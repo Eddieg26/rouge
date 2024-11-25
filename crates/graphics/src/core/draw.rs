@@ -1,8 +1,11 @@
-use super::Color;
-use crate::resource::{
-    binding::{BindGroup, BindGroupId},
-    buffer::{Buffer, BufferSlice, BufferSliceId, IndexSlice},
-    pipeline::{RenderPipeline, RenderPipelineId},
+use crate::{
+    resource::{
+        binding::{BindGroup, BindGroupId},
+        buffer::{Buffer, BufferSlice, BufferSliceId, IndexSlice},
+        pipeline::{RenderPipeline, RenderPipelineId},
+    },
+    wgpu::{IndexFormat, QuerySet, RenderBundle, ShaderStages},
+    Color,
 };
 use bytemuck::{Pod, Zeroable};
 use ecs::{
@@ -12,7 +15,6 @@ use ecs::{
 use glam::{Mat4, Vec4};
 use spatial::rect::Rect;
 use std::{collections::HashMap, hash::Hash, ops::Range};
-use wgpu::{IndexFormat, QuerySet, RenderBundle, ShaderStages};
 
 pub trait Draw: Sized + Send + Sync + 'static {
     fn entity(&self) -> Entity;

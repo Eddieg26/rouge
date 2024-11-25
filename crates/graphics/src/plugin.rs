@@ -245,8 +245,12 @@ fn run_render_graph(mut graph: ResMut<RenderGraph>, world: &World) {
     graph.run(world);
 }
 
-fn present_surface_texture(mut surface_texture: ResMut<RenderSurfaceTexture>) {
+fn present_surface_texture(
+    mut surface_texture: ResMut<RenderSurfaceTexture>,
+    mut textures: ResMut<RenderAssets<RenderTexture>>,
+) {
     surface_texture.present();
+    textures.remove(&RenderSurface::ID.to());
 }
 
 fn extract_resize_events(events: Res<Events<WindowResized>>, actions: SubActions<RenderApp>) {

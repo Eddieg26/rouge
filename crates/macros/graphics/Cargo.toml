@@ -1,0 +1,16 @@
+[package]
+name = "graphics-macros"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+serde = { workspace = true }
+bitflags = { workspace = true }
+macro-utils = { path = "../../macros" }
+syn = { version = "2.0", features = ["full"] }
+quote = "1.0"
+proc-macro2 = "1.0"
+encase = { version = "0.10.0", features = ["glam"] }

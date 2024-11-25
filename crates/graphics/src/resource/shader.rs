@@ -1,3 +1,8 @@
+use crate::{
+    asset::{AssetUsage, ExtractError, RenderAsset, RenderAssetExtractor, RenderAssets},
+    device::RenderDevice,
+    resource::Id,
+};
 use asset::{
     importer::{DefaultProcessor, ImportContext, Importer},
     io::{AssetIoError, AssetReader},
@@ -6,12 +11,7 @@ use asset::{
 use ecs::system::{unlifetime::ReadRes, ArgItem, StaticArg};
 use std::{borrow::Cow, sync::Arc};
 
-use crate::core::{
-    device::RenderDevice,
-    asset::{AssetUsage, ExtractError, RenderAsset, RenderAssetExtractor, RenderAssets},
-};
-
-use super::Id;
+pub use meta::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum ShaderStage {
@@ -232,7 +232,9 @@ impl RenderAssetExtractor for Shader {
 }
 
 pub mod meta {
-    use std::borrow::Cow;
+    use std::{borrow::Cow, num::NonZeroU32};
+
+    use asset::io::cache::LoadPath;
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
     pub enum ShaderValue {
@@ -378,20 +380,43 @@ pub mod meta {
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub struct ShaderMeta {
+        path: LoadPath,
         entry: Cow<'static, str>,
         inputs: Vec<ShaderInput>,
         outputs: Vec<ShaderOuput>,
         bindings: Vec<ShaderBinding>,
+        instances: Option<NonZeroU32>,
     }
 
     impl ShaderMeta {
-        pub fn new(entry: &'static str) -> Self {
+        pub fn new(path: impl Into<LoadPath>, entry: &'static str) -> Self {
             Self {
+                path: path.into(),
                 entry: Cow::Borrowed(entry),
                 inputs: Vec::new(),
                 outputs: Vec::new(),
                 bindings: Vec::new(),
+                instances: None,
             }
+        }
+
+        pub fn with_instances(
+            path: impl Into<LoadPath>,
+            entry: &'static str,
+            instances: NonZeroU32,
+        ) -> Self {
+            Self {
+                path: path.into(),
+                entry: Cow::Borrowed(entry),
+                inputs: Vec::new(),
+                outputs: Vec::new(),
+                bindings: Vec::new(),
+                instances: Some(instances),
+            }
+        }
+
+        pub fn path(&self) -> &LoadPath {
+            &self.path
         }
 
         pub fn entry(&self) -> &str {
@@ -410,6 +435,10 @@ pub mod meta {
             &self.bindings
         }
 
+        pub fn instances(&self) -> Option<NonZeroU32> {
+            self.instances
+        }
+
         pub fn add_input(&mut self, value: ShaderValue, attribute: ShaderAttribute) -> &mut Self {
             self.inputs.push(ShaderInput { value, attribute });
             self
@@ -423,6 +452,11 @@ pub mod meta {
 
         pub fn add_binding(&mut self, binding: ShaderBinding) -> &mut Self {
             self.bindings.push(binding);
+            self
+        }
+
+        pub fn set_instances(&mut self, instances: NonZeroU32) -> &mut Self {
+            self.instances = Some(instances);
             self
         }
     }

@@ -1,12 +1,8 @@
-use crate::resource::{
-    texture::{target::RenderTarget, TextureFormat},
-    Id,
+use crate::resource::{texture::target::RenderTarget, Id};
+use crate::wgpu::{
+    HandleError, HasDisplayHandle, HasWindowHandle, SurfaceTargetUnsafe, TextureFormat,
 };
 use ecs::core::resource::Resource;
-use wgpu::{
-    rwh::{HandleError, HasDisplayHandle, HasWindowHandle},
-    SurfaceTargetUnsafe,
-};
 use window::Window;
 
 #[derive(Debug)]

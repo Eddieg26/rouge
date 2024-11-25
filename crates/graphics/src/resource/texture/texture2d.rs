@@ -1,10 +1,9 @@
-use crate::core::{RenderAssetExtractor, RenderAssets, RenderDevice};
-
 use super::{
     sampler::{Sampler, SamplerDesc},
     FilterMode, RenderTexture, Texture, TextureDimension, TextureFormat, WrapMode,
 };
-use asset::{Asset, Settings};
+use crate::core::{RenderAssetExtractor, RenderAssets, RenderDevice};
+use asset::Settings;
 use ecs::system::{
     unlifetime::{ReadRes, WriteRes},
     StaticArg,
@@ -85,7 +84,7 @@ impl Texture for Texture2d {
     }
 }
 
-impl Asset for Texture2d {}
+impl asset::Asset for Texture2d {}
 
 impl std::fmt::Display for Texture2d {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

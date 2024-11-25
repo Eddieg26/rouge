@@ -1,15 +1,19 @@
-use crate::core::{asset::RenderAsset, device::RenderDevice};
+use super::Id;
+use crate::{
+    wgpu::{TextureAspect, TextureFormat},
+    RenderAsset, RenderDevice,
+};
+use ecs::core::resource::Resource;
 
-pub mod format;
 pub mod render;
 pub mod sampler;
 pub mod target;
 pub mod texture2d;
 
-pub use format::*;
-pub use wgpu::TextureUsages;
-
-use super::Id;
+pub use render::*;
+pub use sampler::*;
+pub use target::*;
+pub use texture2d::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum TextureDimension {
@@ -168,12 +172,12 @@ impl RenderTexture {
                 texture: &created,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
-                aspect: texture.format().aspect(),
+                aspect: TextureAspect::All,
             },
             texture.pixels(),
             wgpu::ImageDataLayout {
                 bytes_per_row: format
-                    .block_copy_size(Some(texture.format().aspect()))
+                    .block_copy_size(Some(TextureAspect::All))
                     .map(|s| s * size.width),
                 ..Default::default()
             },
@@ -221,12 +225,12 @@ impl RenderTexture {
                     texture: &created,
                     mip_level: 0,
                     origin: wgpu::Origin3d::ZERO,
-                    aspect: desc.format.aspect(),
+                    aspect: TextureAspect::All,
                 },
                 &desc.pixels,
                 wgpu::ImageDataLayout {
                     bytes_per_row: format
-                        .block_copy_size(Some(desc.format.aspect()))
+                        .block_copy_size(Some(TextureAspect::All))
                         .map(|s| s * size.width),
                     ..Default::default()
                 },
@@ -262,3 +266,28 @@ impl std::ops::Deref for RenderTexture {
 impl RenderAsset for RenderTexture {
     type Id = Id<RenderTexture>;
 }
+
+pub struct Fallbacks {
+    pub d1: Id<RenderTexture>,
+    pub d2: Id<RenderTexture>,
+    pub d2_array: Id<RenderTexture>,
+    pub d3: Id<RenderTexture>,
+    pub cube: Id<RenderTexture>,
+    pub cube_array: Id<RenderTexture>,
+    pub sampler: Id<Sampler>,
+}
+
+impl Fallbacks {
+    pub fn dimension_id(&self, dimension: TextureDimension) -> Id<RenderTexture> {
+        match dimension {
+            TextureDimension::D1 => self.d1,
+            TextureDimension::D2 => self.d2,
+            TextureDimension::D2Array => self.d2_array,
+            TextureDimension::D3 => self.d3,
+            TextureDimension::Cube => self.cube,
+            TextureDimension::D3Array => self.cube_array,
+        }
+    }
+}
+
+impl Resource for Fallbacks {}

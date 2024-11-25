@@ -90,6 +90,9 @@ name = "arrayvec"
 version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c02d123df017efcdfbd739ef81735b36c5ba83ec3c59c80a9d7ecc718f92e50"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "as-raw-xcb-connection"
@@ -110,6 +113,7 @@ dependencies = [
 name = "asset"
 version = "0.1.0"
 dependencies = [
+ "asset-macros",
  "async-std",
  "bincode",
  "bitflags 2.6.0",
@@ -127,6 +131,16 @@ dependencies = [
  "serde",
  "thiserror",
  "uuid",
+]
+
+[[package]]
+name = "asset-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "serde",
+ "syn",
 ]
 
 [[package]]
@@ -667,6 +681,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "encase-macros"
+version = "0.1.0"
+dependencies = [
+ "encase_derive_impl",
+ "syn",
+]
+
+[[package]]
 name = "encase_derive"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1066,14 +1088,29 @@ dependencies = [
  "downcast-rs",
  "ecs",
  "encase",
+ "encase-macros",
  "game",
  "glam 0.28.0",
+ "graphics-macros",
  "pollster",
  "serde",
  "spatial",
  "uuid",
  "wgpu",
  "window",
+]
+
+[[package]]
+name = "graphics-macros"
+version = "0.1.0"
+dependencies = [
+ "bitflags 2.6.0",
+ "encase",
+ "macro-utils",
+ "proc-macro2",
+ "quote",
+ "serde",
+ "syn",
 ]
 
 [[package]]
@@ -1085,6 +1122,7 @@ dependencies = [
  "ecs",
  "game",
  "graphics",
+ "serde",
  "spatial",
 ]
 
@@ -1300,6 +1338,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a7a70ba024b9dc04c27ea2f0c0548feb474ec5c54bba33a7f72f873a39d07b24"
 dependencies = [
  "value-bag",
+]
+
+[[package]]
+name = "macro-utils"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
@@ -2556,6 +2603,7 @@ dependencies = [
  "parking_lot",
  "profiling",
  "raw-window-handle",
+ "serde",
  "smallvec",
  "static_assertions",
  "wasm-bindgen",
@@ -2586,6 +2634,7 @@ dependencies = [
  "profiling",
  "raw-window-handle",
  "rustc-hash",
+ "serde",
  "smallvec",
  "thiserror",
  "wgpu-hal",
@@ -2645,6 +2694,7 @@ checksum = "610f6ff27778148c31093f3b03abc4840f9636d58d597ca2f5977433acfe0068"
 dependencies = [
  "bitflags 2.6.0",
  "js-sys",
+ "serde",
  "web-sys",
 ]
 

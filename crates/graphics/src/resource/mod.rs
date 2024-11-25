@@ -248,3 +248,34 @@ impl<T> Ord for AtomicId<T> {
 }
 
 pub type Label = Option<Cow<'static, str>>;
+
+pub trait IntoOptionalId<T> {
+    fn into_optional_id(self) -> Option<Id<T>>;
+}
+
+impl<T, S> IntoOptionalId<T> for Id<S> {
+    fn into_optional_id(self) -> Option<Id<T>> {
+        Some(self.to())
+    }
+}
+
+impl<T, S> IntoOptionalId<T> for Option<Id<S>> {
+    fn into_optional_id(self) -> Option<Id<T>> {
+        self.map(|id| id.to())
+    }
+}
+
+impl<T, S> IntoOptionalId<T> for Option<&Id<S>> {
+    fn into_optional_id(self) -> Option<Id<T>> {
+        self.map(|id| id.to())
+    }
+}
+
+impl<T, S> IntoOptionalId<T> for &S
+where
+    for<'a> &'a S: Into<Id<T>>,
+{
+    fn into_optional_id(self) -> Option<Id<T>> {
+        Some(self.into())
+    }
+}

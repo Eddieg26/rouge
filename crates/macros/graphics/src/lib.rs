@@ -136,8 +136,9 @@ fn generate_create_bind_group(input: DeriveInput) -> Result<TokenStream> {
                     visibility,
                 } => {
                     entries.push(quote::quote! {
-                        let id: Id<RenderTexture> = match self.#field_name {
-                            Some(id) => id.into(),
+                        let id: Option<Id<RenderTexture>> = self.#field_name.into_optional_id();
+                        let id: Id<RenderTexture> = match id {
+                            Some(id) => id,
                             None => fallbacks.dimension_id(#dimension),
                         };
                         match textures.get(&id) {
@@ -156,12 +157,13 @@ fn generate_create_bind_group(input: DeriveInput) -> Result<TokenStream> {
                     visibility,
                 } => {
                     entries.push(quote::quote! {
-                        let id: Id<Sampler> = match self.#field_name {
-                            Some(id) => id.into(),
+                        let id: Option<Id<Sampler>> = self.#field_name.into_optional_id();
+                        let id: Id<Sampler> = match id {
+                            Some(id) => id,
                             None => fallbacks.sampler,
                         };
                         match samplers.get(&id) {
-                            Some(sampler) =>  #BIND_GROUP_BUILDER.add_sampler(#binding, *sampler),
+                            Some(sampler) =>  #BIND_GROUP_BUILDER.add_sampler(#binding, sampler.inner()),
                             None => return Err(#graphics::resource::CreateBindGroupError::MissingSampler{id}),
                         }
                     });
@@ -285,7 +287,7 @@ fn generate_create_bind_group(input: DeriveInput) -> Result<TokenStream> {
                 layout: &BindGroupLayout,
                 arg: &#ecs::system::ArgItem<Self::Arg>,
             ) -> Result<BindGroup<Self::Data>, #graphics::resource::CreateBindGroupError> {
-                use #graphics::{wgpu::BufferUsages, resource::{Buffer, BindGroupEntries, TextureDimension, Sampler, RenderTexture, IntoBufferData}};
+                use #graphics::{wgpu::BufferUsages, resource::{Buffer, BindGroupEntries, TextureDimension, Sampler, RenderTexture, IntoBufferData, IntoOptionalId}};
 
                 let (textures, samplers, fallbacks) = arg.inner();
 

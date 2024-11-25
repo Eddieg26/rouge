@@ -182,7 +182,9 @@ mod t {
     use graphics::{
         encase::ShaderType,
         resource::{
-            BindGroup, BindGroupLayout, BuiltinValue, CreateBindGroup, Id, IntoBindGroupData, IntoBufferData, Mesh, RenderTexture, ShaderAttribute, ShaderMeta, ShaderValue
+            BindGroup, BindGroupLayout, BuiltinValue, CreateBindGroup, Id, IntoBindGroupData,
+            IntoBufferData, IntoOptionalId, Mesh, RenderTexture, ShaderAttribute, ShaderMeta,
+            ShaderValue,
         },
         wgpu::PrimitiveState,
         Color, CreateBindGroup, RenderDevice,
@@ -211,6 +213,7 @@ mod t {
         albedo_color: Color,
         other_color: Color,
         #[texture(1)]
+        #[sampler(1)]
         albedo_texture: Option<Id<RenderTexture>>,
         _marker: std::marker::PhantomData<S>,
     }
@@ -219,7 +222,6 @@ mod t {
         type Surface = S;
 
         fn mode() -> super::BlendMode {
-
             todo!()
         }
 
@@ -228,6 +230,8 @@ mod t {
         }
 
         fn shader() -> ShaderMeta {
+            let id = Id::<Standard<Mesh>>::new(0);
+            let id: Option<Id<Mesh>> = id.into_optional_id();
             todo!()
         }
     }

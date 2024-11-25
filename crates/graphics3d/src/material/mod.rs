@@ -1,4 +1,4 @@
-use asset::{Asset, AssetId};
+use asset::{io::cache::LoadPath, Asset, AssetId};
 use ecs::core::{resource::Resource, IndexMap, Type};
 use graphics::{
     resource::{
@@ -34,15 +34,15 @@ pub trait Surface: Send + Sync + 'static {
         DepthWrite::On
     }
     fn primitive() -> PrimitiveState;
-    fn shader() -> ShaderMeta;
+    fn shader() -> impl Into<LoadPath>;
 }
 
-pub trait Material: Asset + CreateBindGroup + 'static {
+pub trait Material: Asset + CreateBindGroup<Data = ()> + 'static {
     type Surface: Surface;
 
     fn mode() -> BlendMode;
     fn model() -> ShaderModel;
-    fn shader() -> ShaderMeta;
+    fn shader() -> impl Into<LoadPath>;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -70,51 +70,6 @@ pub struct MaterialInstance {
 impl RenderAsset for MaterialInstance {
     type Id = AssetId;
 }
-
-pub struct MaterialMeta {
-    pub model: ShaderModel,
-    pub mode: BlendMode,
-    pub fragment: ShaderMeta,
-    pub vertex: ShaderMeta,
-}
-
-impl MaterialMeta {
-    pub fn new<M: Material>() -> Self {
-        Self {
-            model: M::model(),
-            mode: M::mode(),
-            fragment: M::shader(),
-            vertex: M::Surface::shader(),
-        }
-    }
-}
-
-pub struct MaterialRegistry {
-    materials: IndexMap<MaterialType, MaterialMeta>,
-}
-
-impl MaterialRegistry {
-    pub fn new() -> Self {
-        Self {
-            materials: IndexMap::new(),
-        }
-    }
-
-    pub fn register<M: Material>(&mut self) {
-        self.materials
-            .insert(MaterialType::of::<M>(), MaterialMeta::new::<M>());
-    }
-
-    pub fn get(&self, ty: MaterialType) -> Option<&MaterialMeta> {
-        self.materials.get(&ty)
-    }
-
-    pub fn iter(&self) -> impl Iterator<Item = (&MaterialType, &MaterialMeta)> {
-        self.materials.iter()
-    }
-}
-
-impl Resource for MaterialRegistry {}
 
 pub struct MaterialResources {
     layouts: IndexMap<MaterialType, BindGroupLayout>,
@@ -178,7 +133,7 @@ impl Resource for MaterialResources {}
 
 mod t {
     use super::{Material, Surface};
-    use asset::Asset;
+    use asset::{io::cache::LoadPath, Asset};
     use graphics::{
         encase::ShaderType,
         resource::{
@@ -194,16 +149,8 @@ mod t {
             PrimitiveState::default()
         }
 
-        fn shader() -> ShaderMeta {
-            let mut meta = ShaderMeta::new("vs_main");
-            meta.add_input(ShaderValue::Vec3, ShaderAttribute::Location(0));
-            meta.add_input(ShaderValue::Vec2, ShaderAttribute::Location(1));
-            meta.add_output(
-                ShaderValue::Vec4,
-                ShaderAttribute::Builtin(BuiltinValue::Position),
-            );
-
-            meta
+        fn shader() -> impl Into<LoadPath> {
+            ""
         }
     }
 
@@ -228,10 +175,8 @@ mod t {
             todo!()
         }
 
-        fn shader() -> ShaderMeta {
-            let id = Id::<Standard<Mesh>>::new(0);
-            let id: Option<Id<Mesh>> = id.into_optional_id();
-            todo!()
+        fn shader() -> impl Into<LoadPath> {
+            ""
         }
     }
 

@@ -706,7 +706,7 @@ checksum = "b0a05902cf601ed11d564128448097b98ebe3c6574bd7b6a653a3d56d54aa020"
 dependencies = [
  "const_panic",
  "encase_derive",
- "glam 0.29.2",
+ "glam",
  "thiserror",
 ]
 
@@ -1009,19 +1009,13 @@ dependencies = [
 
 [[package]]
 name = "glam"
-version = "0.28.0"
+version = "0.29.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "779ae4bf7e8421cf91c0b3b64e7e8b40b862fba4d393f59150042de7c4965a94"
+checksum = "dc46dd3ec48fdd8e693a98d2b8bafae273a2d54c1de02a2a7e3d57d501f39677"
 dependencies = [
  "bytemuck",
  "serde",
 ]
-
-[[package]]
-name = "glam"
-version = "0.29.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc46dd3ec48fdd8e693a98d2b8bafae273a2d54c1de02a2a7e3d57d501f39677"
 
 [[package]]
 name = "gloo-timers"
@@ -1120,7 +1114,7 @@ dependencies = [
  "encase",
  "encase-macros",
  "game",
- "glam 0.28.0",
+ "glam",
  "graphics-macros",
  "naga_oil",
  "pollster",
@@ -2256,7 +2250,7 @@ version = "0.1.0"
 dependencies = [
  "ecs",
  "game",
- "glam 0.28.0",
+ "glam",
  "serde",
 ]
 

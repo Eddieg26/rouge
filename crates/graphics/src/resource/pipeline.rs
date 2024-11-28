@@ -22,11 +22,7 @@ impl std::ops::Deref for RenderPipeline {
 }
 
 impl RenderPipeline {
-    pub fn create(
-        device: &RenderDevice,
-        desc: RenderPipelineDesc,
-        shaders: &RenderAssets<Shader>,
-    ) -> Option<Self> {
+    pub fn create<'a>(device: &RenderDevice, desc: RenderPipelineDesc<'a>) -> Self {
         let layout = desc.layout.map(|layout| {
             let layout = layout
                 .iter()
@@ -39,10 +35,7 @@ impl RenderPipeline {
             })
         });
 
-        let vertex_shader = match &desc.vertex.shader {
-            Handle::Ref(id) => shaders.get(id)?,
-            Handle::Owned(shader) => shader,
-        };
+        let vertex_shader = &desc.vertex.shader;
 
         let vertex_buffer_layouts = desc
             .vertex
@@ -64,10 +57,7 @@ impl RenderPipeline {
 
         let fragment = match &desc.fragment {
             Some(state) => Some(wgpu::FragmentState {
-                module: match &state.shader {
-                    Handle::Ref(id) => shaders.get(id)?.module(),
-                    Handle::Owned(shader) => shader.module(),
-                },
+                module: &state.shader,
                 entry_point: Some(&state.entry),
                 compilation_options: Default::default(),
                 targets: &state.targets,
@@ -75,7 +65,7 @@ impl RenderPipeline {
             None => None,
         };
 
-        let instances = desc.instances;
+        let instances = vertex_shader.meta().and_then(|m| m.instances());
 
         let desc = wgpu::RenderPipelineDescriptor {
             label: desc.label,
@@ -89,11 +79,11 @@ impl RenderPipeline {
             cache: None,
         };
 
-        Some(RenderPipeline {
+        RenderPipeline {
             inner: device.create_render_pipeline(&desc),
             id: RenderPipelineId::new(),
             instances,
-        })
+        }
     }
 
     pub fn with_instances(mut self, instances: NonZeroU32) -> Self {
@@ -149,27 +139,26 @@ impl VertexBufferLayout {
     }
 }
 
-pub struct VertexState {
-    pub shader: Handle<Shader>,
-    pub entry: Cow<'static, str>,
+pub struct VertexState<'a> {
+    pub shader: &'a Shader,
+    pub entry: &'a str,
     pub buffers: Vec<VertexBufferLayout>,
 }
 
-pub struct FragmentState {
-    pub shader: Handle<Shader>,
-    pub entry: Cow<'static, str>,
+pub struct FragmentState<'a> {
+    pub shader: &'a Shader,
+    pub entry: &'a str,
     pub targets: Vec<Option<ColorTargetState>>,
 }
 
 pub struct RenderPipelineDesc<'a> {
     pub label: Option<&'a str>,
     pub layout: Option<&'a [&'a BindGroupLayout]>,
-    pub vertex: VertexState,
-    pub fragment: Option<FragmentState>,
+    pub vertex: VertexState<'a>,
+    pub fragment: Option<FragmentState<'a>>,
     pub primitive: PrimitiveState,
     pub depth_state: Option<DepthStencilState>,
     pub multisample: MultisampleState,
-    pub instances: Option<NonZeroU32>,
 }
 
 pub struct ComputePipelineDesc<'a> {

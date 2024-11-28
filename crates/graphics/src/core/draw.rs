@@ -12,6 +12,7 @@ use ecs::{
     core::{entity::Entity, IndexMap},
     system::SystemArg,
 };
+use encase::ShaderType;
 use glam::{Mat4, Vec4};
 use spatial::rect::Rect;
 use std::{collections::HashMap, hash::Hash, ops::Range};
@@ -29,7 +30,7 @@ pub trait BatchDraw: Draw {
     fn can_batch(&self) -> bool;
 }
 
-#[derive(Debug, Clone, Copy, Pod, Zeroable)]
+#[derive(Debug, Default, Clone, Copy, Pod, Zeroable, ShaderType)]
 #[repr(C)]
 pub struct RenderViewData {
     pub position: Vec4,

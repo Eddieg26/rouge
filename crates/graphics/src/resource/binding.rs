@@ -4,7 +4,7 @@ use crate::{
         BindGroupEntry, BindGroupLayoutEntry, BindingType, BufferBindingType, SamplerBindingType,
         ShaderStages, StorageTextureAccess, TextureFormat, TextureSampleType,
     },
-    RenderDevice,
+    ExtractError, RenderDevice,
 };
 use ecs::system::{ArgItem, SystemArg};
 use encase::ShaderType;
@@ -34,6 +34,8 @@ impl BindGroupLayoutBuilder {
         binding: u32,
         visibility: ShaderStages,
         buffer: BufferBindingType,
+        min_binding_size: Option<wgpu::BufferSize>,
+        array_size: Option<NonZeroU32>,
     ) -> Self {
         self.entries.push(BindGroupLayoutEntry {
             binding,
@@ -41,9 +43,9 @@ impl BindGroupLayoutBuilder {
             ty: BindingType::Buffer {
                 ty: buffer,
                 has_dynamic_offset: false,
-                min_binding_size: None,
+                min_binding_size,
             },
-            count: None,
+            count: array_size,
         });
         self
     }
@@ -54,7 +56,7 @@ impl BindGroupLayoutBuilder {
         visibility: ShaderStages,
         dynamic: bool,
         min_binding_size: Option<wgpu::BufferSize>,
-        count: Option<NonZeroU32>,
+        array_size: Option<NonZeroU32>,
     ) -> Self {
         self.entries.push(BindGroupLayoutEntry {
             binding,
@@ -64,7 +66,7 @@ impl BindGroupLayoutBuilder {
                 has_dynamic_offset: dynamic,
                 min_binding_size,
             },
-            count,
+            count: array_size,
         });
         self
     }
@@ -291,6 +293,10 @@ impl<D: Send + Sync + 'static> BindGroup<D> {
     pub fn data(&self) -> &D {
         &self.data
     }
+
+    pub fn data_mut(&mut self) -> &mut D {
+        &mut self.data
+    }
 }
 
 impl From<wgpu::BindGroup> for BindGroup<()> {
@@ -320,6 +326,12 @@ pub enum CreateBindGroupError {
     MissingBuffer,
 }
 
+impl CreateBindGroupError {
+    pub fn from_error<E: Error + Send + Sync + 'static>(error: E) -> Self {
+        Self::Error(Arc::new(error))
+    }
+}
+
 impl std::fmt::Display for CreateBindGroupError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -332,9 +344,19 @@ impl std::fmt::Display for CreateBindGroupError {
     }
 }
 
-impl<E: Error + Send + Sync + 'static> From<E> for CreateBindGroupError {
-    fn from(error: E) -> Self {
-        Self::Error(Arc::new(error))
+impl std::error::Error for CreateBindGroupError {}
+
+impl Into<ExtractError> for CreateBindGroupError {
+    fn into(self) -> ExtractError {
+        match self {
+            CreateBindGroupError::Error(error) => ExtractError::Error(error),
+            CreateBindGroupError::InvalidLayout => {
+                ExtractError::from_error(CreateBindGroupError::InvalidLayout)
+            }
+            CreateBindGroupError::MissingTexture { .. } => ExtractError::MissingDependency,
+            CreateBindGroupError::MissingSampler { .. } => ExtractError::MissingDependency,
+            CreateBindGroupError::MissingBuffer => ExtractError::MissingDependency,
+        }
     }
 }
 

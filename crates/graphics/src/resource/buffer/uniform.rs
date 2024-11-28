@@ -1,3 +1,5 @@
+use encase::internal::AlignmentValue;
+
 use super::{Buffer, BufferArrayIndex, BufferData, Label, StaticArray};
 use crate::{
     encase::{
@@ -62,6 +64,27 @@ impl<T: ShaderType> UniformBuffer<T> {
 }
 
 impl<T: ShaderType + WriteInto> UniformBuffer<T> {
+    pub fn with_buffer(device: &RenderDevice, value: T) -> Self {
+        let mut data = EncaseUniformBuffer::new(vec![]);
+        data.write(&value).unwrap();
+
+        let buffer = Buffer::with_data(
+            device,
+            data.as_ref(),
+            BufferUsages::COPY_DST | BufferUsages::UNIFORM,
+            None,
+        );
+
+        Self {
+            label: None,
+            value,
+            data,
+            buffer: Some(buffer),
+            usage: BufferUsages::COPY_DST | BufferUsages::UNIFORM,
+            is_dirty: false,
+        }
+    }
+
     pub fn set(&mut self, value: T) {
         self.value = value;
         self.is_dirty = true;
@@ -118,6 +141,13 @@ impl<B: ShaderType> UniformBufferArray<B> {
         }
     }
 
+    pub fn aligned(device: &RenderDevice) -> Self {
+        let alignment =
+            AlignmentValue::new(device.limits().min_uniform_buffer_offset_alignment as u64)
+                .round_up(B::min_size().get());
+        Self::with_alignment(alignment)
+    }
+
     pub fn with_label(mut self, label: Label) -> Self {
         self.label = label;
         self
@@ -158,6 +188,11 @@ impl<B: ShaderType> UniformBufferArray<B> {
 
     pub fn binding(&self) -> Option<BindingResource> {
         self.buffer.as_ref().map(|b| b.as_entire_binding())
+    }
+
+    pub fn min_alignment(device: &RenderDevice) -> u64 {
+        AlignmentValue::new(device.limits().min_uniform_buffer_offset_alignment as u64)
+            .round_up(B::min_size().get())
     }
 }
 

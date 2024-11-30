@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use super::{FilterMode, WrapMode};
 use crate::{
     resource::Id,
@@ -32,7 +34,8 @@ impl Default for SamplerDesc<'_> {
     }
 }
 
-pub struct Sampler(wgpu::Sampler);
+#[derive(Clone)]
+pub struct Sampler(Arc<wgpu::Sampler>);
 
 impl Sampler {
     pub fn create(device: &wgpu::Device, desc: &SamplerDesc) -> Self {
@@ -54,7 +57,7 @@ impl Sampler {
             border_color: desc.border_color,
         });
 
-        Self(sampler)
+        Self(Arc::new(sampler))
     }
 
     pub fn inner(&self) -> &wgpu::Sampler {
@@ -72,7 +75,7 @@ impl std::ops::Deref for Sampler {
 
 impl From<wgpu::Sampler> for Sampler {
     fn from(sampler: wgpu::Sampler) -> Self {
-        Self(sampler)
+        Self(Arc::new(sampler))
     }
 }
 

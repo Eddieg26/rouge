@@ -40,13 +40,15 @@ pub struct RenderViewData {
     pub frustum: [Vec4; 6],
 }
 
-pub struct RenderView<V: 'static> {
+pub trait View: Clone + Send + Sync + 'static {}
+
+pub struct RenderView<V: View> {
     pub data: RenderViewData,
     pub viewport: Viewport,
     view: V,
 }
 
-impl<V: 'static> std::ops::Deref for RenderView<V> {
+impl<V: View> std::ops::Deref for RenderView<V> {
     type Target = V;
 
     fn deref(&self) -> &Self::Target {
@@ -432,7 +434,7 @@ impl<'a> RenderState<'a> {
 
 pub trait DrawSystem {
     type Draw: Draw;
-    type View: 'static;
+    type View: View;
     type Arg: SystemArg;
 
     fn draw(
@@ -446,7 +448,7 @@ pub trait DrawSystem {
 
 pub trait BatchDrawSystem {
     type Draw: BatchDraw;
-    type View: 'static;
+    type View: View;
     type Arg: SystemArg;
 
     fn draw(

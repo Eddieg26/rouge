@@ -89,7 +89,7 @@ impl AssetDatabase {
     pub fn refresh(&self, mode: RefreshMode) {
         self.events
             .lock_arc_blocking()
-            .push_back(DatabaseEvent::Refresh(mode));
+            .push_front(DatabaseEvent::Refresh(mode));
 
         self.update();
     }

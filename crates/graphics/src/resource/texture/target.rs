@@ -12,10 +12,7 @@ use crate::{
 use asset::AssetId;
 use ecs::{
     event::{Event, Events},
-    system::{
-        unlifetime::{ReadRes, WriteRes},
-        StaticArg,
-    },
+    system::unlifetime::{ReadRes, WriteRes},
     world::action::WorldAction,
 };
 
@@ -34,21 +31,18 @@ impl RenderAsset for RenderTarget {
 impl RenderAssetExtractor for RenderTarget {
     type Source = RenderTargetTexture;
     type Asset = RenderTarget;
-    type Arg = StaticArg<
-        'static,
-        (
-            ReadRes<RenderDevice>,
-            WriteRes<RenderAssets<RenderTexture>>,
-            WriteRes<RenderAssets<Sampler>>,
-        ),
-    >;
+    type Arg = (
+        ReadRes<RenderDevice>,
+        WriteRes<RenderAssets<RenderTexture>>,
+        WriteRes<RenderAssets<Sampler>>,
+    );
 
     fn extract(
         id: &AssetId,
         source: &mut Self::Source,
         arg: &mut ecs::system::ArgItem<Self::Arg>,
     ) -> Result<Self::Asset, crate::core::ExtractError> {
-        let (device, textures, samplers) = arg.inner_mut();
+        let (device, textures, samplers) = arg;
 
         let color = RenderTexture::create(device, source);
         let sampler = Sampler::create(
@@ -81,7 +75,7 @@ impl RenderAssetExtractor for RenderTarget {
         assets: &mut crate::core::RenderAssets<Self::Asset>,
         arg: &mut ecs::system::ArgItem<Self::Arg>,
     ) {
-        let (.., textures, samplers) = arg.inner_mut();
+        let (.., textures, samplers) = arg;
         if let Some(target) = assets.remove(&id.into()) {
             textures.remove(&target.color);
             samplers.remove(&target.sampler);

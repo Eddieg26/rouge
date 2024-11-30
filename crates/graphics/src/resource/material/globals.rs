@@ -2,12 +2,9 @@ use crate::{
     resource::{
         BindGroup, BindGroupLayout, BindGroupLayoutBuilder, UniformBuffer, UniformBufferArray,
     },
-    RenderDevice, RenderResourceExtractor, RenderViewData,
+    RenderDevice, RenderResourceExtractor, RenderViewData, View,
 };
-use ecs::{
-    core::resource::Resource,
-    system::{unlifetime::ReadRes, StaticArg},
-};
+use ecs::{core::resource::Resource, system::unlifetime::ReadRes};
 use encase::ShaderType;
 use wgpu::{BufferBindingType, ShaderStages};
 
@@ -64,7 +61,15 @@ impl From<BindGroupLayout> for GlobalLayout {
 
 impl Resource for GlobalLayout {}
 
-pub struct Globals<V: Send + 'static> {
+impl RenderResourceExtractor for GlobalLayout {
+    type Arg = ReadRes<RenderDevice>;
+
+    fn extract(arg: ecs::system::ArgItem<Self::Arg>) -> Result<Self, crate::ExtractError> {
+        Ok(Self::new(&arg))
+    }
+}
+
+pub struct Globals<V: View> {
     binding: BindGroup,
     layout: GlobalLayout,
     buffer: UniformBuffer<GlobalsData>,
@@ -72,7 +77,7 @@ pub struct Globals<V: Send + 'static> {
     _phantom: std::marker::PhantomData<V>,
 }
 
-impl<V: Send + 'static> Globals<V> {
+impl<V: View> Globals<V> {
     pub fn new(device: &RenderDevice, layout: &GlobalLayout, data: GlobalsData) -> Self {
         let buffer = UniformBuffer::with_buffer(device, data);
         let mut views = UniformBufferArray::<RenderViewData>::aligned(device);
@@ -124,19 +129,15 @@ impl<V: Send + 'static> Globals<V> {
     }
 }
 
-impl<V: Send + 'static> Resource for Globals<V> {}
+impl<V: View> Resource for Globals<V> {}
 
-impl<V: Send + 'static> RenderResourceExtractor for Globals<V> {
-    type Resource = Globals<V>;
+impl<V: View> RenderResourceExtractor for Globals<V> {
+    type Arg = (ReadRes<RenderDevice>, ReadRes<GlobalLayout>);
 
-    type Arg = StaticArg<'static, (ReadRes<RenderDevice>, ReadRes<GlobalLayout>)>;
-
-    fn extract(
-        arg: ecs::system::ArgItem<Self::Arg>,
-    ) -> Result<Self::Resource, crate::ExtractError> {
-        let (device, layout) = arg.inner();
+    fn extract(arg: ecs::system::ArgItem<Self::Arg>) -> Result<Self, crate::ExtractError> {
+        let (device, layout) = arg;
 
         let data = GlobalsData::default();
-        Ok(Self::new(device, layout, data))
+        Ok(Self::new(&device, &layout, data))
     }
 }

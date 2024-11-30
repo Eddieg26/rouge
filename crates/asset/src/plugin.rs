@@ -2,12 +2,17 @@ use crate::{
     asset::{Asset, AssetType, Assets},
     database::{
         config::AssetConfig,
-        events::{on_asset_event, on_update_assets_modified, AssetEvent, AssetsModified},
+        events::{
+            on_asset_event, on_update_assets_modified, AssetEvent, AssetsModified, LoadAssets,
+        },
+        state::PreloadAssets,
         update::RefreshMode,
         AssetDatabase, DatabaseInitError,
     },
     importer::{ImportError, Importer, LoadError, Processor},
-    io::{embedded::EmbeddedFs, local::LocalFs, source::AssetSourceName, FileSystem},
+    io::{
+        cache::LoadPath, embedded::EmbeddedFs, local::LocalFs, source::AssetSourceName, FileSystem,
+    },
 };
 use ecs::{core::resource::ResMut, event::Events, world::builtin::events::ResourceUpdate};
 use futures::executor::block_on;
@@ -24,6 +29,7 @@ impl Plugin for AssetPlugin {
     fn start(&mut self, game: &mut GameBuilder) {
         game.add_resource(AssetConfig::new());
         game.add_resource(AssetsModified::new());
+        game.add_resource(PreloadAssets::new());
         game.register_event::<ImportError>();
         game.register_event::<LoadError>();
         game.register_event::<DatabaseInitError>();
@@ -42,6 +48,10 @@ impl Plugin for AssetPlugin {
             config.add_source(AssetSourceName::Default, LocalFs::new("assets"));
         }
 
+        if let Some(assets) = game.remove_resource::<PreloadAssets>() {
+            game.actions().add(LoadAssets::new(assets.assets));
+        }
+
         let tasks = game.tasks().clone();
         let actions = game.actions().clone();
         game.add_resource(AssetDatabase::new(config, tasks, actions));
@@ -58,6 +68,7 @@ pub trait AssetExt: 'static {
     fn register_asset<A: Asset>(&mut self) -> &mut Self;
     fn add_importer<I: Importer>(&mut self) -> &mut Self;
     fn set_processor<P: Processor>(&mut self) -> &mut Self;
+    fn load_asset<A: Asset>(&mut self, path: impl Into<LoadPath>) -> &mut Self;
 }
 
 impl AssetExt for GameBuilder {
@@ -113,6 +124,11 @@ impl AssetExt for GameBuilder {
         let config = self.resource_mut::<AssetConfig>();
         config.registry_mut().set_processor::<P>();
 
+        self
+    }
+
+    fn load_asset<A: Asset>(&mut self, path: impl Into<LoadPath>) -> &mut Self {
+        self.resource_mut::<PreloadAssets>().add(path.into());
         self
     }
 }

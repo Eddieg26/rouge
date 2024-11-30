@@ -9,7 +9,7 @@ use crate::{
 };
 use ecs::{
     core::{resource::Resource, IndexMap},
-    system::{unlifetime::ReadRes, StaticArg},
+    system::unlifetime::ReadRes,
     world::{access::Removed, World},
 };
 use std::{any::TypeId, collections::HashMap};
@@ -302,18 +302,14 @@ impl Default for RenderGraph {
 impl Resource for RenderGraph {}
 
 impl RenderResourceExtractor for RenderGraph {
-    type Resource = RenderGraph;
-    type Arg = StaticArg<
-        'static,
-        (
-            ReadRes<RenderDevice>,
-            ReadRes<RenderAssets<RenderTarget>>,
-            Removed<RenderGraphBuilder>,
-        ),
-    >;
+    type Arg = (
+        ReadRes<RenderDevice>,
+        ReadRes<RenderAssets<RenderTarget>>,
+        Removed<RenderGraphBuilder>,
+    );
 
-    fn extract(arg: ecs::system::ArgItem<Self::Arg>) -> Result<Self::Resource, ExtractError> {
-        let (device, targets, builder) = arg.into_inner();
+    fn extract(arg: ecs::system::ArgItem<Self::Arg>) -> Result<Self, ExtractError> {
+        let (device, targets, builder) = arg;
         if let Some(builder) = builder.into_inner() {
             let (width, height) = targets.max_size();
             match builder.build(&device, width, height) {
@@ -325,7 +321,7 @@ impl RenderResourceExtractor for RenderGraph {
         }
     }
 
-    fn default() -> Option<Self::Resource> {
+    fn default() -> Option<Self> {
         Some(Default::default())
     }
 }

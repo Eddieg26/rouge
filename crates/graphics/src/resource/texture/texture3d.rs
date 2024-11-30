@@ -1,43 +1,61 @@
+use super::{FilterMode, Texture, TextureDimension, WrapMode};
 use std::ops::Range;
+use wgpu::TextureFormat;
 
-use super::{FilterMode, Texture, TextureDimension, TextureFormat, WrapMode};
-use asset::Asset;
-use wgpu::TextureUsages;
-
-#[derive(serde::Serialize, serde::Deserialize)]
-pub struct RenderTargetTexture {
+pub struct Texture3d {
     width: u32,
     height: u32,
+    depth: u32,
     format: TextureFormat,
     filter_mode: FilterMode,
     wrap_mode: WrapMode,
+    mipmaps: bool,
     pixels: Vec<u8>,
     faces: [super::TextureFace; 1],
 }
 
-impl RenderTargetTexture {
+impl Texture3d {
     pub fn new(
         width: u32,
         height: u32,
+        depth: u32,
         format: TextureFormat,
         filter_mode: FilterMode,
         wrap_mode: WrapMode,
+        mipmaps: bool,
+        pixels: Vec<u8>,
     ) -> Self {
-        let faces = [super::TextureFace::new(0, 0)];
-
+        let faces = [super::TextureFace::new(0, pixels.len())];
         Self {
-            wrap_mode,
+            width,
             height,
+            depth,
             format,
             filter_mode,
-            width,
-            pixels: Vec::new(),
+            wrap_mode,
+            mipmaps,
+            pixels,
             faces,
         }
     }
 }
 
-impl Texture for RenderTargetTexture {
+impl Default for Texture3d {
+    fn default() -> Self {
+        Self::new(
+            1,
+            1,
+            1,
+            TextureFormat::Rgba8Unorm,
+            FilterMode::Linear,
+            WrapMode::ClampToEdge,
+            false,
+            vec![0; 4],
+        )
+    }
+}
+
+impl Texture for Texture3d {
     fn width(&self) -> u32 {
         self.width
     }
@@ -47,7 +65,7 @@ impl Texture for RenderTargetTexture {
     }
 
     fn depth(&self) -> u32 {
-        1
+        self.depth
     }
 
     fn format(&self) -> TextureFormat {
@@ -55,7 +73,7 @@ impl Texture for RenderTargetTexture {
     }
 
     fn dimension(&self) -> TextureDimension {
-        TextureDimension::D2
+        TextureDimension::D3
     }
 
     fn filter_mode(&self) -> FilterMode {
@@ -67,11 +85,13 @@ impl Texture for RenderTargetTexture {
     }
 
     fn mipmaps(&self) -> bool {
-        false
+        self.mipmaps
     }
 
-    fn usage(&self) -> TextureUsages {
-        TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING
+    fn usage(&self) -> wgpu::TextureUsages {
+        wgpu::TextureUsages::TEXTURE_BINDING
+            | wgpu::TextureUsages::COPY_DST
+            | wgpu::TextureUsages::COPY_SRC
     }
 
     fn faces(&self) -> &[super::TextureFace] {
@@ -82,5 +102,3 @@ impl Texture for RenderTargetTexture {
         &self.pixels[range]
     }
 }
-
-impl Asset for RenderTargetTexture {}

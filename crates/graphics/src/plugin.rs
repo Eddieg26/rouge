@@ -15,8 +15,10 @@ use crate::{
             texture2d::Texture2d,
             RenderTexture,
         },
+        Fallbacks,
     },
     surface::{RenderSurface, RenderSurfaceError, RenderSurfaceTexture},
+    RenderResourceExtractors,
 };
 use asset::{
     database::events::AssetEvent,
@@ -27,10 +29,8 @@ use asset::{
 use ecs::{
     core::resource::{NonSend, Res, ResMut},
     event::{Event, Events},
-    system::StaticArg,
     world::{
         action::{BatchEvents, WorldAction, WorldActions},
-        builtin::actions::AddResource,
         World,
     },
 };
@@ -53,6 +53,7 @@ impl Plugin for RenderPlugin {
         use render_phases::*;
         game.register_event::<ExtractError>()
             .add_resource(RenderAssetExtractors::new())
+            .add_resource(RenderResourceExtractors::new())
             .add_resource(RenderGraphBuilder::new())
             .observe::<WindowCreated, _>(create_render_surface)
             .observe::<WindowResized, _>(extract_resize_events)
@@ -89,14 +90,21 @@ impl Plugin for RenderPlugin {
         game.add_render_asset_extractor::<Texture2d>();
         game.add_render_asset_extractor::<RenderTarget>();
         game.add_render_asset_extractor::<Shader>();
+        game.add_render_resource_extractor::<Fallbacks>();
         game.add_render_resource_extractor::<RenderGraph>();
     }
 
     fn finish(&mut self, game: &mut game::GameBuilder) {
         if let Some(extractors) = game.remove_resource::<RenderAssetExtractors>() {
-            let configs = extractors.build();
+            let systems = extractors.build();
             game.sub_app_mut::<RenderApp>()
-                .add_systems(Extract, configs);
+                .add_systems(Extract, systems);
+        }
+
+        if let Some(extractors) = game.remove_resource::<RenderResourceExtractors>() {
+            let observers = extractors.build();
+            game.sub_app_mut::<RenderApp>()
+                .observe::<SurfaceCreated, _>(observers);
         }
 
         match game.remove_resource::<RenderGraphBuilder>() {
@@ -351,23 +359,8 @@ impl RenderAppExt for GameBuilder {
     }
 
     fn add_render_resource_extractor<R: RenderResourceExtractor>(&mut self) -> &mut Self {
-        let app = self.sub_app_mut::<RenderApp>();
-        app.observe::<SurfaceCreated, _>(
-            |arg: StaticArg<R::Arg>,
-             actions: &WorldActions,
-             mut errors: ResMut<Events<ExtractError>>| {
-                let arg = arg.into_inner();
-                match R::extract(arg) {
-                    Ok(resource) => actions.add(AddResource::new(resource)),
-                    Err(error) => {
-                        errors.add(error);
-                        if let Some(default) = R::default() {
-                            actions.add(AddResource::new(default));
-                        }
-                    }
-                }
-            },
-        );
+        let extractors = self.resource_mut::<RenderResourceExtractors>();
+        extractors.add::<R>();
         self
     }
 }

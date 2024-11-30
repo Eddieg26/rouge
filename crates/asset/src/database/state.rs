@@ -1,5 +1,6 @@
-use crate::asset::AssetId;
+use crate::{asset::AssetId, io::cache::LoadPath};
 use async_std::sync::RwLock;
+use ecs::core::resource::Resource;
 use hashbrown::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -355,3 +356,21 @@ impl AssetStates {
 }
 
 pub type SharedStates = Arc<RwLock<AssetStates>>;
+
+pub struct PreloadAssets {
+    pub assets: HashSet<LoadPath>,
+}
+
+impl PreloadAssets {
+    pub fn new() -> Self {
+        Self {
+            assets: HashSet::new(),
+        }
+    }
+
+    pub fn add(&mut self, path: LoadPath) {
+        self.assets.insert(path);
+    }
+}
+
+impl Resource for PreloadAssets {}

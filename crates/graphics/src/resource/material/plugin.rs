@@ -1,21 +1,18 @@
 use super::{
-    globals::GlobalLayout, Material, MaterialInstance, MaterialMetadata, MaterialPipelines,
-    MeshPipelineData,
+    globals::{GlobalLayout, Globals},
+    Material, MaterialInstance, MaterialMetadata, MaterialPipelines, MeshPipelineData,
 };
 use crate::{
-    plugin::{RenderApp, RenderAppExt},
+    plugin::{RenderApp, RenderAppExt, RenderPlugin},
     resource::{
         material::{MeshPipeline, Metadata},
-        MaterialPipelineDesc, MaterialType, Shader,
+        MaterialPipelineDesc, MaterialType, Shader, ShaderSource,
     },
     surface::RenderSurface,
-    RenderAssetExtractor, RenderAssets, RenderDevice,
+    RenderAssetExtractor, RenderAssets, RenderDevice, View,
 };
-use asset::{database::AssetDatabase, io::cache::LoadPath};
-use ecs::system::{
-    unlifetime::{ReadRes, WriteRes},
-    StaticArg,
-};
+use asset::{database::AssetDatabase, io::cache::LoadPath, plugin::AssetExt};
+use ecs::system::unlifetime::{ReadRes, WriteRes};
 use game::{GameBuilder, Main, Plugin};
 
 pub struct BaseMaterialPlugin;
@@ -25,13 +22,15 @@ impl Plugin for BaseMaterialPlugin {
         "BaseMaterialPlugin"
     }
 
-    fn start(&mut self, game: &mut GameBuilder) {
-        game.add_render_asset_extractor::<GlobalLayout>();
+    fn dependencies(&self) -> game::Plugins {
+        let mut plugins = game::Plugins::new();
+        plugins.add(RenderPlugin);
+        plugins
     }
 
-    fn run(&mut self, _game: &mut GameBuilder) {}
-
-    fn finish(&mut self, _game: &mut GameBuilder) {}
+    fn start(&mut self, game: &mut GameBuilder) {
+        game.add_render_resource_extractor::<GlobalLayout>();
+    }
 }
 
 pub struct MaterialPlugin<M: Material> {
@@ -51,8 +50,18 @@ impl<M: Material> Plugin for MaterialPlugin<M> {
         std::any::type_name::<M>()
     }
 
+    fn dependencies(&self) -> game::Plugins {
+        let mut plugins = game::Plugins::new();
+        plugins.add(BaseMaterialPlugin);
+        plugins
+    }
+
     fn start(&mut self, game: &mut GameBuilder) {
-        game.add_render_asset_extractor::<M>();
+        game.add_render_asset_extractor::<M>()
+            .add_render_resource_extractor::<MaterialMetadata<M::Meta>>()
+            .add_render_resource_extractor::<MeshPipelineData<M::Pipeline>>()
+            .load_asset::<ShaderSource>(M::shader())
+            .load_asset::<ShaderSource>(M::Pipeline::shader());
     }
 
     fn finish(&mut self, game: &mut GameBuilder) {
@@ -66,20 +75,17 @@ impl<M: Material> Plugin for MaterialPlugin<M> {
 impl<M: Material> RenderAssetExtractor for M {
     type Source = M;
     type Asset = MaterialInstance;
-    type Arg = StaticArg<
-        'static,
-        (
-            ReadRes<RenderDevice>,
-            ReadRes<RenderSurface>,
-            ReadRes<RenderAssets<Shader>>,
-            ReadRes<GlobalLayout>,
-            ReadRes<MeshPipelineData<M::Pipeline>>,
-            ReadRes<MaterialMetadata<M::Meta>>,
-            WriteRes<MaterialPipelines>,
-            Main<'static, ReadRes<AssetDatabase>>,
-            M::Arg,
-        ),
-    >;
+    type Arg = (
+        ReadRes<RenderDevice>,
+        ReadRes<RenderSurface>,
+        ReadRes<RenderAssets<Shader>>,
+        ReadRes<GlobalLayout>,
+        ReadRes<MeshPipelineData<M::Pipeline>>,
+        ReadRes<MaterialMetadata<M::Meta>>,
+        WriteRes<MaterialPipelines>,
+        Main<'static, ReadRes<AssetDatabase>>,
+        M::Arg,
+    );
 
     fn extract(
         id: &asset::AssetId,
@@ -96,7 +102,7 @@ impl<M: Material> RenderAssetExtractor for M {
             pipelines,
             database,
             material_arg,
-        ) = arg.inner_mut();
+        ) = arg;
 
         let ty = MaterialType::of::<M>();
         let layout = match pipelines.get(&ty).map(|p| p.layout()) {
@@ -174,10 +180,25 @@ impl<M: Material> RenderAssetExtractor for M {
         assets: &mut crate::RenderAssets<Self::Asset>,
         arg: &mut ecs::system::ArgItem<Self::Arg>,
     ) {
-        let (_, _, _, _, _, _, pipelines, _, _) = arg.inner_mut();
+        let (_, _, _, _, _, _, pipelines, _, _) = arg;
 
         if let Some(instance) = assets.remove(id) {
             pipelines.remove_dependency(&instance.ty, id);
         }
+    }
+}
+
+pub trait MaterialAppExt: 'static {
+    fn add_material<M: Material>(&mut self) -> &mut Self;
+    fn add_view_globals<V: View>(&mut self) -> &mut Self;
+}
+
+impl MaterialAppExt for GameBuilder {
+    fn add_material<M: Material>(&mut self) -> &mut Self {
+        self.add_plugin(MaterialPlugin::<M>::new())
+    }
+
+    fn add_view_globals<V: View>(&mut self) -> &mut Self {
+        self.add_render_resource_extractor::<Globals<V>>()
     }
 }

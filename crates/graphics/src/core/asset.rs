@@ -11,6 +11,7 @@ use ecs::{
     system::{
         AccessType, ArgItem, IntoSystemConfigs, StaticArg, SystemArg, SystemConfig, WorldAccess,
     },
+    world::{action::WorldActions, builtin::actions::AddResource},
 };
 use game::Main;
 use std::{collections::HashSet, hash::Hash, sync::Arc};
@@ -359,13 +360,54 @@ impl RenderAssetExtractors {
 
 impl Resource for RenderAssetExtractors {}
 
-pub trait RenderResourceExtractor: 'static {
-    type Resource: Resource + Send;
+pub trait RenderResourceExtractor: Resource + Send + Sized + 'static {
     type Arg: SystemArg;
 
-    fn extract(arg: ArgItem<Self::Arg>) -> Result<Self::Resource, ExtractError>;
+    fn extract(arg: ArgItem<Self::Arg>) -> Result<Self, ExtractError>;
 
-    fn default() -> Option<Self::Resource> {
+    fn default() -> Option<Self> {
         None
     }
 }
+
+pub struct RenderResourceExtractors {
+    extractors: IndexMap<ResourceId, SystemConfig>,
+}
+
+impl RenderResourceExtractors {
+    pub fn new() -> Self {
+        Self {
+            extractors: IndexMap::new(),
+        }
+    }
+
+    pub fn add<R: RenderResourceExtractor>(&mut self) {
+        let id = ResourceId::of::<R>();
+        if !self.extractors.contains_key(&id) {
+            let mut configs =
+                (|arg: StaticArg<R::Arg>,
+                  actions: &WorldActions,
+                  mut errors: ResMut<Events<ExtractError>>| {
+                    let arg = arg.into_inner();
+                    match R::extract(arg) {
+                        Ok(resource) => actions.add(AddResource::new(resource)),
+                        Err(error) => {
+                            errors.add(error);
+                            if let Some(default) = R::default() {
+                                actions.add(AddResource::new(default));
+                            }
+                        }
+                    }
+                })
+                .configs();
+
+            self.extractors.insert(id, configs.remove(0));
+        }
+    }
+
+    pub fn build(self) -> Vec<SystemConfig> {
+        self.extractors.into_values().collect()
+    }
+}
+
+impl Resource for RenderResourceExtractors {}

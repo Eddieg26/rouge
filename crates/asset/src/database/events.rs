@@ -374,3 +374,41 @@ impl WorldAction for ImportAssets {
         Some(())
     }
 }
+
+pub struct LoadAsset<A: Asset> {
+    pub path: LoadPath,
+    _marker: std::marker::PhantomData<A>,
+}
+
+impl<A: Asset> LoadAsset<A> {
+    pub fn new(path: impl Into<LoadPath>) -> Self {
+        Self {
+            path: path.into(),
+            _marker: std::marker::PhantomData::default(),
+        }
+    }
+}
+
+impl<A: Asset> WorldAction for LoadAsset<A> {
+    fn execute(self, world: &mut ecs::world::World) -> Option<()> {
+        let database = world.resource::<AssetDatabase>();
+        Some(database.load(std::iter::once(self.path)))
+    }
+}
+
+pub struct LoadAssets {
+    paths: HashSet<LoadPath>,
+}
+
+impl LoadAssets {
+    pub fn new(paths: HashSet<LoadPath>) -> Self {
+        Self { paths }
+    }
+}
+
+impl WorldAction for LoadAssets {
+    fn execute(self, world: &mut ecs::world::World) -> Option<()> {
+        let database = world.resource::<AssetDatabase>();
+        Some(database.load(self.paths))
+    }
+}

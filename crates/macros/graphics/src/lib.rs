@@ -137,14 +137,13 @@ fn generate_create_bind_group(input: DeriveInput) -> Result<TokenStream> {
                 } => {
                     entries.push(quote::quote! {
                         let id: Option<Id<RenderTexture>> = self.#field_name.into_optional_id();
-                        let id: Id<RenderTexture> = match id {
-                            Some(id) => id,
-                            None => fallbacks.dimension_id(#dimension),
+                        match id {
+                            Some(id) => match textures.get(&id) {
+                                Some(texture) => #BIND_GROUP_BUILDER.add_texture(#binding, texture.view()),
+                                None => #BIND_GROUP_BUILDER.add_texture(#binding, fallbacks.texture(#dimension)),
+                            },
+                            None => #BIND_GROUP_BUILDER.add_texture(#binding, fallbacks.texture(#dimension)),
                         };
-                        match textures.get(&id) {
-                            Some(texture) => #BIND_GROUP_BUILDER.add_texture(#binding, texture.view()),
-                            None => return Err(#graphics::resource::CreateBindGroupError::MissingTexture{id}),
-                        }
                     });
 
                     layout.extend(quote::quote! {
@@ -158,14 +157,13 @@ fn generate_create_bind_group(input: DeriveInput) -> Result<TokenStream> {
                 } => {
                     entries.push(quote::quote! {
                         let id: Option<Id<Sampler>> = self.#field_name.into_optional_id();
-                        let id: Id<Sampler> = match id {
-                            Some(id) => id,
-                            None => fallbacks.sampler,
+                        match id {
+                            Some(id) => match samplers.get(&id) {
+                                Some(sampler) => #BIND_GROUP_BUILDER.add_sampler(#binding, sampler.inner()),
+                                None => #BIND_GROUP_BUILDER.add_sampler(#binding, fallbacks.sampler.inner()),
+                            },
+                            None => #BIND_GROUP_BUILDER.add_sampler(#binding, fallbacks.sampler.inner()),
                         };
-                        match samplers.get(&id) {
-                            Some(sampler) =>  #BIND_GROUP_BUILDER.add_sampler(#binding, sampler.inner()),
-                            None => return Err(#graphics::resource::CreateBindGroupError::MissingSampler{id}),
-                        }
                     });
 
                     layout.extend(quote::quote! {
@@ -271,11 +269,11 @@ fn generate_create_bind_group(input: DeriveInput) -> Result<TokenStream> {
         impl #impl_generics #graphics::resource::CreateBindGroup for #name #ty_generics #where_clause {
             type Data = #bind_group_data;
 
-            type Arg = #ecs::system::StaticArg<'static,(
+            type Arg = (
                 #ecs::system::unlifetime::ReadRes<#graphics::RenderAssets<#graphics::resource::RenderTexture>>,
                 #ecs::system::unlifetime::ReadRes<#graphics::RenderAssets<#graphics::resource::Sampler>>,
                 #ecs::system::unlifetime::ReadRes<#graphics::resource::Fallbacks>
-            )>;
+            );
 
             fn label() -> Option< &'static str> {
                 Some(#type_name)
@@ -289,7 +287,7 @@ fn generate_create_bind_group(input: DeriveInput) -> Result<TokenStream> {
             ) -> Result<BindGroup<Self::Data>, #graphics::resource::CreateBindGroupError> {
                 use #graphics::{wgpu::BufferUsages, resource::{Buffer, BindGroupEntries, TextureDimension, Sampler, RenderTexture, IntoBufferData, IntoOptionalId}};
 
-                let (textures, samplers, fallbacks) = arg.inner();
+                let (textures, samplers, fallbacks) = arg;
 
                 #uniform_buffer_def
                 let mut #BIND_GROUP_BUILDER = BindGroupEntries::new();

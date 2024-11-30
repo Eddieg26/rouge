@@ -84,16 +84,12 @@ impl<M: MeshPipeline> std::ops::DerefMut for MeshPipelineData<M> {
 impl<M: MeshPipeline> Resource for MeshPipelineData<M> {}
 
 impl<M: MeshPipeline> RenderResourceExtractor for MeshPipelineData<M> {
-    type Resource = Self;
     type Arg = ReadRes<RenderDevice>;
 
-    fn extract(
-        arg: ecs::system::ArgItem<Self::Arg>,
-    ) -> Result<Self::Resource, crate::ExtractError> {
+    fn extract(arg: ecs::system::ArgItem<Self::Arg>) -> Result<Self, crate::ExtractError> {
         Ok(Self::new(&arg))
     }
 }
-
 
 pub trait Metadata: Sized + Send + Sync + 'static {
     fn new(device: &RenderDevice) -> Self;
@@ -132,12 +128,9 @@ impl<M: Metadata> std::ops::DerefMut for MaterialMetadata<M> {
 impl<M: Metadata> Resource for MaterialMetadata<M> {}
 
 impl<M: Metadata> RenderResourceExtractor for MaterialMetadata<M> {
-    type Resource = Self;
     type Arg = ReadRes<RenderDevice>;
 
-    fn extract(
-        arg: ecs::system::ArgItem<Self::Arg>,
-    ) -> Result<Self::Resource, crate::ExtractError> {
+    fn extract(arg: ecs::system::ArgItem<Self::Arg>) -> Result<Self, crate::ExtractError> {
         Ok(Self::new(&arg))
     }
 }

@@ -8,7 +8,7 @@ use asset::{
     io::{AssetIoError, AssetReader},
     Asset, AssetId, AsyncReadExt,
 };
-use ecs::system::{unlifetime::ReadRes, ArgItem, StaticArg};
+use ecs::system::{unlifetime::ReadRes, ArgItem};
 use std::{borrow::Cow, sync::Arc};
 
 pub use meta::*;
@@ -283,7 +283,7 @@ impl std::ops::Deref for Shader {
 impl RenderAssetExtractor for Shader {
     type Source = ShaderSource;
     type Asset = Shader;
-    type Arg = StaticArg<'static, ReadRes<RenderDevice>>;
+    type Arg = ReadRes<RenderDevice>;
 
     fn extract(
         _: &AssetId,

@@ -86,6 +86,10 @@ impl<M: MeshPipeline> Resource for MeshPipelineData<M> {}
 impl<M: MeshPipeline> RenderResourceExtractor for MeshPipelineData<M> {
     type Arg = ReadRes<RenderDevice>;
 
+    fn can_extract(world: &ecs::world::World) -> bool {
+        world.has_resource::<RenderDevice>()
+    }
+
     fn extract(arg: ecs::system::ArgItem<Self::Arg>) -> Result<Self, crate::ExtractError> {
         Ok(Self::new(&arg))
     }
@@ -129,6 +133,10 @@ impl<M: Metadata> Resource for MaterialMetadata<M> {}
 
 impl<M: Metadata> RenderResourceExtractor for MaterialMetadata<M> {
     type Arg = ReadRes<RenderDevice>;
+
+    fn can_extract(world: &ecs::world::World) -> bool {
+        world.has_resource::<RenderDevice>()
+    }
 
     fn extract(arg: ecs::system::ArgItem<Self::Arg>) -> Result<Self, crate::ExtractError> {
         Ok(Self::new(&arg))

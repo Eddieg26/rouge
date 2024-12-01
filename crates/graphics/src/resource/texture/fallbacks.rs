@@ -45,6 +45,10 @@ impl Resource for Fallbacks {}
 impl RenderResourceExtractor for Fallbacks {
     type Arg = ReadRes<RenderDevice>;
 
+    fn can_extract(world: &ecs::world::World) -> bool {
+        world.has_resource::<RenderDevice>()
+    }
+
     fn extract(device: ecs::system::ArgItem<Self::Arg>) -> Result<Self, crate::ExtractError> {
         Ok(Self::new(&device))
     }

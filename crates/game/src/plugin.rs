@@ -21,7 +21,7 @@ impl PluginId {
 
 #[derive(Default)]
 pub struct Plugins {
-    plugins: IndexMap<PluginId, Box<dyn Plugin>>,
+    pub(crate) plugins: IndexMap<PluginId, Box<dyn Plugin>>,
 }
 
 impl Plugins {

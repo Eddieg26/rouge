@@ -1,8 +1,13 @@
 use crate::{
-    core::{component::ComponentId, entity::Entities, resource::ResourceId, Type},
+    core::{
+        component::ComponentId,
+        entity::Entities,
+        resource::{NonSend, NonSendMut, Res, ResMut, Resource, ResourceId},
+        Type,
+    },
     world::{cell::WorldCell, World},
 };
-use std::hash::Hash;
+use std::{hash::Hash, sync::Arc};
 
 pub mod observer;
 pub mod schedule;
@@ -18,10 +23,11 @@ impl SystemId {
     }
 }
 
+#[derive(Clone)]
 pub struct System {
     id: SystemId,
     name: Option<&'static str>,
-    run: Box<dyn Fn(WorldCell) + Send + Sync>,
+    run: Arc<dyn Fn(WorldCell) + Send + Sync>,
 }
 
 impl System {
@@ -49,7 +55,7 @@ impl System {
 pub struct SystemConfig {
     id: SystemId,
     name: Option<&'static str>,
-    run: Box<dyn Fn(WorldCell) + Send + Sync>,
+    run: Arc<dyn Fn(WorldCell) + Send + Sync>,
     access: fn() -> Vec<WorldAccess>,
     custom: Vec<WorldAccess>,
     after: Option<SystemId>,
@@ -59,7 +65,7 @@ pub struct SystemConfig {
 impl SystemConfig {
     pub fn new(
         name: Option<&'static str>,
-        run: Box<dyn Fn(WorldCell) + Send + Sync>,
+        run: Arc<dyn Fn(WorldCell) + Send + Sync>,
         access: fn() -> Vec<WorldAccess>,
         is_send: bool,
     ) -> Self {
@@ -329,6 +335,38 @@ impl SystemArg for Entities {
     }
 }
 
+impl<R: Resource + Send> SystemArg for Option<Res<'_, R>> {
+    type Item<'a> = Option<Res<'a, R>>;
+
+    fn get<'a>(world: WorldCell<'a>) -> Self::Item<'a> {
+        world.try_resource::<R>()
+    }
+}
+
+impl<R: Resource + Send> SystemArg for Option<ResMut<'_, R>> {
+    type Item<'a> = Option<ResMut<'a, R>>;
+
+    fn get<'a>(world: WorldCell<'a>) -> Self::Item<'a> {
+        world.try_resource_mut::<R>()
+    }
+}
+
+impl<R: Resource> SystemArg for Option<NonSend<'_, R>> {
+    type Item<'a> = Option<NonSend<'a, R>>;
+
+    fn get<'a>(world: WorldCell<'a>) -> Self::Item<'a> {
+        world.try_non_send_resource::<R>()
+    }
+}
+
+impl<R: Resource> SystemArg for Option<NonSendMut<'_, R>> {
+    type Item<'a> = Option<NonSendMut<'a, R>>;
+
+    fn get<'a>(world: WorldCell<'a>) -> Self::Item<'a> {
+        world.try_non_send_resource_mut::<R>()
+    }
+}
+
 pub type ArgItem<'a, A> = <A as SystemArg>::Item<'a>;
 
 impl<F: Fn() + Send + Sync + 'static> IntoSystemConfigs<F> for F {
@@ -342,7 +380,7 @@ impl<F: Fn() + Send + Sync + 'static> IntoSystemConfigs<F> for F {
 
         vec![SystemConfig::new(
             Some(name),
-            Box::new(run),
+            Arc::new(run),
             access,
             is_send,
         )]
@@ -389,7 +427,7 @@ macro_rules! impl_into_system_configs {
 
                 let is_send = ($($arg::is_send() &&)* true);
 
-                vec![SystemConfig::new(Some(name), Box::new(run), access, is_send)]
+                vec![SystemConfig::new(Some(name), Arc::new(run), access, is_send)]
             }
 
             fn before<Marker>(self, system: impl IntoSystemConfigs<Marker>) -> Vec<SystemConfig> {

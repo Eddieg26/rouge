@@ -11,7 +11,7 @@ use ecs::{
     system::{
         AccessType, ArgItem, IntoSystemConfigs, StaticArg, SystemArg, SystemConfig, WorldAccess,
     },
-    world::{action::WorldActions, builtin::actions::AddResource},
+    world::{cell::WorldCell, World},
 };
 use game::Main;
 use std::{collections::HashSet, hash::Hash, sync::Arc};
@@ -240,15 +240,15 @@ impl RenderAssetExtractors {
     }
 
     pub fn add<R: RenderAssetExtractor>(&mut self) {
-        let configs = match R::Asset::world() {
-            RenderAssetWorld::Main => Self::extract_render_asset_main::<R>.configs(),
-            RenderAssetWorld::Render => Self::extract_render_asset_render::<R>.configs(),
+        let config = match R::Asset::world() {
+            RenderAssetWorld::Main => Self::extract_render_asset_main::<R>.configs().remove(0),
+            RenderAssetWorld::Render => Self::extract_render_asset_render::<R>.configs().remove(0),
         };
 
         self.extractors
             .entry(ResourceId::of::<RenderAssets<R::Asset>>())
             .or_default()
-            .extend(configs);
+            .push(config);
     }
 
     pub fn add_dependency<R: RenderAssetExtractor, D: RenderAssetExtractor>(&mut self) {
@@ -363,6 +363,7 @@ impl Resource for RenderAssetExtractors {}
 pub trait RenderResourceExtractor: Resource + Send + Sized + 'static {
     type Arg: SystemArg;
 
+    fn can_extract(world: &World) -> bool;
     fn extract(arg: ArgItem<Self::Arg>) -> Result<Self, ExtractError>;
 
     fn default() -> Option<Self> {
@@ -370,8 +371,39 @@ pub trait RenderResourceExtractor: Resource + Send + Sized + 'static {
     }
 }
 
+pub struct ResourceExtractor {
+    extract: Box<dyn Fn(WorldCell) -> bool + Send + Sync>,
+}
+
+impl ResourceExtractor {
+    pub fn new<R: RenderResourceExtractor>() -> Self {
+        Self {
+            extract: Box::new(|world| match R::can_extract(world.get()) {
+                true => {
+                    let arg = R::Arg::get(world);
+                    match R::extract(arg) {
+                        Ok(resource) => {
+                            world.get_mut().add_resource(resource);
+                        }
+                        Err(e) => {
+                            world.resource_mut::<Events<ExtractError>>().add(e);
+                        }
+                    }
+
+                    true
+                }
+                false => false,
+            }),
+        }
+    }
+
+    pub fn extract(&self, world: WorldCell) -> bool {
+        (self.extract)(world)
+    }
+}
+
 pub struct RenderResourceExtractors {
-    extractors: IndexMap<ResourceId, SystemConfig>,
+    extractors: IndexMap<ResourceId, ResourceExtractor>,
 }
 
 impl RenderResourceExtractors {
@@ -384,29 +416,13 @@ impl RenderResourceExtractors {
     pub fn add<R: RenderResourceExtractor>(&mut self) {
         let id = ResourceId::of::<R>();
         if !self.extractors.contains_key(&id) {
-            let mut configs =
-                (|arg: StaticArg<R::Arg>,
-                  actions: &WorldActions,
-                  mut errors: ResMut<Events<ExtractError>>| {
-                    let arg = arg.into_inner();
-                    match R::extract(arg) {
-                        Ok(resource) => actions.add(AddResource::new(resource)),
-                        Err(error) => {
-                            errors.add(error);
-                            if let Some(default) = R::default() {
-                                actions.add(AddResource::new(default));
-                            }
-                        }
-                    }
-                })
-                .configs();
-
-            self.extractors.insert(id, configs.remove(0));
+            self.extractors.insert(id, ResourceExtractor::new::<R>());
         }
     }
 
-    pub fn build(self) -> Vec<SystemConfig> {
-        self.extractors.into_values().collect()
+    pub fn extract(&mut self, world: WorldCell) {
+        self.extractors
+            .retain(|_, extractor| !extractor.extract(world));
     }
 }
 

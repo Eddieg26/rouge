@@ -15,24 +15,6 @@ use asset::{database::AssetDatabase, io::cache::LoadPath, plugin::AssetExt};
 use ecs::system::unlifetime::{ReadRes, WriteRes};
 use game::{GameBuilder, Main, Plugin};
 
-pub struct BaseMaterialPlugin;
-
-impl Plugin for BaseMaterialPlugin {
-    fn name(&self) -> &'static str {
-        "BaseMaterialPlugin"
-    }
-
-    fn dependencies(&self) -> game::Plugins {
-        let mut plugins = game::Plugins::new();
-        plugins.add(RenderPlugin);
-        plugins
-    }
-
-    fn start(&mut self, game: &mut GameBuilder) {
-        game.add_render_resource_extractor::<GlobalLayout>();
-    }
-}
-
 pub struct MaterialPlugin<M: Material> {
     _marker: std::marker::PhantomData<M>,
 }
@@ -51,13 +33,14 @@ impl<M: Material> Plugin for MaterialPlugin<M> {
     }
 
     fn dependencies(&self) -> game::Plugins {
-        let mut plugins = game::Plugins::new();
-        plugins.add(BaseMaterialPlugin);
+        let mut plugins = game::Plugins::default();
+        plugins.add(RenderPlugin);
         plugins
     }
 
     fn start(&mut self, game: &mut GameBuilder) {
         game.add_render_asset_extractor::<M>()
+            .add_render_resource_extractor::<GlobalLayout>()
             .add_render_resource_extractor::<MaterialMetadata<M::Meta>>()
             .add_render_resource_extractor::<MeshPipelineData<M::Pipeline>>()
             .load_asset::<ShaderSource>(M::shader())

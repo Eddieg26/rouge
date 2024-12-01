@@ -308,6 +308,12 @@ impl RenderResourceExtractor for RenderGraph {
         Removed<RenderGraphBuilder>,
     );
 
+    fn can_extract(world: &World) -> bool {
+        world.has_resource::<RenderDevice>()
+            && world.has_resource::<RenderAssets<RenderTarget>>()
+            && world.has_resource::<RenderGraphBuilder>()
+    }
+
     fn extract(arg: ecs::system::ArgItem<Self::Arg>) -> Result<Self, ExtractError> {
         let (device, targets, builder) = arg;
         if let Some(builder) = builder.into_inner() {

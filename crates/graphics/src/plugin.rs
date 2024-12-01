@@ -101,11 +101,11 @@ impl Plugin for RenderPlugin {
                 .add_systems(Extract, systems);
         }
 
-        if let Some(extractors) = game.remove_resource::<RenderResourceExtractors>() {
-            let observers = extractors.build();
-            game.sub_app_mut::<RenderApp>()
-                .observe::<SurfaceCreated, _>(observers);
-        }
+        // if let Some(extractors) = game.remove_resource::<RenderResourceExtractors>() {
+        //     let observers = extractors.build();
+        //     game.sub_app_mut::<RenderApp>()
+        //         .observe::<SurfaceCreated, _>(observers);
+        // }
 
         match game.remove_resource::<RenderGraphBuilder>() {
             Some(builder) => game.sub_app_mut::<RenderApp>().add_resource(builder),
@@ -113,6 +113,13 @@ impl Plugin for RenderPlugin {
                 .sub_app_mut::<RenderApp>()
                 .add_resource(RenderGraphBuilder::new()),
         };
+
+        game.sub_app_mut::<RenderApp>().add_systems(
+            Extract,
+            |world: &World, mut extractors: ResMut<RenderResourceExtractors>| {
+                extractors.extract(unsafe { world.cell() });
+            },
+        );
     }
 
     fn dependencies(&self) -> game::Plugins {

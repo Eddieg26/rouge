@@ -110,10 +110,12 @@ impl GameBuilder {
     pub fn add_plugin<P: Plugin>(&mut self, plugin: P) -> &mut Self {
         let mut plugins = plugin.dependencies().flatten();
         plugins.add(plugin);
-        for (_, plugin) in plugins.iter_mut() {
-            plugin.start(self);
+        for (id, mut plugin) in plugins.plugins {
+            if !self.plugins.contains(id) {
+                plugin.start(self);
+                self.plugins.plugins.insert(id, plugin);
+            }
         }
-        self.plugins.extend(plugins);
 
         self
     }

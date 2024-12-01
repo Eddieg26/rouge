@@ -64,6 +64,10 @@ impl Resource for GlobalLayout {}
 impl RenderResourceExtractor for GlobalLayout {
     type Arg = ReadRes<RenderDevice>;
 
+    fn can_extract(world: &ecs::world::World) -> bool {
+        world.has_resource::<RenderDevice>()
+    }
+
     fn extract(arg: ecs::system::ArgItem<Self::Arg>) -> Result<Self, crate::ExtractError> {
         Ok(Self::new(&arg))
     }
@@ -133,6 +137,10 @@ impl<V: View> Resource for Globals<V> {}
 
 impl<V: View> RenderResourceExtractor for Globals<V> {
     type Arg = (ReadRes<RenderDevice>, ReadRes<GlobalLayout>);
+
+    fn can_extract(world: &ecs::world::World) -> bool {
+        world.has_resource::<RenderDevice>() && world.has_resource::<GlobalLayout>()
+    }
 
     fn extract(arg: ecs::system::ArgItem<Self::Arg>) -> Result<Self, crate::ExtractError> {
         let (device, layout) = arg;

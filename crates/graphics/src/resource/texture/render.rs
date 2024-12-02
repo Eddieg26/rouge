@@ -4,7 +4,7 @@ use super::{FilterMode, Texture, TextureDimension, TextureFormat, WrapMode};
 use asset::Asset;
 use wgpu::TextureUsages;
 
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize, Asset)]
 pub struct RenderTargetTexture {
     width: u32,
     height: u32,
@@ -82,5 +82,3 @@ impl Texture for RenderTargetTexture {
         &self.pixels[range]
     }
 }
-
-impl Asset for RenderTargetTexture {}

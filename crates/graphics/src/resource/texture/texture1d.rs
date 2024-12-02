@@ -77,7 +77,10 @@ impl Default for Texture1d {
 
 impl Texture for Texture1d {
     fn width(&self) -> u32 {
-        self.pixels.len() as u32
+        self.format
+            .block_copy_size(Some(wgpu::TextureAspect::All))
+            .map(|s| self.pixels.len() as u32 / s)
+            .unwrap_or(0)
     }
 
     fn height(&self) -> u32 {

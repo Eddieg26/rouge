@@ -15,19 +15,23 @@ use crate::{
             texture2d::Texture2d,
             RenderTexture,
         },
-        Fallbacks,
+        Fallbacks, RenderPipelineExtractor, RenderPipelineExtractors, ShaderSource,
     },
     surface::{RenderSurface, RenderSurfaceError, RenderSurfaceTexture},
     RenderResourceExtractors,
 };
 use asset::{
-    database::events::AssetEvent,
+    database::{events::AssetEvent, AssetDatabase},
     future::block_on,
+    io::cache::LoadPath,
     plugin::{AssetExt, AssetPlugin},
     Assets,
 };
 use ecs::{
-    core::resource::{NonSend, Res, ResMut},
+    core::{
+        resource::{NonSend, Res, ResMut},
+        Type,
+    },
     event::{Event, Events},
     world::{
         action::{BatchEvents, WorldAction, WorldActions},
@@ -54,6 +58,7 @@ impl Plugin for RenderPlugin {
         game.register_event::<ExtractError>()
             .add_resource(RenderAssetExtractors::new())
             .add_resource(RenderResourceExtractors::new())
+            .add_resource(RenderPipelineExtractors::new())
             .add_resource(RenderGraphBuilder::new())
             .observe::<WindowCreated, _>(create_render_surface)
             .observe::<WindowResized, _>(extract_resize_events)
@@ -78,6 +83,7 @@ impl Plugin for RenderPlugin {
             .add_systems(PreRender, set_surface_texture)
             .add_systems(Render, run_render_graph)
             .add_systems(Present, present_surface_texture)
+            .add_systems(PostExtract, extract_render_pipelines)
             .register_event::<WindowResized>()
             .register_event::<SurfaceCreated>()
             .register_event::<ResizeRenderGraph>()
@@ -85,6 +91,7 @@ impl Plugin for RenderPlugin {
             .observe::<WindowResized, _>(on_window_resized)
             .observe::<ResizeRenderGraph, _>(on_resize_render_graph);
 
+        game.add_importer::<ShaderSource>();
         game.register_render_asset::<Sampler>();
         game.add_render_asset_extractor::<Mesh>();
         game.add_render_asset_extractor::<Texture2d>();
@@ -95,17 +102,23 @@ impl Plugin for RenderPlugin {
     }
 
     fn finish(&mut self, game: &mut game::GameBuilder) {
+        let extractors = game
+            .remove_resource::<RenderResourceExtractors>()
+            .unwrap_or(RenderResourceExtractors::new());
+        game.sub_app_mut::<RenderApp>()
+            .add_systems(Extract, extract_resources)
+            .add_resource(extractors);
+
         if let Some(extractors) = game.remove_resource::<RenderAssetExtractors>() {
             let systems = extractors.build();
             game.sub_app_mut::<RenderApp>()
                 .add_systems(Extract, systems);
         }
 
-        // if let Some(extractors) = game.remove_resource::<RenderResourceExtractors>() {
-        //     let observers = extractors.build();
-        //     game.sub_app_mut::<RenderApp>()
-        //         .observe::<SurfaceCreated, _>(observers);
-        // }
+        if let Some(extractors) = game.remove_resource::<RenderPipelineExtractors>() {
+            let app = game.sub_app_mut::<RenderApp>();
+            app.add_resource(extractors);
+        }
 
         match game.remove_resource::<RenderGraphBuilder>() {
             Some(builder) => game.sub_app_mut::<RenderApp>().add_resource(builder),
@@ -113,13 +126,6 @@ impl Plugin for RenderPlugin {
                 .sub_app_mut::<RenderApp>()
                 .add_resource(RenderGraphBuilder::new()),
         };
-
-        game.sub_app_mut::<RenderApp>().add_systems(
-            Extract,
-            |world: &World, mut extractors: ResMut<RenderResourceExtractors>| {
-                extractors.extract(unsafe { world.cell() });
-            },
-        );
     }
 
     fn dependencies(&self) -> game::Plugins {
@@ -256,8 +262,10 @@ fn set_surface_texture(
     surface_texture.set(surface);
 }
 
-fn run_render_graph(mut graph: ResMut<RenderGraph>, world: &World) {
-    graph.run(world);
+fn run_render_graph(mut graph: Option<ResMut<RenderGraph>>, world: &World) {
+    if let Some(graph) = graph.as_mut() {
+        graph.run(world);
+    }
 }
 
 fn present_surface_texture(
@@ -268,8 +276,35 @@ fn present_surface_texture(
     textures.remove(&RenderSurface::ID.to());
 }
 
+fn extract_resources(world: &World, mut extractors: ResMut<RenderResourceExtractors>) {
+    extractors.extract(world);
+}
+
 fn extract_resize_events(events: Res<Events<WindowResized>>, actions: SubActions<RenderApp>) {
     actions.add(BatchEvents::new(events.iter().copied()));
+}
+
+fn extract_render_pipelines(
+    world: &World,
+    mut extractors: ResMut<RenderPipelineExtractors>,
+    actions: Main<Res<RenderAssetActions<ShaderSource>>>,
+    database: Main<Res<AssetDatabase>>,
+) {
+    for action in actions.iter() {
+        let (id, loaded) = match action {
+            RenderAssetAction::Added { id } => (id, true),
+            RenderAssetAction::Modified { id } => (id, true),
+            RenderAssetAction::Removed { id } => (id, false),
+            _ => continue,
+        };
+
+        let library = database.library().read_arc_blocking();
+        if let Some(path) = library.get_path(&id).cloned() {
+            extractors.shader_updated(world, LoadPath::Path(path), loaded);
+        }
+
+        extractors.shader_updated(world, LoadPath::Id(*id), loaded);
+    }
 }
 
 fn on_window_resized(
@@ -296,10 +331,12 @@ impl Event for SurfaceCreated {}
 fn on_resize_render_graph(
     targets: Res<RenderAssets<RenderTarget>>,
     device: Res<RenderDevice>,
-    mut graph: ResMut<RenderGraph>,
+    mut graph: Option<ResMut<RenderGraph>>,
 ) {
     let (width, height) = targets.max_size();
-    graph.resize(&device, width, height);
+    if let Some(graph) = graph.as_mut() {
+        graph.resize(&device, width, height);
+    }
 }
 
 pub trait RenderAppExt {
@@ -309,6 +346,7 @@ pub trait RenderAppExt {
         &mut self,
     ) -> &mut Self;
     fn add_render_resource_extractor<R: RenderResourceExtractor>(&mut self) -> &mut Self;
+    fn add_render_pipeline_extractor<R: RenderPipelineExtractor>(&mut self) -> &mut Self;
 }
 
 impl RenderAppExt for GameBuilder {
@@ -337,9 +375,32 @@ impl RenderAppExt for GameBuilder {
         self.resource_mut::<RenderAssetExtractors>().add::<R>();
         if !self.has_resource::<RenderAssetActions<R::Source>>() {
             self.add_resource(RenderAssetActions::<R::Source>::new());
+
+            self.observe::<AssetEvent<R::Source>, _>(
+                |events: Res<Events<AssetEvent<R::Source>>>,
+                 mut actions: ResMut<RenderAssetActions<R::Source>>| {
+                    for event in events.iter() {
+                        match event {
+                            AssetEvent::Added { id } | AssetEvent::Loaded { id } => {
+                                actions.add(RenderAssetAction::Added { id: *id })
+                            }
+                            AssetEvent::Unloaded { id, .. } => {
+                                actions.add(RenderAssetAction::Removed { id: *id })
+                            }
+                            AssetEvent::Modified { id } => {
+                                actions.add(RenderAssetAction::Modified { id: *id })
+                            }
+                            AssetEvent::Failed { id, .. } => {
+                                actions.add(RenderAssetAction::Removed { id: *id })
+                            }
+                            AssetEvent::Imported { .. } => continue,
+                        }
+                    }
+                },
+            );
         }
 
-        self.add_systems(
+        self.sub_app_mut::<RenderApp>().add_systems(
             PostExtract,
             |mut assets: Main<ResMut<Assets<R::Source>>>,
              mut actions: Main<ResMut<RenderAssetActions<R::Source>>>| {
@@ -368,6 +429,23 @@ impl RenderAppExt for GameBuilder {
     fn add_render_resource_extractor<R: RenderResourceExtractor>(&mut self) -> &mut Self {
         let extractors = self.resource_mut::<RenderResourceExtractors>();
         extractors.add::<R>();
+        self
+    }
+
+    fn add_render_pipeline_extractor<R: RenderPipelineExtractor>(&mut self) -> &mut Self {
+        self.resource_mut::<RenderPipelineExtractors>().add::<R>();
+        self.observe::<R::Trigger, _>(
+            |world: &World, mut extractors: ResMut<RenderPipelineExtractors>| {
+                let world = unsafe { world.cell() };
+                if let Some(state) = extractors.get_mut(Type::of::<R>()) {
+                    let prev = state.event_triggered;
+                    state.event_triggered = true;
+                    if !prev && state.vertex_shader_loaded && state.fragment_shader_loaded {
+                        (state.create_pipeline)(world);
+                    }
+                }
+            },
+        );
         self
     }
 }

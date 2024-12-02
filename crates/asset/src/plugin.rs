@@ -3,7 +3,8 @@ use crate::{
     database::{
         config::AssetConfig,
         events::{
-            on_asset_event, on_update_assets_modified, AssetEvent, AssetsModified, LoadAssets,
+            on_asset_event, on_update_assets_modified, AssetAdded, AssetEvent, AssetsModified,
+            LoadAssets,
         },
         state::PreloadAssets,
         update::RefreshMode,
@@ -13,6 +14,7 @@ use crate::{
     io::{
         cache::LoadPath, embedded::EmbeddedFs, local::LocalFs, source::AssetSourceName, FileSystem,
     },
+    AssetId,
 };
 use ecs::{core::resource::ResMut, event::Events, world::builtin::events::ResourceUpdate};
 use futures::executor::block_on;
@@ -69,6 +71,12 @@ pub trait AssetExt: 'static {
     fn add_importer<I: Importer>(&mut self) -> &mut Self;
     fn set_processor<P: Processor>(&mut self) -> &mut Self;
     fn load_asset<A: Asset>(&mut self, path: impl Into<LoadPath>) -> &mut Self;
+    fn add_asset<A: Asset>(
+        &mut self,
+        id: AssetId,
+        asset: A,
+        dependencies: Vec<AssetId>,
+    ) -> &mut Self;
 }
 
 impl AssetExt for GameBuilder {
@@ -129,6 +137,17 @@ impl AssetExt for GameBuilder {
 
     fn load_asset<A: Asset>(&mut self, path: impl Into<LoadPath>) -> &mut Self {
         self.resource_mut::<PreloadAssets>().add(path.into());
+        self
+    }
+
+    fn add_asset<A: Asset>(
+        &mut self,
+        id: AssetId,
+        asset: A,
+        dependencies: Vec<AssetId>,
+    ) -> &mut Self {
+        self.actions()
+            .add(AssetAdded::new(id, asset).with_dependencies(dependencies));
         self
     }
 }

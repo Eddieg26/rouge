@@ -10,6 +10,6 @@ pub fn derive_asset(input: TokenStream) -> TokenStream {
     let (impl_generics, type_generics, where_clause) = &input.generics.split_for_impl();
 
     TokenStream::from(quote! {
-        impl #impl_generics asset::Asset for #name #type_generics #where_clause { }
+        impl #impl_generics asset::asset::Asset for #name #type_generics #where_clause { }
     })
 }

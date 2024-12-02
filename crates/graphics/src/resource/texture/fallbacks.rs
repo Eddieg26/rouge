@@ -17,14 +17,22 @@ pub struct Fallbacks {
 
 impl Fallbacks {
     pub fn new(device: &RenderDevice) -> Self {
+        let d1 = RenderTexture::create(device, &Texture1d::default());
+        let d2 = RenderTexture::create(device, &Texture2d::default());
+        let d2_array = RenderTexture::create(device, &Texture2dArray::default());
+        let d3 = RenderTexture::create(device, &Texture3d::default());
+        let cube = RenderTexture::create(device, &TextureCube::default());
+        let cube_array = RenderTexture::create(device, &TextureCubeArray::default());
+        let sampler = Sampler::create(device, &SamplerDesc::default());
+
         Self {
-            d1: RenderTexture::create(&device, &Texture1d::default()),
-            d2: RenderTexture::create(&device, &Texture2d::default()),
-            d2_array: RenderTexture::create(&device, &Texture2dArray::default()),
-            d3: RenderTexture::create(&device, &Texture3d::default()),
-            cube: RenderTexture::create(&device, &TextureCube::default()),
-            cube_array: RenderTexture::create(&device, &TextureCubeArray::default()),
-            sampler: Sampler::create(&device, &SamplerDesc::default()),
+            d1,
+            d2_array,
+            d2,
+            d3,
+            cube,
+            cube_array,
+            sampler,
         }
     }
 

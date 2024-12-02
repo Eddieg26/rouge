@@ -14,5 +14,6 @@ window = { path = "../../crates/window" }
 graphics = { path = "../../crates/graphics" }
 vfs = { version = "0.12.0", features = ["embedded-fs"] }
 serde = { workspace = true, features = ["derive"] }
+glam = { workspace = true }
 futures-lite = "2.3.0"
 pollster = "=0.2.4"

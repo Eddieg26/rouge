@@ -184,9 +184,12 @@ impl EmbeddedFs {
         path: impl AsRef<Path>,
         asset: &'static [u8],
         settings: S,
-    ) -> Result<AssetMetadata<A, S>, AssetIoError> {
+    ) -> AssetMetadata<A, S> {
         let metadata = AssetMetadata::<A, S>::new(id.into(), settings);
-        let metabytes = ron::to_string(&metadata).map_err(AssetIoError::from)?;
+        let metabytes = match ron::to_string(&metadata) {
+            Ok(metabytes) => metabytes,
+            Err(err) => panic!("Failed to serialize metadata: {}", err),
+        };
         let path = path.as_ref().to_path_buf();
 
         let mut fs = self.fs.write_blocking();
@@ -195,7 +198,7 @@ impl EmbeddedFs {
             path.append_ext("meta"),
             EmbeddedData::Dynamic(metabytes.into_bytes().into()),
         );
-        Ok(metadata)
+        metadata
     }
 }
 

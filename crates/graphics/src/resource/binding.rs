@@ -170,13 +170,6 @@ pub struct BindGroupLayout {
 }
 
 impl BindGroupLayout {
-    pub fn new(layout: wgpu::BindGroupLayout) -> Self {
-        Self {
-            id: BindGroupLayoutId::new(),
-            layout: Arc::new(layout),
-        }
-    }
-
     pub fn id(&self) -> BindGroupLayoutId {
         self.id
     }
@@ -191,6 +184,15 @@ impl std::ops::Deref for BindGroupLayout {
 
     fn deref(&self) -> &Self::Target {
         &self.layout
+    }
+}
+
+impl From<wgpu::BindGroupLayout> for BindGroupLayout {
+    fn from(layout: wgpu::BindGroupLayout) -> Self {
+        Self {
+            id: BindGroupLayoutId::new(),
+            layout: Arc::new(layout),
+        }
     }
 }
 

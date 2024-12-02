@@ -2,7 +2,7 @@ use super::buffer::{IndexBuffer, Indices, Vertex, VertexBuffer};
 use crate::core::{
     AssetUsage, Color, ReadWrite, RenderAsset, RenderAssetExtractor, RenderAssets, RenderDevice,
 };
-use asset::{Asset, AssetId};
+use asset::{asset::Asset, AssetId};
 use ecs::system::{unlifetime::ReadRes, ArgItem};
 use spatial::bounds::BoundingBox;
 use std::{hash::Hash, ops::Range};

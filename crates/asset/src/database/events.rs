@@ -35,6 +35,19 @@ pub enum AssetEvent<A: Asset> {
     },
 }
 
+impl<A: Asset> AssetEvent<A> {
+    pub fn id(&self) -> AssetId {
+        match self {
+            AssetEvent::Imported { id } => *id,
+            AssetEvent::Added { id } => *id,
+            AssetEvent::Unloaded { id, .. } => *id,
+            AssetEvent::Loaded { id } => *id,
+            AssetEvent::Modified { id } => *id,
+            AssetEvent::Failed { id, .. } => *id,
+        }
+    }
+}
+
 impl<A: Asset> Event for AssetEvent<A> {}
 
 pub(crate) fn on_asset_event<A: Asset>(

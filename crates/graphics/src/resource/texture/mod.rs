@@ -163,6 +163,7 @@ impl RenderTexture {
             view_formats: &[format],
         });
 
+        let block_size = format.block_copy_size(None).unwrap_or(0);
         for (layer, face) in texture.faces().iter().enumerate() {
             device.queue.write_texture(
                 wgpu::ImageCopyTexture {
@@ -177,12 +178,15 @@ impl RenderTexture {
                 },
                 texture.pixels(face.start..face.start + face.size),
                 wgpu::ImageDataLayout {
-                    bytes_per_row: format
-                        .block_copy_size(Some(TextureAspect::All))
-                        .map(|s| s * size.width),
-                    ..Default::default()
+                    bytes_per_row: Some(block_size * size.width),
+                    rows_per_image: Some(block_size * size.width / size.height),
+                    offset: 0,
                 },
-                size,
+                wgpu::Extent3d {
+                    width: size.width,
+                    height: size.height,
+                    depth_or_array_layers: 1,
+                },
             );
         }
 

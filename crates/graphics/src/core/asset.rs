@@ -240,15 +240,15 @@ impl RenderAssetExtractors {
     }
 
     pub fn add<R: RenderAssetExtractor>(&mut self) {
-        let config = match R::Asset::world() {
-            RenderAssetWorld::Main => Self::extract_render_asset_main::<R>.configs().remove(0),
-            RenderAssetWorld::Render => Self::extract_render_asset_render::<R>.configs().remove(0),
+        let configs = match R::Asset::world() {
+            RenderAssetWorld::Main => Self::extract_render_asset_main::<R>.configs(),
+            RenderAssetWorld::Render => Self::extract_render_asset_render::<R>.configs(),
         };
 
         self.extractors
             .entry(ResourceId::of::<RenderAssets<R::Asset>>())
             .or_default()
-            .push(config);
+            .extend(configs);
     }
 
     pub fn add_dependency<R: RenderAssetExtractor, D: RenderAssetExtractor>(&mut self) {
@@ -420,7 +420,8 @@ impl RenderResourceExtractors {
         }
     }
 
-    pub fn extract(&mut self, world: WorldCell) {
+    pub fn extract(&mut self, world: &World) {
+        let world = unsafe { world.cell() };
         self.extractors
             .retain(|_, extractor| !extractor.extract(world));
     }

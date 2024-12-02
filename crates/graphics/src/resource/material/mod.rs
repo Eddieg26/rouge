@@ -3,7 +3,7 @@ use super::{
     RenderPipelineDesc, Shader, VertexBufferLayout, VertexState,
 };
 use crate::{RenderAsset, RenderDevice, RenderResourceExtractor};
-use asset::{io::cache::LoadPath, Asset, AssetId};
+use asset::{io::cache::LoadPath, AssetId};
 use ecs::{
     core::{resource::Resource, IndexMap, Type},
     system::unlifetime::ReadRes,
@@ -231,7 +231,7 @@ impl Metadata for Unlit {
     }
 }
 
-pub trait Material: Asset + CreateBindGroup<Data = ()> + 'static {
+pub trait Material: asset::asset::Asset + CreateBindGroup<Data = ()> + 'static {
     type Pipeline: MeshPipeline;
     type Meta: Metadata;
 
@@ -265,30 +265,24 @@ impl RenderAsset for MaterialInstance {
     type Id = AssetId;
 }
 
-pub struct MaterialPipeline {
+pub struct MaterialLayout {
     layout: BindGroupLayout,
-    pipeline: RenderPipeline,
     dependencies: HashSet<AssetId>,
 }
 
-impl MaterialPipeline {
-    pub fn new(layout: BindGroupLayout, pipeline: RenderPipeline, dependency: AssetId) -> Self {
+impl MaterialLayout {
+    pub fn new(layout: BindGroupLayout, dependency: AssetId) -> Self {
         let mut dependencies = HashSet::new();
         dependencies.insert(dependency);
 
         Self {
             layout,
-            pipeline,
             dependencies,
         }
     }
 
     pub fn layout(&self) -> &BindGroupLayout {
         &self.layout
-    }
-
-    pub fn pipeline(&self) -> &RenderPipeline {
-        &self.pipeline
     }
 
     pub fn dependencies(&self) -> &HashSet<AssetId> {
@@ -332,8 +326,59 @@ pub struct MaterialPipelineDesc<'a, M: Material> {
     pub fragment_shader: &'a Shader,
 }
 
+pub struct MaterialLayouts {
+    layouts: IndexMap<MaterialType, MaterialLayout>,
+}
+
+impl MaterialLayouts {
+    pub fn new() -> Self {
+        Self {
+            layouts: IndexMap::new(),
+        }
+    }
+
+    pub fn get(&self, ty: &MaterialType) -> Option<&MaterialLayout> {
+        self.layouts.get(ty)
+    }
+
+    pub fn has(&self, ty: &MaterialType) -> bool {
+        self.layouts.contains_key(ty)
+    }
+
+    pub fn add<M: Material>(&mut self, device: &RenderDevice, id: AssetId) -> BindGroupLayout {
+        let ty = MaterialType::of::<M>();
+        let layout = M::bind_group_layout(device);
+        self.layouts
+            .insert(ty, MaterialLayout::new(layout.clone(), id));
+
+        layout
+    }
+
+    pub fn add_dependency(&mut self, ty: &MaterialType, id: AssetId) {
+        if let Some(pipeline) = self.layouts.get_mut(ty) {
+            pipeline.add_dependency(id);
+        }
+    }
+
+    pub fn remove_dependency(&mut self, ty: &MaterialType, id: &AssetId) -> bool {
+        let remove = if let Some(pipeline) = self.layouts.get_mut(ty) {
+            pipeline.remove_dependency(id) == 0
+        } else {
+            false
+        };
+
+        if remove {
+            self.layouts.shift_remove(ty);
+        }
+
+        remove
+    }
+}
+
+impl Resource for MaterialLayouts {}
+
 pub struct MaterialPipelines {
-    pipelines: IndexMap<MaterialType, MaterialPipeline>,
+    pipelines: IndexMap<MaterialType, RenderPipeline>,
 }
 
 impl MaterialPipelines {
@@ -343,20 +388,16 @@ impl MaterialPipelines {
         }
     }
 
-    pub fn get(&self, ty: &MaterialType) -> Option<&MaterialPipeline> {
+    pub fn get(&self, ty: &MaterialType) -> Option<&RenderPipeline> {
         self.pipelines.get(ty)
-    }
-
-    pub fn has(&self, ty: &MaterialType) -> bool {
-        self.pipelines.contains_key(ty)
     }
 
     pub fn add<M: Material>(
         &mut self,
         device: &RenderDevice,
         desc: MaterialPipelineDesc<M>,
-        dependency: AssetId,
-    ) -> BindGroupLayout {
+        material_layout: &MaterialLayout,
+    ) {
         let MaterialPipelineDesc {
             format,
             depth_format,
@@ -368,12 +409,11 @@ impl MaterialPipelines {
         } = desc;
 
         let ty = MaterialType::of::<M>();
-        let material_layout = M::bind_group_layout(device);
 
         let mut layouts = vec![
             global_layout.inner(),
             mesh.bind_group_layout(),
-            &material_layout,
+            material_layout.layout(),
         ];
 
         let vertex = VertexState {
@@ -418,29 +458,12 @@ impl MaterialPipelines {
             multisample: Default::default(),
         };
 
-        let pipeline = RenderPipeline::create(device, desc);
-        let pipeline = MaterialPipeline::new(material_layout.clone(), pipeline, dependency);
-        self.pipelines.insert(ty, pipeline);
-
-        material_layout
+        self.pipelines
+            .insert(ty, RenderPipeline::create(device, desc));
     }
 
-    pub fn add_dependency(&mut self, ty: &MaterialType, id: AssetId) {
-        if let Some(pipeline) = self.pipelines.get_mut(ty) {
-            pipeline.add_dependency(id);
-        }
-    }
-
-    pub fn remove_dependency(&mut self, ty: &MaterialType, id: &AssetId) {
-        let remove = if let Some(pipeline) = self.pipelines.get_mut(ty) {
-            pipeline.remove_dependency(id) == 0
-        } else {
-            false
-        };
-
-        if remove {
-            self.pipelines.shift_remove(ty);
-        }
+    pub fn remove(&mut self, ty: &MaterialType) {
+        self.pipelines.shift_remove(ty);
     }
 }
 

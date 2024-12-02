@@ -30,7 +30,7 @@ impl Into<wgpu::naga::ShaderStage> for ShaderStage {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, Asset)]
 pub enum ShaderSource {
     Spirv {
         data: Cow<'static, [u32]>,
@@ -94,8 +94,6 @@ impl From<std::io::Error> for ShaderLoadError {
 }
 
 impl std::error::Error for ShaderLoadError {}
-
-impl Asset for ShaderSource {}
 
 impl Importer for ShaderSource {
     type Asset = Self;
@@ -708,7 +706,6 @@ pub mod meta {
     impl From<&wgpu::naga::Module> for ShaderMeta {
         fn from(module: &wgpu::naga::Module) -> Self {
             let entry = module.entry_points[0].name.clone();
-
             let mut meta = ShaderMeta::new(entry);
 
             for (_, value) in module.global_variables.iter() {

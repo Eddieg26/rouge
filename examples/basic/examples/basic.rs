@@ -1,10 +1,9 @@
 use asset::{
-    asset::{Asset, AssetId, AssetRef, Assets},
     database::{events::AssetEvent, AssetDatabase},
     embed_asset,
     importer::{DefaultProcessor, ImportContext, ImportError, Importer},
     io::{
-        cache::{Artifact, ArtifactMeta, AssetCache},
+        cache::{Artifact, ArtifactMeta, AssetCache, LoadPath},
         embedded::EmbeddedFs,
         local::LocalFs,
         source::{AssetPath, AssetSource},
@@ -12,17 +11,25 @@ use asset::{
         AssetIoError, FileSystem,
     },
     plugin::{AssetExt, AssetPlugin},
-    AsyncReadExt, AsyncWriteExt,
+    Asset, AssetId, AssetRef, Assets, AsyncReadExt, AsyncWriteExt,
 };
 use graphics::{
     core::{Color, ExtractError},
+    encase::ShaderType,
     plugin::{RenderApp, RenderPlugin},
     renderer::{
         graph::{RenderGraphBuilder, RenderGraphNode},
         pass::{Attachment, LoadOp, Operations, RenderPass, StoreOp},
     },
+    resource::{
+        plugin::MaterialAppExt, BindGroupLayout, BindGroupLayoutBuilder, BlendMode, Material,
+        MeshPipeline, ShaderSource, Unlit, VertexAttribute,
+    },
+    wgpu::{PrimitiveState, ShaderStages},
+    CreateBindGroup,
 };
 use std::{future::Future, path::PathBuf};
+use uuid::Uuid;
 use window::plugin::WindowPlugin;
 // use asset::{
 //     asset::{Asset, AssetId, AssetType},
@@ -47,65 +54,24 @@ use ecs::{
 use game::{Game, PostInit, Update};
 use pollster::block_on;
 
-pub struct TestEvent;
-impl Event for TestEvent {}
-
-pub struct TestAction;
-
-impl WorldAction for TestAction {
-    fn execute(self, _: &mut world::World) -> Option<()> {
-        println!("Test Action!");
-        Some(())
-    }
-}
-
-#[derive(Debug)]
-pub struct A;
-impl Component for A {}
-
-pub struct B;
-impl Component for B {}
-
-pub struct ResA;
-impl Resource for ResA {}
-
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
-pub struct PlainText(String);
-impl Asset for PlainText {}
-
-impl Importer for PlainText {
-    type Asset = PlainText;
-    type Settings = ();
-    type Processor = DefaultProcessor<Self, Self::Settings>;
-    type Error = AssetIoError;
-
-    async fn import(
-        _ctx: &mut ImportContext<'_, Self::Asset, Self::Settings>,
-        reader: &mut dyn asset::io::AssetReader,
-    ) -> Result<Self::Asset, Self::Error> {
-        let mut data = String::new();
-        reader.read_to_string(&mut data).await?;
-        Ok(PlainText(data))
-    }
-
-    fn extensions() -> &'static [&'static str] {
-        &["txt"]
-    }
-}
-
-const ID: uuid::Uuid = uuid::Uuid::from_u128(0);
+const VERTEX_SHADER_ID: Uuid = Uuid::from_u128(0);
+const FRAGMENT_SHADER_ID: Uuid = Uuid::from_u128(1);
+const MATERIAL_ID: Uuid = Uuid::from_u128(0);
 
 fn main() {
     let embedded = EmbeddedFs::new("assets");
-    let id = AssetRef::<PlainText>::from(ID);
-    let _ = embed_asset!(embedded, id, "assets/embedded.txt", ());
+    let vs_id = AssetRef::<ShaderSource>::from(VERTEX_SHADER_ID);
+    embed_asset!(embedded, vs_id, "assets/vertex.wgsl", ());
+    let fs_id = AssetRef::<ShaderSource>::from(FRAGMENT_SHADER_ID);
+    embed_asset!(embedded, fs_id, "assets/fragment.wgsl", ());
+    let mat_id = AssetId::from::<UnlitColor>(MATERIAL_ID);
 
     Game::new()
         .add_plugin(RenderPlugin)
+        .add_material::<UnlitColor>()
+        .add_asset(mat_id, UnlitColor::from(Color::green()), vec![])
         .scoped_resource::<RenderGraphBuilder>(|_, builder| {
             builder.add_node(BasicRenderNode::new());
-            builder.add_node(NoopNode);
-            builder.add_edge::<BasicRenderNode, NoopNode>();
         })
         .scoped_sub_app::<RenderApp>(|_, app| {
             app.observe::<ExtractError, _>(|errors: Res<Events<ExtractError>>| {
@@ -114,20 +80,9 @@ fn main() {
                 }
             });
         })
-        .register_asset::<PlainText>()
-        .add_importer::<PlainText>()
         .embed_assets("basic", embedded)
         .add_systems(PostInit, |db: Res<AssetDatabase>| {
             db.load(["basic://assets/embedded.txt"]);
-        })
-        .observe::<AssetEvent<PlainText>, _>(|events: Res<Events<AssetEvent<PlainText>>>| {
-            for event in events.iter() {
-                match event {
-                    AssetEvent::Imported { id } => println!("Imported: {:?}", id),
-                    AssetEvent::Added { id } => println!("Loaded: {:?}", id),
-                    _ => (),
-                }
-            }
         })
         .observe::<ImportError, _>(|errors: Res<Events<ImportError>>| {
             for error in errors.iter() {
@@ -135,6 +90,67 @@ fn main() {
             }
         })
         .run();
+}
+
+pub struct BasicMeshPipeline {
+    layout: BindGroupLayout,
+}
+
+impl MeshPipeline for BasicMeshPipeline {
+    fn new(device: &graphics::RenderDevice) -> Self {
+        let layout = BindGroupLayoutBuilder::new()
+            .with_uniform_buffer(
+                0,
+                ShaderStages::VERTEX,
+                true,
+                Some(glam::Mat4::min_size()),
+                None,
+            )
+            .build(device);
+
+        Self { layout }
+    }
+
+    fn primitive() -> PrimitiveState {
+        PrimitiveState::default()
+    }
+
+    fn attributes() -> Vec<VertexAttribute> {
+        vec![VertexAttribute::Vec3]
+    }
+
+    fn shader() -> impl Into<LoadPath> {
+        LoadPath::Id(AssetId::from::<ShaderSource>(VERTEX_SHADER_ID))
+    }
+
+    fn bind_group_layout(&self) -> &graphics::resource::BindGroupLayout {
+        &self.layout
+    }
+}
+
+#[derive(Clone, Copy, serde::Serialize, serde::Deserialize, Asset, CreateBindGroup)]
+pub struct UnlitColor {
+    #[uniform(0)]
+    pub color: Color,
+}
+
+impl From<Color> for UnlitColor {
+    fn from(color: Color) -> Self {
+        Self { color }
+    }
+}
+
+impl Material for UnlitColor {
+    type Pipeline = BasicMeshPipeline;
+    type Meta = Unlit;
+
+    fn mode() -> BlendMode {
+        BlendMode::Opaque
+    }
+
+    fn shader() -> impl Into<LoadPath> {
+        LoadPath::Id(AssetId::from::<ShaderSource>(FRAGMENT_SHADER_ID))
+    }
 }
 
 pub struct BasicRenderNode {
@@ -165,14 +181,4 @@ impl RenderGraphNode for BasicRenderNode {
 
         ctx.submit(encoder);
     }
-}
-
-pub struct NoopNode;
-
-impl RenderGraphNode for NoopNode {
-    fn name(&self) -> &str {
-        "Noop"
-    }
-
-    fn run(&mut self, _: &mut graphics::renderer::context::RenderContext) {}
 }

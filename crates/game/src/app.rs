@@ -361,6 +361,20 @@ impl MainWorld {
     }
 }
 
+impl std::ops::Deref for MainWorld {
+    type Target = World;
+
+    fn deref(&self) -> &Self::Target {
+        self.inner()
+    }
+}
+
+impl std::ops::DerefMut for MainWorld {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.inner_mut()
+    }
+}
+
 impl Resource for MainWorld {}
 unsafe impl Send for MainWorld {}
 unsafe impl Sync for MainWorld {}
@@ -389,14 +403,6 @@ impl<A: AppTag> SubActions<A> {
     pub fn new(actions: WorldActions) -> Self {
         Self(actions, std::marker::PhantomData)
     }
-
-    pub fn add(&self, action: impl Into<WorldActionFn>) {
-        self.0.add(action);
-    }
-
-    pub fn extend(&self, actions: Vec<impl Into<WorldActionFn>>) {
-        self.0.extend(actions);
-    }
 }
 
 impl<A: AppTag> Resource for SubActions<A> {}
@@ -404,6 +410,20 @@ impl<A: AppTag> Resource for SubActions<A> {}
 impl<A: AppTag> Clone for SubActions<A> {
     fn clone(&self) -> Self {
         Self(self.0.clone(), std::marker::PhantomData)
+    }
+}
+
+impl<A: AppTag> std::ops::Deref for SubActions<A> {
+    type Target = WorldActions;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<A: AppTag> std::ops::DerefMut for SubActions<A> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
     }
 }
 

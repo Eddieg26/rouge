@@ -23,11 +23,13 @@ impl SystemId {
     }
 }
 
+pub type SystemFunc = Arc<dyn Fn(WorldCell) + Send + Sync>;
+
 #[derive(Clone)]
 pub struct System {
     id: SystemId,
     name: Option<&'static str>,
-    run: Arc<dyn Fn(WorldCell) + Send + Sync>,
+    run: SystemFunc,
 }
 
 impl System {
@@ -55,7 +57,7 @@ impl System {
 pub struct SystemConfig {
     id: SystemId,
     name: Option<&'static str>,
-    run: Arc<dyn Fn(WorldCell) + Send + Sync>,
+    run: SystemFunc,
     access: fn() -> Vec<WorldAccess>,
     custom: Vec<WorldAccess>,
     after: Option<SystemId>,
@@ -65,7 +67,7 @@ pub struct SystemConfig {
 impl SystemConfig {
     pub fn new(
         name: Option<&'static str>,
-        run: Arc<dyn Fn(WorldCell) + Send + Sync>,
+        run: SystemFunc,
         access: fn() -> Vec<WorldAccess>,
         is_send: bool,
     ) -> Self {

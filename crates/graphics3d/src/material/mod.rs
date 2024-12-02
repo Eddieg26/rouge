@@ -3,7 +3,7 @@ use graphics::{
     encase::ShaderType,
     resource::{
         BindGroup, BindGroupLayout, BlendMode, Id, IntoBindGroupData, IntoBufferData, Material,
-        RenderTexture, ShaderModel, MeshPipeline, Unlit,
+        MeshPipeline, RenderTexture, ShaderModel, Unlit,
     },
     wgpu::PrimitiveState,
     Color, CreateBindGroup, RenderDevice,
@@ -79,22 +79,3 @@ pub struct StandardBufferData {
     albedo_color: Color,
     other_color: Color,
 }
-
-// impl<S: Surface> CreateBindGroup for Standard<S> {
-//     type Arg = ();
-
-//     type Data = ();
-
-//     fn bind_group(
-//         &self,
-//         device: &RenderDevice,
-//         layout: &BindGroupLayout,
-//         arg: &ecs::system::ArgItem<Self::Arg>,
-//     ) -> Result<BindGroup<Self::Data>, CreateBindGroupError> {
-//         todo!()
-//     }
-
-//     fn bind_group_layout(device: &RenderDevice) -> BindGroupLayout {
-//         todo!()
-//     }
-// }

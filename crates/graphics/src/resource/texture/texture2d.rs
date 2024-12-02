@@ -3,11 +3,11 @@ use super::{
     FilterMode, RenderTexture, Texture, TextureDimension, TextureFormat, WrapMode,
 };
 use crate::core::{RenderAssetExtractor, RenderAssets, RenderDevice};
-use asset::Settings;
+use asset::{Asset, Settings};
 use ecs::system::unlifetime::{ReadRes, WriteRes};
 use std::ops::Range;
 
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize, serde::Deserialize, Asset)]
 pub struct Texture2d {
     width: u32,
     height: u32,
@@ -133,8 +133,6 @@ impl Texture for Texture2d {
         &self.pixels[range]
     }
 }
-
-impl asset::Asset for Texture2d {}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Texture2dSettings {

@@ -185,9 +185,10 @@ fn generate_create_bind_group(input: DeriveInput) -> Result<TokenStream> {
 
                 let uniform_buffer = quote::quote! {
                     let mut #uniform_buffer_name = #graphics::encase::UniformBuffer::new(Vec::<u8>::new());
-                    #uniform_buffer_name.write(#field).unwrap();
+                    #uniform_buffer_name.write(&self.#field).unwrap();
 
                     uniform_buffers.push(Buffer::with_data(device, #uniform_buffer_name.as_ref().as_slice(), BufferUsages::UNIFORM, None));
+                    #BIND_GROUP_BUILDER.add_buffer(#binding, uniform_buffers.last().unwrap().inner(), 0, None);
                 };
 
                 entries.push(uniform_buffer);
@@ -281,11 +282,11 @@ fn generate_create_bind_group(input: DeriveInput) -> Result<TokenStream> {
 
             fn bind_group(
                 &self,
-                device: &RenderDevice,
-                layout: &BindGroupLayout,
+                device: &graphics::RenderDevice,
+                layout: &graphics::resource::BindGroupLayout,
                 arg: &#ecs::system::ArgItem<Self::Arg>,
-            ) -> Result<BindGroup<Self::Data>, #graphics::resource::CreateBindGroupError> {
-                use #graphics::{wgpu::BufferUsages, resource::{Buffer, BindGroupEntries, TextureDimension, Sampler, RenderTexture, IntoBufferData, IntoOptionalId}};
+            ) -> Result<#graphics::resource::BindGroup<Self::Data>, #graphics::resource::CreateBindGroupError> {
+                use #graphics::{wgpu::BufferUsages, resource::{Buffer, BindGroup, BindGroupEntries, TextureDimension, Sampler, RenderTexture, IntoBufferData, IntoOptionalId}};
 
                 let (textures, samplers, fallbacks) = arg;
 
@@ -297,7 +298,7 @@ fn generate_create_bind_group(input: DeriveInput) -> Result<TokenStream> {
                 Ok(BindGroup::create(device, layout, #BIND_GROUP_BUILDER.entries(), #get_bind_group_data))
             }
 
-            fn bind_group_layout(device: &RenderDevice) -> BindGroupLayout {
+            fn bind_group_layout(device: &#graphics::RenderDevice) -> #graphics::resource::BindGroupLayout {
                 use #graphics::{wgpu::{TextureSampleType, SamplerBindingType, ShaderStages}, resource::{BindGroupLayoutBuilder, TextureDimension}};
 
                 let mut #BIND_GROUP_LAYOUT_BUILDER = BindGroupLayoutBuilder::new();

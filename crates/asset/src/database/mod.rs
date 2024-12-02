@@ -7,7 +7,7 @@ use async_std::sync::{Mutex, RwLock};
 use config::AssetConfig;
 use ecs::{core::resource::Resource, event::Event, task::TaskPool, world::action::WorldActions};
 use futures::executor::block_on;
-use state::SharedStates;
+use state::{LoadState, SharedStates};
 use std::{collections::VecDeque, sync::Arc};
 use update::{AssetImporter, AssetLoader, AssetRefresher, RefreshMode};
 
@@ -84,6 +84,21 @@ impl AssetDatabase {
 
     pub fn states(&self) -> &SharedStates {
         &self.states
+    }
+
+    pub fn asset_load_state(&self, path: LoadPath) -> LoadState {
+        let id = match path {
+            LoadPath::Id(id) => id,
+            LoadPath::Path(path) => {
+                let library = self.library.read_arc_blocking();
+                match library.get_id(&path) {
+                    Some(id) => id,
+                    None => return LoadState::Unloaded,
+                }
+            }
+        };
+
+        self.states.read_blocking().get_load_state(id)
     }
 
     pub fn refresh(&self, mode: RefreshMode) {

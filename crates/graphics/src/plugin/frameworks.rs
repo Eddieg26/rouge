@@ -148,6 +148,49 @@ impl ResizeFramework {
     }
 }
 
+pub struct CreateSurfaceFramework;
+
+impl Framework for CreateSurfaceFramework {
+    fn apply(&self, context: &mut game::FrameworkContext) {
+        context
+            .observe::<WindowCreated, _>(Self::create_render_surface)
+            .sub_app_mut::<RenderApp>()
+            .register_event::<SurfaceCreated>();
+    }
+}
+
+impl CreateSurfaceFramework {
+    fn create_render_surface(
+        window: NonSend<Window>,
+        actions: &WorldActions,
+        render_actions: SubActions<RenderApp>,
+    ) {
+        let instance = RenderInstance::create();
+        let actions = actions.clone();
+        let runner = async {
+            let mut surface = match RenderSurface::create(&instance, &window).await {
+                Ok(surface) => surface,
+                Err(error) => return Err(CreateSurfaceError::Surface(error)),
+            };
+
+            let device = match RenderDevice::create(surface.adapter()).await {
+                Ok(device) => device,
+                Err(error) => return Err(CreateSurfaceError::Device(error)),
+            };
+
+            surface.configure(&device);
+
+            render_actions.add(AddRenderSurface { surface, device });
+
+            Ok(())
+        };
+
+        if let Err(error) = block_on(runner) {
+            actions.add(ExitGame::failure(error));
+        }
+    }
+}
+
 pub struct SurfaceCreated;
 impl Event for SurfaceCreated {}
 
@@ -205,49 +248,6 @@ impl WorldAction for AddRenderSurface {
             .add(SurfaceCreated);
 
         Some(())
-    }
-}
-
-pub struct CreateSurfaceFramework;
-
-impl Framework for CreateSurfaceFramework {
-    fn apply(&self, context: &mut game::FrameworkContext) {
-        context
-            .observe::<WindowCreated, _>(Self::create_render_surface)
-            .sub_app_mut::<RenderApp>()
-            .register_event::<SurfaceCreated>();
-    }
-}
-
-impl CreateSurfaceFramework {
-    fn create_render_surface(
-        window: NonSend<Window>,
-        actions: &WorldActions,
-        render_actions: SubActions<RenderApp>,
-    ) {
-        let instance = RenderInstance::create();
-        let actions = actions.clone();
-        let runner = async {
-            let mut surface = match RenderSurface::create(&instance, &window).await {
-                Ok(surface) => surface,
-                Err(error) => return Err(CreateSurfaceError::Surface(error)),
-            };
-
-            let device = match RenderDevice::create(surface.adapter()).await {
-                Ok(device) => device,
-                Err(error) => return Err(CreateSurfaceError::Device(error)),
-            };
-
-            surface.configure(&device);
-
-            render_actions.add(AddRenderSurface { surface, device });
-
-            Ok(())
-        };
-
-        if let Err(error) = block_on(runner) {
-            actions.add(ExitGame::failure(error));
-        }
     }
 }
 

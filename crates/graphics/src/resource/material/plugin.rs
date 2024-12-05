@@ -6,8 +6,9 @@ use super::{
 use crate::{
     plugin::{RenderApp, RenderAppExt, RenderPlugin},
     resource::{
+        extract::PipelineExtractor,
         material::{MeshPipeline, Metadata},
-        MaterialPipelineDesc, MaterialType, RenderPipelineExtractor, Shader, ShaderSource,
+        MaterialPipelineDesc, MaterialType, Shader, ShaderSource,
     },
     surface::RenderSurface,
     RenderAssetExtractor, RenderAssets, RenderDevice, View,
@@ -52,7 +53,7 @@ impl<M: Material> Plugin for MaterialPlugin<M> {
             .add_render_resource_extractor::<MaterialMetadata<M::Meta>>()
             .add_render_resource_extractor::<MeshPipelineData<M::Pipeline>>()
             .add_render_asset_dependency::<M, Shader>()
-            .add_render_pipeline_extractor::<M>()
+            .add_pipeline_extractor::<M>()
             .register_asset::<M>()
             .load_asset::<ShaderSource>(M::shader())
             .load_asset::<ShaderSource>(M::Pipeline::shader());
@@ -84,11 +85,7 @@ impl<M: Material> ModifyMaterialType<M> {
 
 impl<M: Material> Event for ModifyMaterialType<M> {}
 
-impl<M: Material> RenderPipelineExtractor for M {
-    type Trigger = ModifyMaterialType<M>;
-
-    type RemoveTrigger = ModifyMaterialType<M>;
-
+impl<M: Material> PipelineExtractor for M {
     type Arg = (
         ReadRes<RenderSurface>,
         ReadRes<GlobalLayout>,
@@ -99,15 +96,14 @@ impl<M: Material> RenderPipelineExtractor for M {
         Main<'static, ReadRes<AssetDatabase>>,
     );
 
-    fn vertex_shader() -> impl Into<LoadPath> {
-        M::Pipeline::shader()
+    fn kind() -> crate::resource::extract::PipelineExtractorKind {
+        crate::resource::extract::PipelineExtractorKind::Render {
+            vertex_shader: M::Pipeline::shader().into(),
+            fragment_shader: M::shader().into(),
+        }
     }
 
-    fn fragment_shader() -> impl Into<LoadPath> {
-        M::shader()
-    }
-
-    fn create_pipeline(
+    fn extract_pipeline(
         device: &RenderDevice,
         shaders: &RenderAssets<Shader>,
         arg: &mut ecs::system::ArgItem<Self::Arg>,

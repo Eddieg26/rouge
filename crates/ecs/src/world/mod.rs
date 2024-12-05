@@ -1,3 +1,4 @@
+use crate::world::id::WorldKind;
 use crate::{
     archetype::{table::Row, Archetypes, EntityMove},
     core::{
@@ -35,6 +36,7 @@ pub mod spawner;
 
 pub struct World {
     id: WorldId,
+    kind: WorldKind,
     access: WorldAccessTracker,
     entities: Entities,
     archetypes: Archetypes,
@@ -51,8 +53,17 @@ pub struct World {
 
 impl World {
     pub fn new() -> Self {
+        Self::new_kind(WorldKind::Main)
+    }
+
+    pub fn sub() -> Self {
+        Self::new_kind(WorldKind::Sub)
+    }
+
+    fn new_kind(kind: WorldKind) -> Self {
         let mut world = Self {
             id: WorldId::new(),
+            kind,
             access: WorldAccessTracker::new(),
             entities: Entities::new(),
             archetypes: Archetypes::new(),
@@ -73,6 +84,10 @@ impl World {
 
     pub fn id(&self) -> WorldId {
         self.id
+    }
+
+    pub fn kind(&self) -> WorldKind {
+        self.kind
     }
 
     pub fn access(&self) -> &WorldAccessTracker {
@@ -405,11 +420,18 @@ pub mod id {
             Self(id)
         }
     }
+
     impl std::ops::Deref for WorldId {
         type Target = u32;
 
         fn deref(&self) -> &Self::Target {
             &self.0
         }
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    pub enum WorldKind {
+        Main,
+        Sub,
     }
 }

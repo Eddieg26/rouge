@@ -42,9 +42,9 @@ impl WorldActions {
         self.actions.lock().unwrap().is_empty()
     }
 
-    pub fn extend(&self, mut actions: Vec<impl Into<WorldActionFn>>) {
+    pub fn extend(&self, mut actions: impl IntoIterator<Item= impl Into<WorldActionFn>>) {
         let mut list = self.actions.lock().unwrap();
-        list.extend(actions.drain(..).map(|a| a.into()));
+        list.extend(actions.into_iter().map(|a| a.into()));
     }
 
     pub fn take(&self) -> Vec<WorldActionFn> {

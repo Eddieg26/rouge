@@ -3,14 +3,7 @@ use crate::{
     wgpu::{ColorTargetState, DepthStencilState, MultisampleState, PrimitiveState, VertexStepMode},
     RenderAssets, RenderDevice,
 };
-use asset::io::cache::LoadPath;
-use ecs::{
-    core::{resource::Resource, IndexMap, Type},
-    event::Event,
-    system::{ArgItem, SystemArg, SystemFunc},
-    world::World,
-};
-use std::{borrow::Cow, collections::HashMap, num::NonZeroU32, sync::Arc};
+use std::{borrow::Cow, num::NonZeroU32};
 
 pub type RenderPipelineId = AtomicId<RenderPipeline>;
 
@@ -29,7 +22,7 @@ impl std::ops::Deref for RenderPipeline {
 }
 
 impl RenderPipeline {
-    pub fn create<'a>(device: &RenderDevice, desc: RenderPipelineDesc<'a>) -> Self {
+    pub fn create(device: &RenderDevice, desc: RenderPipelineDesc) -> Self {
         let layout = desc.layout.map(|layout| {
             let layout = layout
                 .iter()
@@ -227,122 +220,244 @@ impl From<wgpu::ComputePipeline> for ComputePipeline {
     }
 }
 
-pub trait RenderPipelineExtractor: 'static {
-    type Trigger: Event;
-    type RemoveTrigger: Event;
-    type Arg: SystemArg;
+pub mod extract {
+    use crate::{resource::Shader, RenderAssets, RenderDevice};
+    use asset::io::cache::LoadPath;
+    use ecs::{
+        core::{resource::Resource, IndexMap, Type},
+        system::{ArgItem, SystemArg},
+        world::{
+            action::{WorldAction, WorldActionFn},
+            id::WorldKind,
+            World,
+        },
+    };
+    use std::collections::{hash_map::Entry, HashMap};
+    use wgpu::ShaderStages;
 
-    fn vertex_shader() -> impl Into<LoadPath>;
-    fn fragment_shader() -> impl Into<LoadPath>;
+    pub trait PipelineExtractor: Send + 'static {
+        type Arg: SystemArg;
 
-    fn create_pipeline(
-        device: &RenderDevice,
-        shaders: &RenderAssets<Shader>,
-        arg: &mut ArgItem<Self::Arg>,
-    );
-
-    fn remove_pipeline(arg: &mut ArgItem<Self::Arg>);
-}
-
-pub struct RenderPipelineState {
-    pub event_triggered: bool,
-    pub vertex_shader_loaded: bool,
-    pub fragment_shader_loaded: bool,
-    pub create_pipeline: SystemFunc,
-    pub remove_pipeline: SystemFunc,
-}
-
-pub struct RenderPipelineExtractors {
-    extractors: IndexMap<Type, RenderPipelineState>,
-    shader_map: HashMap<LoadPath, (Vec<usize>, bool)>,
-}
-
-impl RenderPipelineExtractors {
-    pub fn new() -> Self {
-        Self {
-            extractors: IndexMap::new(),
-            shader_map: HashMap::new(),
-        }
-    }
-
-    pub fn get(&self, ty: Type) -> Option<&RenderPipelineState> {
-        self.extractors.get(&ty)
-    }
-
-    pub fn get_mut(&mut self, ty: Type) -> Option<&mut RenderPipelineState> {
-        self.extractors.get_mut(&ty)
-    }
-
-    pub fn add<E: RenderPipelineExtractor>(&mut self) {
-        let ty = Type::of::<E>();
-        if self.extractors.contains_key(&ty) {
-            return;
-        }
-
-        let vs = E::vertex_shader().into();
-        let fs = E::fragment_shader().into();
-
-        let index = self.extractors.len();
-        self.shader_map
-            .entry(vs)
-            .or_insert((vec![], true))
-            .0
-            .push(index);
-        self.shader_map
-            .entry(fs)
-            .or_insert((vec![], false))
-            .0
-            .push(index);
-
-        self.extractors.insert(
-            ty,
-            RenderPipelineState {
-                event_triggered: false,
-                vertex_shader_loaded: false,
-                fragment_shader_loaded: false,
-                create_pipeline: Arc::new(|world| {
-                    let device = world.resource::<RenderDevice>();
-                    let shaders = world.resource::<RenderAssets<Shader>>();
-                    let mut arg = E::Arg::get(world);
-                    E::create_pipeline(&device, &shaders, &mut arg);
-                }),
-                remove_pipeline: Arc::new(|world| {
-                    let mut arg = E::Arg::get(world);
-                    E::remove_pipeline(&mut arg);
-                }),
-            },
+        fn kind() -> PipelineExtractorKind;
+        fn extract_pipeline(
+            device: &RenderDevice,
+            shaders: &RenderAssets<Shader>,
+            arg: &mut ArgItem<Self::Arg>,
         );
+        fn remove_pipeline(arg: &mut ArgItem<Self::Arg>);
     }
 
-    pub fn remove<E: RenderPipelineExtractor>(&mut self, world: &World) {
-        let world = unsafe { world.cell() };
-        let ty = Type::of::<E>();
-        if let Some(state) = self.extractors.get_mut(&ty) {
-            (state.remove_pipeline)(world);
-            state.event_triggered = false;
+    #[derive(Debug, Clone, Eq, PartialEq)]
+    pub enum PipelineExtractorKind {
+        Render {
+            vertex_shader: LoadPath,
+            fragment_shader: LoadPath,
+        },
+        Compute {
+            shader: LoadPath,
+        },
+    }
+
+    #[derive(Debug, Copy, Clone, Eq, PartialEq)]
+    pub enum PipelineAction {
+        Extract,
+        Remove,
+    }
+
+    pub struct PipelineExtractorState {
+        shaders: ShaderStages,
+        shaders_loaded: ShaderStages,
+        extract: fn() -> WorldActionFn,
+        remove: fn() -> WorldActionFn,
+        action: Option<PipelineAction>,
+    }
+
+    impl PipelineExtractorState {
+        pub fn new(
+            kind: &PipelineExtractorKind,
+            extract: fn() -> WorldActionFn,
+            remove: fn() -> WorldActionFn,
+        ) -> Self {
+            let shaders = match kind {
+                PipelineExtractorKind::Render { .. } => {
+                    ShaderStages::VERTEX | ShaderStages::FRAGMENT
+                }
+                PipelineExtractorKind::Compute { .. } => ShaderStages::COMPUTE,
+            };
+
+            Self {
+                shaders,
+                extract,
+                remove,
+                shaders_loaded: ShaderStages::empty(),
+                action: None,
+            }
+        }
+
+        pub fn shader_updated(&mut self, stage: ShaderStages, loaded: bool) {
+            self.shaders_loaded.set(stage, loaded);
+        }
+
+        pub fn action(&self) -> Option<PipelineAction> {
+            self.action
+        }
+
+        pub fn are_shaders_loaded(&self) -> bool {
+            self.shaders.difference(self.shaders_loaded) == ShaderStages::empty()
+        }
+
+        pub fn extract(&self) -> WorldActionFn {
+            (self.extract)()
+        }
+
+        pub fn remove(&self) -> WorldActionFn {
+            (self.remove)()
         }
     }
 
-    pub fn shader_updated(&mut self, world: &World, path: LoadPath, loaded: bool) {
-        let world = unsafe { world.cell() };
-        if let Some((indices, is_vs)) = self.shader_map.get(&path) {
-            for &index in indices {
-                let state = &mut self.extractors[index];
-                if *is_vs {
-                    state.vertex_shader_loaded = loaded;
-                } else {
-                    state.fragment_shader_loaded = loaded;
+    pub struct PipelineExtractors {
+        extractors: IndexMap<Type, PipelineExtractorState>,
+        shaders: HashMap<LoadPath, (Vec<usize>, ShaderStages)>,
+        pub(crate) actions: IndexMap<Type, WorldActionFn>,
+    }
+
+    impl PipelineExtractors {
+        pub fn new() -> Self {
+            Self {
+                extractors: IndexMap::new(),
+                shaders: HashMap::new(),
+                actions: IndexMap::new(),
+            }
+        }
+
+        pub fn add_extractor<P: PipelineExtractor>(&mut self) {
+            let ty = Type::of::<P>();
+            if self.extractors.contains_key(&ty) {
+                return;
+            }
+
+            let kind = P::kind();
+            let extract = || ExtractPipeline::<P>::new().into();
+            let remove = || RemovePipeline::<P>::new().into();
+            let state = PipelineExtractorState::new(&kind, extract, remove);
+
+            let index = self.extractors.len();
+            self.extractors.insert(ty, state);
+
+            match kind {
+                PipelineExtractorKind::Render {
+                    vertex_shader,
+                    fragment_shader,
+                } => {
+                    self.add_shader(vertex_shader, ShaderStages::VERTEX, index);
+                    self.add_shader(fragment_shader, ShaderStages::FRAGMENT, index);
+                }
+                PipelineExtractorKind::Compute { shader } => {
+                    self.add_shader(shader, ShaderStages::COMPUTE, index);
+                }
+            }
+        }
+
+        pub fn extract<P: PipelineExtractor>(&mut self) {
+            let ty = Type::of::<P>();
+            if let Some(state) = self.extractors.get_mut(&ty) {
+                state.action = Some(PipelineAction::Extract);
+                if state.are_shaders_loaded() {
+                    self.actions.insert(ty, state.extract());
+                }
+            }
+        }
+
+        pub fn remove<P: PipelineExtractor>(&mut self) {
+            let ty = Type::of::<P>();
+            if let Some(state) = self.extractors.get_mut(&ty) {
+                if state.action == Some(PipelineAction::Extract) {
+                    state.action = Some(PipelineAction::Remove);
+                    self.actions.insert(ty, state.remove());
+                }
+            }
+        }
+
+        pub fn shader_updated(&mut self, path: LoadPath, loaded: bool) {
+            if let Some((indices, stages)) = self.shaders.get(&path) {
+                let mut actions = Vec::new();
+                for index in indices {
+                    let (extract, extractor) = {
+                        let state = &mut self.extractors[*index];
+                        state.shader_updated(*stages, loaded);
+
+                        let extract = state.action == Some(PipelineAction::Extract)
+                            && state.are_shaders_loaded();
+
+                        (extract, state.extract())
+                    };
+
+                    if extract {
+                        let ty = self.extractors.keys()[*index];
+                        actions.push((ty, extractor));
+                    }
                 }
 
-                if state.event_triggered
-                    && state.vertex_shader_loaded
-                    && state.fragment_shader_loaded
-                {
-                    (state.create_pipeline)(world);
+                self.actions.extend(actions);
+            }
+        }
+
+        fn add_shader(&mut self, path: LoadPath, stage: ShaderStages, index: usize) {
+            match self.shaders.entry(path) {
+                Entry::Occupied(mut entry) => {
+                    entry.get_mut().0.push(index);
+                    entry.get_mut().1 |= stage;
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert((vec![index], stage));
+                }
+            }
+        }
+    }
+
+    impl Resource for PipelineExtractors {}
+
+    pub struct ExtractPipeline<P: PipelineExtractor>(std::marker::PhantomData<P>);
+
+    impl<P: PipelineExtractor> ExtractPipeline<P> {
+        pub fn new() -> Self {
+            Self(Default::default())
+        }
+    }
+
+    impl<P: PipelineExtractor> WorldAction for ExtractPipeline<P> {
+        fn execute(self, world: &mut World) -> Option<()> {
+            match world.kind() {
+                WorldKind::Main => Some(world.resource_mut::<PipelineExtractors>().extract::<P>()),
+                WorldKind::Sub => {
+                    let world = unsafe { world.cell() };
+                    let device = world.resource::<RenderDevice>();
+                    let shaders = world.resource::<RenderAssets<Shader>>();
+                    let mut arg = P::Arg::get(world);
+                    Some(P::extract_pipeline(&device, &shaders, &mut arg))
+                }
+            }
+        }
+    }
+
+    pub struct RemovePipeline<P: PipelineExtractor>(std::marker::PhantomData<P>);
+
+    impl<P: PipelineExtractor> RemovePipeline<P> {
+        pub fn new() -> Self {
+            Self(Default::default())
+        }
+    }
+
+    impl<P: PipelineExtractor> WorldAction for RemovePipeline<P> {
+        fn execute(self, world: &mut World) -> Option<()> {
+            match world.kind() {
+                WorldKind::Main => Some(world.resource_mut::<PipelineExtractors>().remove::<P>()),
+                WorldKind::Sub => {
+                    let world = unsafe { world.cell() };
+                    let mut arg = P::Arg::get(world);
+                    Some(P::remove_pipeline(&mut arg))
                 }
             }
         }
     }
 }
-
-impl Resource for RenderPipelineExtractors {}

@@ -23,7 +23,7 @@ pub struct SubApp {
 impl SubApp {
     pub fn new() -> Self {
         Self {
-            world: World::new(),
+            world: World::sub(),
         }
     }
 

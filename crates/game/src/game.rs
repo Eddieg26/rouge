@@ -120,6 +120,11 @@ impl GameBuilder {
         self
     }
 
+    pub fn add_framework<F: Framework>(&mut self, framework: F) -> &mut Self {
+        framework.apply(&mut FrameworkContext::new(self));
+        self
+    }
+
     pub fn add_resource<R: Resource + Send>(&mut self, resource: R) -> &mut Self {
         self.apps.main_world_mut().add_resource(resource);
         self
@@ -342,3 +347,31 @@ impl WorldAction for ExitGame {
 }
 
 impl Event for ExitGame {}
+
+pub struct FrameworkContext<'a> {
+    game: &'a mut GameBuilder,
+}
+
+impl<'a> FrameworkContext<'a> {
+    pub(crate) fn new(game: &'a mut GameBuilder) -> Self {
+        Self { game }
+    }
+
+    pub fn add_systems<M>(
+        &mut self,
+        phase: impl Phase,
+        systems: impl IntoSystemConfigs<M>,
+    ) -> &mut Self {
+        self.game.add_systems::<M>(phase, systems);
+        self
+    }
+
+    pub fn observe<E: Event, M>(&mut self, observers: impl IntoSystemConfigs<M>) -> &mut Self {
+        self.game.observe::<E, M>(observers);
+        self
+    }
+}
+
+pub trait Framework: 'static {
+    fn apply(&self, context: &mut FrameworkContext);
+}

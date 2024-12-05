@@ -16,15 +16,13 @@ pub trait AppTag: 'static + Send {
     const NAME: &'static str;
 }
 
-pub struct SubApp {
+pub struct App {
     world: World,
 }
 
-impl SubApp {
-    pub fn new() -> Self {
-        Self {
-            world: World::sub(),
-        }
+impl App {
+    pub fn new(world: World) -> Self {
+        Self { world }
     }
 
     pub fn world(&self) -> &World {
@@ -178,59 +176,35 @@ impl SubApp {
         self.world.remove_resource::<MainWorld>();
     }
 
-    pub(crate) fn run(&mut self) {
-        self.world.run(Update);
-    }
-}
-
-pub struct MainApp {
-    world: World,
-}
-
-impl MainApp {
-    pub fn new() -> Self {
-        Self {
-            world: World::new(),
-        }
-    }
-
-    pub fn world(&self) -> &World {
-        &self.world
-    }
-
-    pub fn world_mut(&mut self) -> &mut World {
-        &mut self.world
-    }
-
-    pub fn run(&mut self, phase: impl Phase) {
+    pub(crate) fn run(&mut self, phase: impl Phase) {
         self.world.run(phase);
     }
 }
 
-impl Default for MainApp {
+impl Default for App {
     fn default() -> Self {
-        Self::new()
+        Self::new(World::new())
     }
 }
 
 pub struct AppBuilders {
-    main: MainApp,
-    apps: IndexMap<Type, SubApp>,
+    main: App,
+    apps: IndexMap<Type, App>,
 }
 
 impl AppBuilders {
     pub fn new() -> Self {
         Self {
-            main: MainApp::new(),
+            main: App::new(World::new()),
             apps: IndexMap::new(),
         }
     }
 
-    pub fn main_app(&self) -> &MainApp {
+    pub fn main_app(&self) -> &App {
         &self.main
     }
 
-    pub fn main_app_mut(&mut self) -> &mut MainApp {
+    pub fn main_app_mut(&mut self) -> &mut App {
         &mut self.main
     }
 
@@ -242,26 +216,26 @@ impl AppBuilders {
         &mut self.main.world
     }
 
-    pub fn sub<A: AppTag>(&self) -> Option<&SubApp> {
+    pub fn sub<A: AppTag>(&self) -> Option<&App> {
         self.apps.get(&Type::of::<A>())
     }
 
-    pub fn sub_mut<A: AppTag>(&mut self) -> Option<&mut SubApp> {
+    pub fn sub_mut<A: AppTag>(&mut self) -> Option<&mut App> {
         self.apps.get_mut(&Type::of::<A>())
     }
 
-    pub fn sub_dyn(&self, tag: Type) -> Option<&SubApp> {
+    pub fn sub_dyn(&self, tag: Type) -> Option<&App> {
         self.apps.get(&tag)
     }
 
-    pub fn sub_dyn_mut(&mut self, tag: Type) -> Option<&mut SubApp> {
+    pub fn sub_dyn_mut(&mut self, tag: Type) -> Option<&mut App> {
         self.apps.get_mut(&tag)
     }
 
-    pub fn add<A: AppTag>(&mut self) -> &mut SubApp {
+    pub fn add<A: AppTag>(&mut self) -> &mut App {
         let ty = Type::of::<A>();
         if !self.apps.contains_key(&ty) {
-            let mut app = SubApp::new();
+            let mut app = App::new(World::sub());
             app.register_resource::<MainWorld>();
             app.world.add_phase::<Extract>();
             app.world.add_phase::<Update>();
@@ -272,11 +246,11 @@ impl AppBuilders {
         self.apps.get_mut(&ty).unwrap()
     }
 
-    pub fn remove<A: AppTag>(&mut self) -> Option<SubApp> {
+    pub fn remove<A: AppTag>(&mut self) -> Option<App> {
         self.apps.shift_remove(&Type::of::<A>())
     }
 
-    pub fn insert(&mut self, tag: Type, app: SubApp) {
+    pub fn insert(&mut self, tag: Type, app: App) {
         self.apps.insert(tag, app);
     }
 
@@ -294,25 +268,25 @@ impl AppBuilders {
 }
 
 pub struct Apps {
-    main: MainApp,
-    apps: IndexMap<Type, Arc<Mutex<SubApp>>>,
+    main: App,
+    apps: IndexMap<Type, Arc<Mutex<App>>>,
     tasks: TaskPool,
 }
 
 impl Apps {
     pub fn new() -> Self {
         Self {
-            main: MainApp::new(),
+            main: App::new(World::new()),
             apps: IndexMap::new(),
             tasks: TaskPool::default(),
         }
     }
 
-    pub fn main_app(&self) -> &MainApp {
+    pub fn main_app(&self) -> &App {
         &self.main
     }
 
-    pub fn main_app_mut(&mut self) -> &mut MainApp {
+    pub fn main_app_mut(&mut self) -> &mut App {
         &mut self.main
     }
 
@@ -333,7 +307,7 @@ impl Apps {
             let app = app.clone();
             self.tasks.spawn(move || {
                 let mut app_lock = app.lock().unwrap();
-                app_lock.run();
+                app_lock.run(Update);
             });
         }
     }

@@ -1,8 +1,8 @@
 use crate::{
-    app::{AppBuilders, AppTag, Apps, MainApp},
+    app::{AppBuilders, AppTag, Apps},
     phases::{Execute, PostExecute, PreExecute, Shutdown, Startup},
     plugin::{Plugin, Plugins},
-    MainActions, SubActions, SubApp,
+    App, MainActions, SubActions,
 };
 use ecs::{
     core::{component::Component, resource::Resource, Type},
@@ -168,7 +168,7 @@ impl GameBuilder {
         self
     }
 
-    pub fn add_sub_app<A: AppTag>(&mut self) -> &mut SubApp {
+    pub fn add_sub_app<A: AppTag>(&mut self) -> &mut App {
         let sub_actions = {
             let actions = self.actions().clone();
             let app = self.apps.add::<A>();
@@ -180,29 +180,29 @@ impl GameBuilder {
         self.apps.sub_mut::<A>().unwrap()
     }
 
-    pub fn sub_app<A: AppTag>(&self) -> &SubApp {
+    pub fn sub_app<A: AppTag>(&self) -> &App {
         self.apps
             .sub::<A>()
             .expect(&format!("Sub app {:?} not found", A::NAME))
     }
 
-    pub fn sub_app_mut<A: AppTag>(&mut self) -> &mut SubApp {
+    pub fn sub_app_mut<A: AppTag>(&mut self) -> &mut App {
         self.apps
             .sub_mut::<A>()
             .expect(&format!("Sub app {:?} not found", A::NAME))
     }
 
-    pub fn try_sub_app<A: AppTag>(&self) -> Option<&SubApp> {
+    pub fn try_sub_app<A: AppTag>(&self) -> Option<&App> {
         self.apps.sub::<A>()
     }
 
-    pub fn try_sub_app_mut<A: AppTag>(&mut self) -> Option<&mut SubApp> {
+    pub fn try_sub_app_mut<A: AppTag>(&mut self) -> Option<&mut App> {
         self.apps.sub_mut::<A>()
     }
 
     pub fn scoped_sub_app<A: AppTag>(
         &mut self,
-        scope: impl FnOnce(&mut Self, &mut SubApp),
+        scope: impl FnOnce(&mut Self, &mut App),
     ) -> &mut Self {
         let mut sub_app = self.apps.remove::<A>().unwrap();
         scope(self, &mut sub_app);
@@ -270,11 +270,11 @@ impl Game {
         GameBuilder::new()
     }
 
-    pub fn app(&self) -> &MainApp {
+    pub fn app(&self) -> &App {
         self.apps.main_app()
     }
 
-    pub fn app_mut(&mut self) -> &mut MainApp {
+    pub fn app_mut(&mut self) -> &mut App {
         self.apps.main_app_mut()
     }
 
@@ -348,13 +348,46 @@ impl WorldAction for ExitGame {
 
 impl Event for ExitGame {}
 
+pub enum FrameworkContextInner<'a> {
+    Game(&'a mut GameBuilder),
+    App(&'a mut App),
+}
+
 pub struct FrameworkContext<'a> {
-    game: &'a mut GameBuilder,
+    inner: FrameworkContextInner<'a>,
 }
 
 impl<'a> FrameworkContext<'a> {
     pub(crate) fn new(game: &'a mut GameBuilder) -> Self {
-        Self { game }
+        Self {
+            inner: FrameworkContextInner::Game(game),
+        }
+    }
+
+    pub fn add_resource<R: Resource + Send>(&mut self, resource: R) -> &mut Self {
+        match &mut self.inner {
+            FrameworkContextInner::Game(game) => {
+                game.add_resource(resource);
+                self
+            }
+            FrameworkContextInner::App(app) => {
+                app.add_resource(resource);
+                self
+            }
+        }
+    }
+
+    pub fn add_non_send_resource<R: Resource>(&mut self, resource: R) -> &mut Self {
+        match &mut self.inner {
+            FrameworkContextInner::Game(game) => {
+                game.add_non_send_resource(resource);
+                self
+            }
+            FrameworkContextInner::App(app) => {
+                app.add_non_send_resource(resource);
+                self
+            }
+        }
     }
 
     pub fn add_systems<M>(
@@ -362,12 +395,120 @@ impl<'a> FrameworkContext<'a> {
         phase: impl Phase,
         systems: impl IntoSystemConfigs<M>,
     ) -> &mut Self {
-        self.game.add_systems::<M>(phase, systems);
-        self
+        match &mut self.inner {
+            FrameworkContextInner::Game(game) => {
+                game.add_systems(phase, systems);
+                self
+            }
+            FrameworkContextInner::App(app) => {
+                app.add_systems(phase, systems);
+                self
+            }
+        }
     }
 
     pub fn observe<E: Event, M>(&mut self, observers: impl IntoSystemConfigs<M>) -> &mut Self {
-        self.game.observe::<E, M>(observers);
+        match &mut self.inner {
+            FrameworkContextInner::Game(game) => {
+                game.observe::<E, M>(observers);
+                self
+            }
+            FrameworkContextInner::App(app) => {
+                app.observe::<E, M>(observers);
+                self
+            }
+        }
+    }
+
+    pub fn register_event<E: Event>(&mut self) -> &mut Self {
+        match &mut self.inner {
+            FrameworkContextInner::Game(game) => {
+                game.register_event::<E>();
+                self
+            }
+            FrameworkContextInner::App(app) => {
+                app.register_event::<E>();
+                self
+            }
+        }
+    }
+
+    pub fn add_phase<P: Phase>(&mut self) -> &mut Self {
+        match &mut self.inner {
+            FrameworkContextInner::Game(game) => {
+                game.add_phase::<P>();
+                self
+            }
+            FrameworkContextInner::App(app) => {
+                app.add_phase::<P>();
+                self
+            }
+        }
+    }
+
+    pub fn add_sub_phase<Main: Phase, Sub: Phase>(&mut self) -> &mut Self {
+        match &mut self.inner {
+            FrameworkContextInner::Game(game) => {
+                game.add_sub_phase::<Main, Sub>();
+                self
+            }
+            FrameworkContextInner::App(_) => self,
+        }
+    }
+
+    pub fn add_phase_before<P: Phase, Before: Phase>(&mut self) -> &mut Self {
+        match &mut self.inner {
+            FrameworkContextInner::Game(game) => {
+                game.add_phase_before::<P, Before>();
+                self
+            }
+            FrameworkContextInner::App(app) => {
+                app.add_phase_before::<P, Before>();
+                self
+            }
+        }
+    }
+
+    pub fn add_phase_after<P: Phase, After: Phase>(&mut self) -> &mut Self {
+        match &mut self.inner {
+            FrameworkContextInner::Game(game) => {
+                game.add_phase_after::<P, After>();
+                self
+            }
+            FrameworkContextInner::App(app) => {
+                app.add_phase_after::<P, After>();
+                self
+            }
+        }
+    }
+
+    pub fn add_sub_app<A: AppTag>(&mut self) -> &mut App {
+        match &mut self.inner {
+            FrameworkContextInner::Game(game) => {
+                let game = std::ptr::addr_of!(game) as *mut GameBuilder;
+                let game = unsafe { &mut *game };
+                let app = game.add_sub_app::<A>();
+                app
+            }
+            FrameworkContextInner::App(_) => panic!("Cannot add sub app to sub app"),
+        }
+    }
+
+    pub fn sub_app_mut<A: AppTag>(&mut self) -> &mut Self {
+        let app = match &mut self.inner {
+            FrameworkContextInner::Game(game) => {
+                let game = std::ptr::addr_of!(game) as *mut GameBuilder;
+                let game = unsafe { &mut *game };
+                let app = game.sub_app_mut::<A>();
+                Some(app)
+            }
+            FrameworkContextInner::App(_) => None,
+        };
+
+        if let Some(app) = app {
+            self.inner = FrameworkContextInner::App(app);
+        }
+
         self
     }
 }

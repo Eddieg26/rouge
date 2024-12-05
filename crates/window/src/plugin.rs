@@ -8,6 +8,7 @@ use crate::{
         WindowResized,
     },
     window::WindowConfig,
+    Window,
 };
 use game::{GameBuilder, Plugin};
 
@@ -43,6 +44,7 @@ impl Plugin for WindowPlugin {
             .register_event::<TouchpadPressure>()
             .register_event::<ScaleFactorChanged>()
             .register_event::<WindowOccluded>()
+            .register_non_send_resource::<Window>()
             .set_runner(App::runner);
     }
 

@@ -15,7 +15,7 @@ pub struct UniformBuffer<T: ShaderType> {
     label: Label,
     value: T,
     data: EncaseUniformBuffer<Vec<u8>>,
-    buffer: Option<Buffer>,
+    inner: Option<Buffer>,
     usage: BufferUsages,
     is_dirty: bool,
 }
@@ -26,7 +26,7 @@ impl<T: ShaderType> UniformBuffer<T> {
             label: None,
             value,
             data: EncaseUniformBuffer::new(vec![]),
-            buffer: None,
+            inner: None,
             usage: BufferUsages::COPY_DST | BufferUsages::UNIFORM,
             is_dirty: false,
         }
@@ -50,8 +50,8 @@ impl<T: ShaderType> UniformBuffer<T> {
         self.data.as_ref().as_slice()
     }
 
-    pub fn buffer(&self) -> Option<&Buffer> {
-        self.buffer.as_ref()
+    pub fn inner(&self) -> Option<&Buffer> {
+        self.inner.as_ref()
     }
 
     pub fn is_dirty(&self) -> bool {
@@ -59,7 +59,7 @@ impl<T: ShaderType> UniformBuffer<T> {
     }
 
     pub fn binding(&self) -> Option<BindingResource> {
-        self.buffer.as_ref().map(|b| b.as_entire_binding())
+        self.inner.as_ref().map(|b| b.as_entire_binding())
     }
 }
 
@@ -79,7 +79,7 @@ impl<T: ShaderType + WriteInto> UniformBuffer<T> {
             label: None,
             value,
             data,
-            buffer: Some(buffer),
+            inner: Some(buffer),
             usage: BufferUsages::COPY_DST | BufferUsages::UNIFORM,
             is_dirty: false,
         }
@@ -91,7 +91,7 @@ impl<T: ShaderType + WriteInto> UniformBuffer<T> {
     }
 
     pub fn update(&mut self, device: &RenderDevice) {
-        match &self.buffer {
+        match &self.inner {
             Some(buffer) if self.is_dirty => {
                 self.data.write(&self.value).unwrap();
                 buffer.update(device, 0, self.data.as_ref());
@@ -101,7 +101,7 @@ impl<T: ShaderType + WriteInto> UniformBuffer<T> {
                 self.data.write(&self.value).unwrap();
                 let buffer =
                     Buffer::with_data(device, self.data.as_ref(), self.usage, self.label.clone());
-                self.buffer = Some(buffer);
+                self.inner = Some(buffer);
                 self.is_dirty = false;
             }
             _ => {}
@@ -112,7 +112,7 @@ impl<T: ShaderType + WriteInto> UniformBuffer<T> {
 pub struct UniformBufferArray<B: ShaderType> {
     label: Label,
     data: DynamicUniformBuffer<Vec<u8>>,
-    buffer: Option<Buffer>,
+    inner: Option<Buffer>,
     usage: BufferUsages,
     is_dirty: bool,
     _phantom: PhantomData<B>,
@@ -122,7 +122,7 @@ impl<B: ShaderType> UniformBufferArray<B> {
     pub fn new() -> Self {
         Self {
             label: None,
-            buffer: None,
+            inner: None,
             data: DynamicUniformBuffer::new(vec![]),
             usage: BufferUsages::COPY_DST | BufferUsages::UNIFORM,
             is_dirty: false,
@@ -133,7 +133,7 @@ impl<B: ShaderType> UniformBufferArray<B> {
     pub fn with_alignment(alignment: u64) -> Self {
         Self {
             label: None,
-            buffer: None,
+            inner: None,
             data: DynamicUniformBuffer::new_with_alignment(vec![], alignment),
             usage: BufferUsages::COPY_DST | BufferUsages::UNIFORM,
             is_dirty: false,
@@ -162,8 +162,8 @@ impl<B: ShaderType> UniformBufferArray<B> {
         &self.label
     }
 
-    pub fn buffer(&self) -> Option<&Buffer> {
-        self.buffer.as_ref()
+    pub fn inner(&self) -> Option<&Buffer> {
+        self.inner.as_ref()
     }
 
     pub fn data(&self) -> &[u8] {
@@ -187,7 +187,7 @@ impl<B: ShaderType> UniformBufferArray<B> {
     }
 
     pub fn binding(&self) -> Option<BindingResource> {
-        self.buffer.as_ref().map(|b| b.as_entire_binding())
+        self.inner.as_ref().map(|b| b.as_entire_binding())
     }
 
     pub fn min_alignment(device: &RenderDevice) -> u64 {
@@ -215,7 +215,7 @@ impl<B: ShaderType + WriteInto> UniformBufferArray<B> {
     }
 
     pub fn update(&mut self, device: &RenderDevice) {
-        match &self.buffer {
+        match &self.inner {
             Some(buffer) => {
                 let capacity = buffer.size();
                 let size = self.data.as_ref().len() as u64;
@@ -227,7 +227,7 @@ impl<B: ShaderType + WriteInto> UniformBufferArray<B> {
                         self.usage,
                         self.label.clone(),
                     );
-                    self.buffer = Some(new_buffer);
+                    self.inner = Some(new_buffer);
                     self.is_dirty = false;
                 } else if self.is_dirty {
                     buffer.update(device, 0, self.data.as_ref());
@@ -237,7 +237,7 @@ impl<B: ShaderType + WriteInto> UniformBufferArray<B> {
             None => {
                 let buffer =
                     Buffer::with_data(device, self.data.as_ref(), self.usage, self.label.clone());
-                self.buffer = Some(buffer);
+                self.inner = Some(buffer);
                 self.is_dirty = false;
             }
         }
@@ -254,7 +254,7 @@ impl<B: ShaderType + CreateFrom> UniformBufferArray<B> {
 
 pub struct StaticUniformBufferArray<B: BufferData, const N: usize> {
     label: Label,
-    buffer: Option<Buffer>,
+    inner: Option<Buffer>,
     values: [B; N],
     data: Vec<u8>,
     usage: BufferUsages,
@@ -265,7 +265,7 @@ impl<B: BufferData, const N: usize> StaticUniformBufferArray<B, N> {
     pub fn new(values: [B; N]) -> Self {
         Self {
             label: None,
-            buffer: None,
+            inner: None,
             values,
             data: vec![],
             usage: BufferUsages::COPY_DST | BufferUsages::UNIFORM,
@@ -287,8 +287,8 @@ impl<B: BufferData, const N: usize> StaticUniformBufferArray<B, N> {
         &self.label
     }
 
-    pub fn buffer(&self) -> Option<&Buffer> {
-        self.buffer.as_ref()
+    pub fn inner(&self) -> Option<&Buffer> {
+        self.inner.as_ref()
     }
 
     pub fn data(&self) -> &[u8] {
@@ -317,11 +317,11 @@ impl<B: BufferData, const N: usize> StaticUniformBufferArray<B, N> {
     }
 
     pub fn binding(&self) -> Option<BindingResource> {
-        self.buffer.as_ref().map(|b| b.as_entire_binding())
+        self.inner.as_ref().map(|b| b.as_entire_binding())
     }
 
     pub fn update(&mut self, device: &RenderDevice) {
-        match &self.buffer {
+        match &self.inner {
             Some(buffer) => {
                 if self.is_dirty {
                     buffer.update(device, 0, &self.data);
@@ -330,7 +330,7 @@ impl<B: BufferData, const N: usize> StaticUniformBufferArray<B, N> {
             }
             None => {
                 let buffer = Buffer::with_data(device, &self.data, self.usage, self.label.clone());
-                self.buffer = Some(buffer);
+                self.inner = Some(buffer);
                 self.is_dirty = false;
             }
         }
@@ -385,8 +385,8 @@ impl<B: BufferData> BatchedUniformBuffer<B> {
         self.buffer.usage
     }
 
-    pub fn buffer(&self) -> Option<&Buffer> {
-        self.buffer.buffer()
+    pub fn inner(&self) -> Option<&Buffer> {
+        self.buffer.inner()
     }
 
     pub fn binding(&self) -> Option<BindingResource> {

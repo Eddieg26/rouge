@@ -505,7 +505,6 @@ pub mod meta {
         inputs: Vec<ShaderInput>,
         outputs: Vec<ShaderOuput>,
         bindings: Vec<ShaderBindGroup>,
-        instances: Option<NonZeroU32>,
     }
 
     impl ShaderMeta {
@@ -515,17 +514,6 @@ pub mod meta {
                 inputs: Vec::new(),
                 outputs: Vec::new(),
                 bindings: Vec::new(),
-                instances: None,
-            }
-        }
-
-        pub fn with_instances(entry: impl Into<Cow<'static, str>>, instances: NonZeroU32) -> Self {
-            Self {
-                entry: entry.into(),
-                inputs: Vec::new(),
-                outputs: Vec::new(),
-                bindings: Vec::new(),
-                instances: Some(instances),
             }
         }
 
@@ -543,10 +531,6 @@ pub mod meta {
 
         pub fn bindings(&self) -> &[ShaderBindGroup] {
             &self.bindings
-        }
-
-        pub fn instances(&self) -> Option<NonZeroU32> {
-            self.instances
         }
 
         pub fn add_input(&mut self, value: ShaderValue, attribute: ShaderAttribute) -> &mut Self {
@@ -574,11 +558,6 @@ pub mod meta {
                 }),
             }
 
-            self
-        }
-
-        pub fn set_instances(&mut self, instances: NonZeroU32) -> &mut Self {
-            self.instances = Some(instances);
             self
         }
     }

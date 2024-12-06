@@ -201,7 +201,7 @@ impl<T: BufferData> BufferArrayIndex<T> {
 pub struct BufferArray<T: BufferData> {
     label: Label,
     data: Vec<u8>,
-    buffer: Option<Buffer>,
+    inner: Option<Buffer>,
     element_size: usize,
     usage: BufferUsages,
     is_dirty: bool,
@@ -213,7 +213,7 @@ impl<T: BufferData> BufferArray<T> {
         Self {
             data: vec![],
             label: None,
-            buffer: None,
+            inner: None,
             element_size: T::min_size().get() as usize,
             usage,
             is_dirty: false,
@@ -230,14 +230,12 @@ impl<T: BufferData> BufferArray<T> {
         &self.label
     }
 
-    pub fn buffer(&self) -> Option<&Buffer> {
-        self.buffer.as_ref()
+    pub fn inner(&self) -> Option<&Buffer> {
+        self.inner.as_ref()
     }
 
     pub fn binding(&self) -> Option<BindingResource> {
-        self.buffer
-            .as_ref()
-            .map(|buffer| buffer.as_entire_binding())
+        self.inner.as_ref().map(|buffer| buffer.as_entire_binding())
     }
 
     pub fn element_size(&self) -> usize {
@@ -288,12 +286,12 @@ impl<T: BufferData> BufferArray<T> {
             return;
         }
 
-        match &self.buffer {
+        match &self.inner {
             Some(buffer) => {
                 if self.data.len() != buffer.size() as usize {
                     let buffer =
                         Buffer::with_data(device, &self.data, self.usage, self.label.clone());
-                    self.buffer = Some(buffer);
+                    self.inner = Some(buffer);
                 } else if self.is_dirty {
                     buffer.update(device, 0, &self.data);
                 }
@@ -302,7 +300,7 @@ impl<T: BufferData> BufferArray<T> {
             }
             None => {
                 let buffer = Buffer::with_data(device, &self.data, self.usage, self.label.clone());
-                self.buffer = Some(buffer);
+                self.inner = Some(buffer);
                 self.is_dirty = false;
             }
         }

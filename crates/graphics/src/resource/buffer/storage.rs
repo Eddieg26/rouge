@@ -13,7 +13,7 @@ pub struct StorageBuffer<T: ShaderType> {
     label: Label,
     value: T,
     data: EncaseStorageBuffer<Vec<u8>>,
-    buffer: Option<Buffer>,
+    inner: Option<Buffer>,
     usage: BufferUsages,
     is_dirty: bool,
 }
@@ -24,7 +24,7 @@ impl<T: ShaderType> StorageBuffer<T> {
             label: None,
             value,
             data: EncaseStorageBuffer::new(vec![]),
-            buffer: None,
+            inner: None,
             usage: BufferUsages::COPY_DST | BufferUsages::STORAGE,
             is_dirty: false,
         }
@@ -48,8 +48,8 @@ impl<T: ShaderType> StorageBuffer<T> {
         self.data.as_ref().as_slice()
     }
 
-    pub fn buffer(&self) -> Option<&Buffer> {
-        self.buffer.as_ref()
+    pub fn inner(&self) -> Option<&Buffer> {
+        self.inner.as_ref()
     }
 
     pub fn is_dirty(&self) -> bool {
@@ -57,7 +57,7 @@ impl<T: ShaderType> StorageBuffer<T> {
     }
 
     pub fn binding(&self) -> Option<BindingResource> {
-        self.buffer.as_ref().map(|b| b.as_entire_binding())
+        self.inner.as_ref().map(|b| b.as_entire_binding())
     }
 }
 
@@ -68,7 +68,7 @@ impl<T: ShaderType + WriteInto> StorageBuffer<T> {
     }
 
     pub fn update(&mut self, device: &RenderDevice) {
-        match &self.buffer {
+        match &self.inner {
             Some(buffer) if self.is_dirty => {
                 self.data.write(&self.value).unwrap();
                 buffer.update(device, 0, self.data.as_ref());
@@ -78,7 +78,7 @@ impl<T: ShaderType + WriteInto> StorageBuffer<T> {
                 self.data.write(&self.value).unwrap();
                 let buffer =
                     Buffer::with_data(device, self.data.as_ref(), self.usage, self.label.clone());
-                self.buffer = Some(buffer);
+                self.inner = Some(buffer);
                 self.is_dirty = false;
             }
             _ => {}
@@ -89,7 +89,7 @@ impl<T: ShaderType + WriteInto> StorageBuffer<T> {
 pub struct StorageBufferArray<B: ShaderType> {
     label: Label,
     data: DynamicStorageBuffer<Vec<u8>>,
-    buffer: Option<Buffer>,
+    inner: Option<Buffer>,
     usage: BufferUsages,
     is_dirty: bool,
     _phantom: PhantomData<B>,
@@ -99,7 +99,7 @@ impl<B: ShaderType> StorageBufferArray<B> {
     pub fn new() -> Self {
         Self {
             label: None,
-            buffer: None,
+            inner: None,
             data: DynamicStorageBuffer::new(vec![]),
             usage: BufferUsages::COPY_DST | BufferUsages::STORAGE,
             is_dirty: false,
@@ -110,7 +110,7 @@ impl<B: ShaderType> StorageBufferArray<B> {
     pub fn with_alignment(alignment: u64) -> Self {
         Self {
             label: None,
-            buffer: None,
+            inner: None,
             data: DynamicStorageBuffer::new_with_alignment(vec![], alignment),
             usage: BufferUsages::COPY_DST | BufferUsages::STORAGE,
             is_dirty: false,
@@ -132,8 +132,8 @@ impl<B: ShaderType> StorageBufferArray<B> {
         &self.label
     }
 
-    pub fn buffer(&self) -> Option<&Buffer> {
-        self.buffer.as_ref()
+    pub fn inner(&self) -> Option<&Buffer> {
+        self.inner.as_ref()
     }
 
     pub fn data(&self) -> &[u8] {
@@ -157,7 +157,7 @@ impl<B: ShaderType> StorageBufferArray<B> {
     }
 
     pub fn binding(&self) -> Option<BindingResource> {
-        self.buffer.as_ref().map(|b| b.as_entire_binding())
+        self.inner.as_ref().map(|b| b.as_entire_binding())
     }
 }
 
@@ -180,7 +180,7 @@ impl<B: ShaderType + WriteInto> StorageBufferArray<B> {
     }
 
     pub fn update(&mut self, device: &RenderDevice) {
-        match &self.buffer {
+        match &self.inner {
             Some(buffer) => {
                 let capacity = buffer.size();
                 let size = self.data.as_ref().len() as u64;
@@ -192,7 +192,7 @@ impl<B: ShaderType + WriteInto> StorageBufferArray<B> {
                         self.usage,
                         self.label.clone(),
                     );
-                    self.buffer = Some(new_buffer);
+                    self.inner = Some(new_buffer);
                     self.is_dirty = false;
                 } else if self.is_dirty {
                     buffer.update(device, 0, self.data.as_ref());
@@ -202,7 +202,7 @@ impl<B: ShaderType + WriteInto> StorageBufferArray<B> {
             None => {
                 let buffer =
                     Buffer::with_data(device, self.data.as_ref(), self.usage, self.label.clone());
-                self.buffer = Some(buffer);
+                self.inner = Some(buffer);
                 self.is_dirty = false;
             }
         }
@@ -255,6 +255,10 @@ impl<B: BufferData> BatchedStorageBuffer<B> {
 
     pub fn size(&self) -> NonZero<u64> {
         self.batch.size()
+    }
+
+    pub fn inner(&self) -> Option<&Buffer> {
+        self.buffer.inner()
     }
 
     pub fn binding(&self) -> Option<BindingResource> {

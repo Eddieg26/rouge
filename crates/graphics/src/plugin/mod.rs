@@ -58,20 +58,14 @@ impl Plugin for RenderPlugin {
     fn finish(&mut self, game: &mut game::GameBuilder) {
         let extractors = game
             .remove_resource::<RenderResourceExtractors>()
-            .unwrap_or(RenderResourceExtractors::new());
+            .unwrap_or_default();
         game.sub_app_mut::<RenderApp>()
             .add_systems(Extract, extract_resources)
             .add_resource(extractors);
 
         if let Some(extractors) = game.remove_resource::<RenderAssetExtractors>() {
-            let systems = extractors.build();
             game.sub_app_mut::<RenderApp>()
-                .add_systems(Extract, systems);
-        }
-
-        if let Some(extractors) = game.remove_resource::<PipelineExtractors>() {
-            let app = game.sub_app_mut::<RenderApp>();
-            app.add_resource(extractors);
+                .add_systems(Extract, extractors.build());
         }
 
         match game.remove_resource::<RenderGraphBuilder>() {

@@ -1,7 +1,12 @@
+use hashbrown::HashMap;
+
 use super::{cell::WorldCell, World};
 use crate::{
     event::{Event, Events},
-    system::SystemArg,
+    system::{
+        schedule::{Phase, PhaseId},
+        SystemArg,
+    },
 };
 use std::sync::{Arc, Mutex};
 
@@ -24,6 +29,7 @@ impl<W: WorldAction> From<W> for WorldActionFn {
 #[derive(Default, Clone)]
 pub struct WorldActions {
     actions: Arc<Mutex<Vec<WorldActionFn>>>,
+    deferred: Arc<Mutex<HashMap<PhaseId, Vec<WorldActionFn>>>>,
 }
 
 impl WorldActions {
@@ -34,6 +40,14 @@ impl WorldActions {
             .push(WorldActionFn::from(action.into()));
     }
 
+    pub fn defer<P: Phase>(&mut self, action: impl Into<WorldActionFn>) {
+        let mut deferred = self.deferred.lock().unwrap();
+        deferred
+            .entry(PhaseId::of::<P>())
+            .or_insert(vec![])
+            .push(action.into());
+    }
+
     pub fn len(&self) -> usize {
         self.actions.lock().unwrap().len()
     }
@@ -42,13 +56,32 @@ impl WorldActions {
         self.actions.lock().unwrap().is_empty()
     }
 
-    pub fn extend(&self, mut actions: impl IntoIterator<Item= impl Into<WorldActionFn>>) {
+    pub fn extend(&self, actions: impl IntoIterator<Item = impl Into<WorldActionFn>>) {
         let mut list = self.actions.lock().unwrap();
         list.extend(actions.into_iter().map(|a| a.into()));
     }
 
-    pub fn take(&self) -> Vec<WorldActionFn> {
-        std::mem::take(&mut self.actions.lock().unwrap())
+    pub fn extend_deferred<P: Phase>(
+        &mut self,
+        actions: impl IntoIterator<Item = impl Into<WorldActionFn>>,
+    ) {
+        let mut deferred = self.deferred.lock().unwrap();
+        deferred
+            .entry(PhaseId::of::<P>())
+            .or_insert(vec![])
+            .extend(actions.into_iter().map(|a| a.into()));
+    }
+
+    pub fn take(&self, phase: Option<PhaseId>) -> Vec<WorldActionFn> {
+        let mut actions = phase
+            .map(|phase| {
+                let mut deferred = self.deferred.lock().unwrap();
+                deferred.remove(&phase).unwrap_or(vec![])
+            })
+            .unwrap_or_default();
+
+        actions.extend(self.actions.lock().unwrap().drain(..));
+        actions
     }
 }
 
@@ -57,6 +90,14 @@ impl SystemArg for &WorldActions {
 
     fn get<'a>(world: WorldCell<'a>) -> Self::Item<'a> {
         &world.get().actions
+    }
+}
+
+impl SystemArg for WorldActions {
+    type Item<'a> = Self;
+
+    fn get<'a>(world: WorldCell<'a>) -> Self::Item<'a> {
+        world.get().actions.clone()
     }
 }
 

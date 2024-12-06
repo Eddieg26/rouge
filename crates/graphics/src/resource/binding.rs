@@ -151,31 +151,35 @@ impl BindGroupLayoutBuilder {
     }
 
     pub fn build(self, device: &RenderDevice) -> BindGroupLayout {
-        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: None,
-            entries: &self.entries,
-        });
-
-        BindGroupLayout {
-            id: BindGroupLayoutId::new(),
-            layout: Arc::new(layout),
-        }
+        BindGroupLayout::create(device, &self.entries)
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct BindGroupLayout {
     id: BindGroupLayoutId,
-    layout: Arc<wgpu::BindGroupLayout>,
+    inner: Arc<wgpu::BindGroupLayout>,
 }
 
 impl BindGroupLayout {
+    pub fn create(device: &RenderDevice, entries: &[BindGroupLayoutEntry]) -> Self {
+        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: None,
+            entries,
+        });
+
+        BindGroupLayout {
+            id: BindGroupLayoutId::new(),
+            inner: Arc::new(layout),
+        }
+    }
+
     pub fn id(&self) -> BindGroupLayoutId {
         self.id
     }
 
     pub fn inner(&self) -> &wgpu::BindGroupLayout {
-        &self.layout
+        &self.inner
     }
 }
 
@@ -183,7 +187,7 @@ impl std::ops::Deref for BindGroupLayout {
     type Target = wgpu::BindGroupLayout;
 
     fn deref(&self) -> &Self::Target {
-        &self.layout
+        &self.inner
     }
 }
 
@@ -191,7 +195,7 @@ impl From<wgpu::BindGroupLayout> for BindGroupLayout {
     fn from(layout: wgpu::BindGroupLayout) -> Self {
         Self {
             id: BindGroupLayoutId::new(),
-            layout: Arc::new(layout),
+            inner: Arc::new(layout),
         }
     }
 }
@@ -259,7 +263,7 @@ impl<'a> std::ops::Deref for BindGroupEntries<'a> {
 #[derive(Debug, Clone)]
 pub struct BindGroup<D: Send + Sync + 'static = ()> {
     id: BindGroupId,
-    binding: Arc<wgpu::BindGroup>,
+    inner: Arc<wgpu::BindGroup>,
     data: D,
 }
 
@@ -278,7 +282,7 @@ impl<D: Send + Sync + 'static> BindGroup<D> {
 
         Self {
             id: BindGroupId::new(),
-            binding: Arc::new(binding),
+            inner: Arc::new(binding),
             data,
         }
     }
@@ -287,9 +291,8 @@ impl<D: Send + Sync + 'static> BindGroup<D> {
         self.id
     }
 
-    #[inline]
     pub fn inner(&self) -> &wgpu::BindGroup {
-        &self.binding
+        &self.inner
     }
 
     pub fn data(&self) -> &D {
@@ -305,7 +308,7 @@ impl From<wgpu::BindGroup> for BindGroup<()> {
     fn from(binding: wgpu::BindGroup) -> Self {
         Self {
             id: BindGroupId::new(),
-            binding: Arc::new(binding),
+            inner: Arc::new(binding),
             data: (),
         }
     }
@@ -315,7 +318,7 @@ impl<D: Send + Sync + Clone + 'static> std::ops::Deref for BindGroup<D> {
     type Target = wgpu::BindGroup;
 
     fn deref(&self) -> &Self::Target {
-        &self.binding
+        &self.inner
     }
 }
 

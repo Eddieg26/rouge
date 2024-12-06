@@ -174,6 +174,10 @@ impl RenderSurfaceTexture {
         let texture = self.0.take()?;
         Some(texture.present())
     }
+
+    pub fn destroy(&mut self) {
+        std::mem::drop(self.0.take());
+    }
 }
 
 impl Resource for RenderSurfaceTexture {}

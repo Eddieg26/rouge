@@ -279,7 +279,7 @@ impl RenderGraph {
                     RenderNodeAction::Flush => {
                         if !buffers.is_empty() {
                             device.queue.submit(buffers.drain(..));
-                            device.queue.on_submitted_work_done(|| {});
+                            // device.queue.on_submitted_work_done(|| {});
                         }
                     }
                 }

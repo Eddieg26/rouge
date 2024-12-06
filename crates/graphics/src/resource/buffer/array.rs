@@ -27,8 +27,8 @@ impl<B: BufferData> RenderBufferArray<B> {
 
     pub fn buffer(&self) -> Option<&Buffer> {
         match self {
-            Self::Uniform(buffer) => buffer.buffer(),
-            Self::Storage(buffer) => buffer.buffer(),
+            Self::Uniform(buffer) => buffer.inner(),
+            Self::Storage(buffer) => buffer.inner(),
         }
     }
 

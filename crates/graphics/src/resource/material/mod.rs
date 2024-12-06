@@ -5,11 +5,11 @@ use super::{
 use crate::{RenderAsset, RenderDevice, RenderResourceExtractor};
 use asset::{io::cache::LoadPath, AssetId};
 use ecs::{
-    core::{resource::Resource, IndexMap, Type},
+    core::{map::Entry, resource::Resource, IndexMap, Type},
     system::unlifetime::ReadRes,
 };
 use globals::GlobalLayout;
-use std::collections::HashSet;
+use std::{collections::HashSet, num::NonZeroU32};
 use wgpu::{BlendState, PrimitiveState, TextureFormat};
 
 pub mod globals;
@@ -48,10 +48,14 @@ pub trait MeshPipeline: Sized + Send + Sync + 'static {
     fn depth_write() -> DepthWrite {
         DepthWrite::On
     }
+
+    fn instances() -> Option<NonZeroU32> {
+        None
+    }
+
     fn primitive() -> PrimitiveState;
     fn attributes() -> Vec<VertexAttribute>;
     fn shader() -> impl Into<LoadPath>;
-
     fn bind_group_layout(&self) -> &BindGroupLayout;
 }
 
@@ -265,57 +269,6 @@ impl RenderAsset for MaterialInstance {
     type Id = AssetId;
 }
 
-pub struct MaterialLayout {
-    layout: BindGroupLayout,
-    dependencies: HashSet<AssetId>,
-}
-
-impl MaterialLayout {
-    pub fn new(layout: BindGroupLayout, dependency: AssetId) -> Self {
-        let mut dependencies = HashSet::new();
-        dependencies.insert(dependency);
-
-        Self {
-            layout,
-            dependencies,
-        }
-    }
-
-    pub fn layout(&self) -> &BindGroupLayout {
-        &self.layout
-    }
-
-    pub fn dependencies(&self) -> &HashSet<AssetId> {
-        &self.dependencies
-    }
-
-    pub fn add_dependency(&mut self, id: AssetId) {
-        self.dependencies.insert(id);
-    }
-
-    pub fn remove_dependency(&mut self, id: &AssetId) -> usize {
-        self.dependencies.remove(id);
-
-        self.dependencies.len()
-    }
-
-    pub fn clear_dependencies(&mut self) {
-        self.dependencies.clear();
-    }
-
-    pub fn has_dependencies(&self) -> bool {
-        !self.dependencies.is_empty()
-    }
-
-    pub fn len(&self) -> usize {
-        self.dependencies.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.dependencies.is_empty()
-    }
-}
-
 pub struct MaterialPipelineDesc<'a, M: Material> {
     pub format: TextureFormat,
     pub depth_format: Option<TextureFormat>,
@@ -326,59 +279,41 @@ pub struct MaterialPipelineDesc<'a, M: Material> {
     pub fragment_shader: &'a Shader,
 }
 
-pub struct MaterialLayouts {
-    layouts: IndexMap<MaterialType, MaterialLayout>,
+pub struct MaterialPipeline {
+    layout: BindGroupLayout,
+    pipeline: Option<RenderPipeline>,
+    dependencies: HashSet<AssetId>,
 }
 
-impl MaterialLayouts {
-    pub fn new() -> Self {
+impl MaterialPipeline {
+    pub fn create<M: Material>(device: &RenderDevice) -> Self {
         Self {
-            layouts: IndexMap::new(),
+            layout: M::bind_group_layout(device),
+            pipeline: None,
+            dependencies: HashSet::new(),
         }
     }
 
-    pub fn get(&self, ty: &MaterialType) -> Option<&MaterialLayout> {
-        self.layouts.get(ty)
+    pub fn with_dependency(mut self, id: AssetId) -> Self {
+        self.dependencies.insert(id);
+        self
     }
 
-    pub fn has(&self, ty: &MaterialType) -> bool {
-        self.layouts.contains_key(ty)
+    pub fn layout(&self) -> &BindGroupLayout {
+        &self.layout
     }
 
-    pub fn add<M: Material>(&mut self, device: &RenderDevice, id: AssetId) -> BindGroupLayout {
-        let ty = MaterialType::of::<M>();
-        let layout = M::bind_group_layout(device);
-        self.layouts
-            .insert(ty, MaterialLayout::new(layout.clone(), id));
-
-        layout
+    pub fn pipeline(&self) -> Option<&RenderPipeline> {
+        self.pipeline.as_ref()
     }
 
-    pub fn add_dependency(&mut self, ty: &MaterialType, id: AssetId) {
-        if let Some(pipeline) = self.layouts.get_mut(ty) {
-            pipeline.add_dependency(id);
-        }
-    }
-
-    pub fn remove_dependency(&mut self, ty: &MaterialType, id: &AssetId) -> bool {
-        let remove = if let Some(pipeline) = self.layouts.get_mut(ty) {
-            pipeline.remove_dependency(id) == 0
-        } else {
-            false
-        };
-
-        if remove {
-            self.layouts.shift_remove(ty);
-        }
-
-        remove
+    pub fn dependencies(&self) -> &HashSet<AssetId> {
+        &self.dependencies
     }
 }
-
-impl Resource for MaterialLayouts {}
 
 pub struct MaterialPipelines {
-    pipelines: IndexMap<MaterialType, RenderPipeline>,
+    pipelines: IndexMap<MaterialType, MaterialPipeline>,
 }
 
 impl MaterialPipelines {
@@ -388,15 +323,35 @@ impl MaterialPipelines {
         }
     }
 
-    pub fn get(&self, ty: &MaterialType) -> Option<&RenderPipeline> {
-        self.pipelines.get(ty)
+    pub fn get(&self, ty: MaterialType) -> Option<&MaterialPipeline> {
+        self.pipelines.get(&ty)
     }
 
-    pub fn add<M: Material>(
+    pub fn has(&self, ty: MaterialType) -> bool {
+        self.pipelines.contains_key(&ty)
+    }
+
+    pub fn create_layout<M: Material>(
+        &mut self,
+        device: &RenderDevice,
+        id: AssetId,
+    ) -> BindGroupLayout {
+        match self.pipelines.entry(MaterialType::of::<M>()) {
+            Entry::Occupied(mut entry) => {
+                entry.get_mut().dependencies.insert(id);
+                entry.get().layout().clone()
+            }
+            Entry::Vacant(entry) => entry
+                .insert(MaterialPipeline::create::<M>(device).with_dependency(id))
+                .layout()
+                .clone(),
+        }
+    }
+
+    pub fn create_pipeline<M: Material>(
         &mut self,
         device: &RenderDevice,
         desc: MaterialPipelineDesc<M>,
-        material_layout: &MaterialLayout,
     ) {
         let MaterialPipelineDesc {
             format,
@@ -410,10 +365,17 @@ impl MaterialPipelines {
 
         let ty = MaterialType::of::<M>();
 
+        let pipeline = self
+            .pipelines
+            .entry(ty)
+            .or_insert(MaterialPipeline::create::<M>(device));
+
+        let material_layout = pipeline.layout.clone();
+
         let mut layouts = vec![
             global_layout.inner(),
             mesh.bind_group_layout(),
-            material_layout.layout(),
+            &material_layout,
         ];
 
         let vertex = VertexState {
@@ -423,6 +385,7 @@ impl MaterialPipelines {
                 &M::Pipeline::attributes(),
                 wgpu::VertexStepMode::Vertex,
             )],
+            instances: M::Pipeline::instances(),
         };
 
         let fragment = FragmentState {
@@ -458,12 +421,27 @@ impl MaterialPipelines {
             multisample: Default::default(),
         };
 
-        self.pipelines
-            .insert(ty, RenderPipeline::create(device, desc));
+        pipeline.pipeline = Some(RenderPipeline::create(device, desc));
     }
 
-    pub fn remove(&mut self, ty: &MaterialType) {
-        self.pipelines.shift_remove(ty);
+    pub fn add_dependency(&mut self, ty: MaterialType, id: AssetId) {
+        if let Some(pipeline) = self.pipelines.get_mut(&ty) {
+            pipeline.dependencies.insert(id);
+        }
+    }
+
+    pub fn remove_dependency(&mut self, ty: MaterialType, id: &AssetId) -> bool {
+        match self.pipelines.get_mut(&ty) {
+            Some(pipeline) => {
+                pipeline.dependencies.remove(id);
+                pipeline.dependencies.is_empty()
+            }
+            None => false,
+        }
+    }
+
+    pub fn remove(&mut self, ty: MaterialType) -> Option<MaterialPipeline> {
+        self.pipelines.swap_remove(&ty)
     }
 }
 

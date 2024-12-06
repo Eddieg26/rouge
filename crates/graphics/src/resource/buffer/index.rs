@@ -75,7 +75,7 @@ impl<I: Index> std::ops::Deref for Indices<I> {
 }
 
 pub struct IndexBuffer<I: Index> {
-    buffer: Buffer,
+    inner: Buffer,
     len: u64,
     _marker: PhantomData<I>,
 }
@@ -91,20 +91,20 @@ impl<I: Index> IndexBuffer<I> {
         let buffer = Buffer::with_data(device, data, usage, label);
 
         Self {
-            buffer,
+            inner: buffer,
             len: indices.len() as u64,
             _marker: Default::default(),
         }
     }
 
-    pub fn buffer(&self) -> &Buffer {
-        &self.buffer
+    pub fn inner(&self) -> &Buffer {
+        &self.inner
     }
 
     pub fn slice<S: RangeBounds<u64>>(&self, bounds: S) -> IndexSlice {
         IndexSlice {
             format: I::format(),
-            slice: self.buffer.slice(bounds),
+            slice: self.inner.slice(bounds),
         }
     }
 
@@ -113,12 +113,12 @@ impl<I: Index> IndexBuffer<I> {
     }
 
     pub fn resize(&mut self, device: &RenderDevice, size: u64) {
-        self.buffer.resize(device, size);
+        self.inner.resize(device, size);
     }
 
     pub fn update(&mut self, device: &RenderDevice, offset: u64, indices: &Indices<I>) {
         let data = bytemuck::cast_slice(indices);
-        self.buffer.update(device, offset, data);
+        self.inner.update(device, offset, data);
     }
 }
 

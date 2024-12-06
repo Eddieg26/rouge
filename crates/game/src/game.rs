@@ -484,30 +484,27 @@ impl<'a> FrameworkContext<'a> {
 
     pub fn add_sub_app<A: AppTag>(&mut self) -> &mut App {
         match &mut self.inner {
-            FrameworkContextInner::Game(game) => {
-                let game = std::ptr::addr_of!(game) as *mut GameBuilder;
-                let game = unsafe { &mut *game };
-                let app = game.add_sub_app::<A>();
-                app
-            }
+            FrameworkContextInner::Game(game) => unsafe {
+                let game_ptr: *mut GameBuilder = *game;
+                let game: &mut GameBuilder = &mut *game_ptr;
+                game.add_sub_app::<A>()
+            },
             FrameworkContextInner::App(_) => panic!("Cannot add sub app to sub app"),
         }
     }
 
     pub fn sub_app_mut<A: AppTag>(&mut self) -> &mut Self {
-        let app = match &mut self.inner {
-            FrameworkContextInner::Game(game) => {
-                let game = std::ptr::addr_of!(game) as *mut GameBuilder;
-                let game = unsafe { &mut *game };
+        let mut inner = match &mut self.inner {
+            FrameworkContextInner::Game(game) => unsafe {
+                let game_ptr: *mut GameBuilder = *game;
+                let game: &mut GameBuilder = &mut *game_ptr;
                 let app = game.sub_app_mut::<A>();
-                Some(app)
-            }
-            FrameworkContextInner::App(_) => None,
+                FrameworkContextInner::App(app)
+            },
+            FrameworkContextInner::App(_) => panic!("Cannot add sub app to sub app"),
         };
 
-        if let Some(app) = app {
-            self.inner = FrameworkContextInner::App(app);
-        }
+        std::mem::swap(&mut inner, &mut self.inner);
 
         self
     }

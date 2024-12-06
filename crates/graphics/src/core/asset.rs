@@ -402,6 +402,7 @@ impl ResourceExtractor {
     }
 }
 
+#[derive(Default)]
 pub struct RenderResourceExtractors {
     extractors: IndexMap<ResourceId, ResourceExtractor>,
 }

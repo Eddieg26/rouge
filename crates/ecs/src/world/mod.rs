@@ -295,7 +295,7 @@ impl World {
     }
 
     pub fn flush(&mut self, phase: Option<PhaseId>) {
-        let mut actions = self.actions.take();
+        let mut actions = self.actions.take(phase);
         let mut invoked = self.take_invoked(phase);
         while !actions.is_empty() || !invoked.is_empty() {
             actions.drain(..).for_each(|a| a.execute(self));
@@ -304,7 +304,7 @@ impl World {
             self.observers.run(WorldCell::from(self as &Self), invoked);
 
             invoked = self.take_invoked(phase);
-            actions = self.actions.take();
+            actions = self.actions.take(phase);
         }
     }
 
@@ -407,16 +407,16 @@ impl World {
 }
 
 pub mod id {
-    use std::sync::atomic::AtomicU32;
-
-    pub static mut WORLD_ID: AtomicU32 = AtomicU32::new(0);
-
     #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
     pub struct WorldId(u32);
 
     impl WorldId {
         pub fn new() -> Self {
-            let id = unsafe { WORLD_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed) };
+            use core::sync::atomic::AtomicU32;
+
+            static CURRENT_ID: AtomicU32 = AtomicU32::new(0);
+
+            let id = CURRENT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             Self(id)
         }
     }

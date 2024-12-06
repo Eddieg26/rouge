@@ -84,11 +84,6 @@ fn main() {
         .add_systems(PostInit, |db: Res<AssetDatabase>| {
             db.load(["basic://assets/embedded.txt"]);
         })
-        .observe::<ImportError, _>(|errors: Res<Events<ImportError>>| {
-            for error in errors.iter() {
-                println!("Import Error: {:?}", error);
-            }
-        })
         .run();
 }
 

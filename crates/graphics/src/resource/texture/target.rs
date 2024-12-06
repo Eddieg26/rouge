@@ -1,20 +1,22 @@
+use super::{FilterMode, Texture, TextureDimension, TextureFormat, WrapMode};
 use crate::{
     core::{RenderAsset, RenderAssetExtractor, RenderAssets, RenderDevice},
     resource::{
         texture::{
-            render::RenderTargetTexture,
             sampler::{Sampler, SamplerDesc},
-            RenderTexture, Texture, TextureFormat,
+            RenderTexture,
         },
         Id,
     },
 };
-use asset::AssetId;
+use asset::{Asset, AssetId};
 use ecs::{
     event::{Event, Events},
     system::unlifetime::{ReadRes, WriteRes},
     world::action::WorldAction,
 };
+use std::ops::Range;
+use wgpu::TextureUsages;
 
 pub struct RenderTarget {
     pub width: u32,
@@ -102,5 +104,84 @@ impl Event for ResizeRenderGraph {}
 impl WorldAction for ResizeRenderGraph {
     fn execute(self, world: &mut ecs::world::World) -> Option<()> {
         Some(world.resource_mut::<Events<Self>>().add(self))
+    }
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Asset)]
+pub struct RenderTargetTexture {
+    width: u32,
+    height: u32,
+    format: TextureFormat,
+    filter_mode: FilterMode,
+    wrap_mode: WrapMode,
+    pixels: Vec<u8>,
+    faces: [super::TextureFace; 1],
+}
+
+impl RenderTargetTexture {
+    pub fn new(
+        width: u32,
+        height: u32,
+        format: TextureFormat,
+        filter_mode: FilterMode,
+        wrap_mode: WrapMode,
+    ) -> Self {
+        let faces = [super::TextureFace::new(0, 0)];
+
+        Self {
+            wrap_mode,
+            height,
+            format,
+            filter_mode,
+            width,
+            pixels: Vec::new(),
+            faces,
+        }
+    }
+}
+
+impl Texture for RenderTargetTexture {
+    fn width(&self) -> u32 {
+        self.width
+    }
+
+    fn height(&self) -> u32 {
+        self.height
+    }
+
+    fn depth(&self) -> u32 {
+        1
+    }
+
+    fn format(&self) -> TextureFormat {
+        self.format
+    }
+
+    fn dimension(&self) -> TextureDimension {
+        TextureDimension::D2
+    }
+
+    fn filter_mode(&self) -> FilterMode {
+        self.filter_mode
+    }
+
+    fn wrap_mode(&self) -> WrapMode {
+        self.wrap_mode
+    }
+
+    fn mipmaps(&self) -> bool {
+        false
+    }
+
+    fn usage(&self) -> TextureUsages {
+        TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING
+    }
+
+    fn faces(&self) -> &[super::TextureFace] {
+        &self.faces
+    }
+
+    fn pixels(&self, range: Range<usize>) -> &[u8] {
+        &self.pixels[range]
     }
 }

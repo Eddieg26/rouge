@@ -6,7 +6,6 @@ use crate::{
 use std::{ops::Range, sync::Arc};
 
 pub mod fallbacks;
-pub mod render;
 pub mod sampler;
 pub mod target;
 pub mod texture1d;
@@ -15,7 +14,6 @@ pub mod texture3d;
 pub mod texture_cube;
 
 pub use fallbacks::*;
-pub use render::*;
 pub use sampler::*;
 pub use target::*;
 pub use texture1d::*;

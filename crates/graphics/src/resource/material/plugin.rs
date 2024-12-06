@@ -1,12 +1,11 @@
 use super::{
     globals::{GlobalLayout, Globals},
-    Material, MaterialInstance, MaterialLayouts, MaterialMetadata, MaterialPipelines,
-    MeshPipelineData,
+    Material, MaterialInstance, MaterialMetadata, MaterialPipelines, MeshPipelineData,
 };
 use crate::{
     plugin::{RenderApp, RenderAppExt, RenderPlugin},
     resource::{
-        extract::PipelineExtractor,
+        extract::{ExtractPipeline, PipelineExtractor},
         material::{MeshPipeline, Metadata},
         MaterialPipelineDesc, MaterialType, Shader, ShaderSource,
     },
@@ -15,8 +14,8 @@ use crate::{
 };
 use asset::{database::AssetDatabase, io::cache::LoadPath, plugin::AssetExt};
 use ecs::{
-    event::{Event, Events},
     system::unlifetime::{ReadRes, WriteRes},
+    world::action::WorldActions,
 };
 use game::{GameBuilder, Main, Plugin};
 
@@ -44,10 +43,6 @@ impl<M: Material> Plugin for MaterialPlugin<M> {
     }
 
     fn start(&mut self, game: &mut GameBuilder) {
-        if !game.has_resource::<MaterialPipelines>() {
-            game.add_resource(MaterialPipelines::new());
-        }
-
         game.add_render_asset_extractor::<M>()
             .add_render_resource_extractor::<GlobalLayout>()
             .add_render_resource_extractor::<MaterialMetadata<M::Meta>>()
@@ -57,33 +52,13 @@ impl<M: Material> Plugin for MaterialPlugin<M> {
             .register_asset::<M>()
             .load_asset::<ShaderSource>(M::shader())
             .load_asset::<ShaderSource>(M::Pipeline::shader());
-    }
 
-    fn finish(&mut self, game: &mut GameBuilder) {
         let app = game.sub_app_mut::<RenderApp>();
-        if !app.has_resource::<MaterialLayouts>() {
-            app.add_resource(MaterialLayouts::new());
-        }
-
-        app.register_event::<ModifyMaterialType<M>>();
-    }
-}
-
-pub struct ModifyMaterialType<M: Material> {
-    pub remove: bool,
-    _marker: std::marker::PhantomData<M>,
-}
-
-impl<M: Material> ModifyMaterialType<M> {
-    pub fn new(remove: bool) -> Self {
-        Self {
-            remove,
-            _marker: std::marker::PhantomData,
+        if !app.has_resource::<MaterialPipelines>() {
+            app.add_resource(MaterialPipelines::new());
         }
     }
 }
-
-impl<M: Material> Event for ModifyMaterialType<M> {}
 
 impl<M: Material> PipelineExtractor for M {
     type Arg = (
@@ -91,7 +66,6 @@ impl<M: Material> PipelineExtractor for M {
         ReadRes<GlobalLayout>,
         ReadRes<MeshPipelineData<M::Pipeline>>,
         ReadRes<MaterialMetadata<M::Meta>>,
-        ReadRes<MaterialLayouts>,
         WriteRes<MaterialPipelines>,
         Main<'static, ReadRes<AssetDatabase>>,
     );
@@ -108,11 +82,7 @@ impl<M: Material> PipelineExtractor for M {
         shaders: &RenderAssets<Shader>,
         arg: &mut ecs::system::ArgItem<Self::Arg>,
     ) {
-        let (surface, global_layout, surface_pipeline, metadata, layouts, pipelines, database) =
-            arg;
-
-        let ty = MaterialType::of::<M>();
-        let layout = layouts.get(&ty).unwrap();
+        let (surface, global_layout, surface_pipeline, metadata, pipelines, database) = arg;
 
         let vertex_shader = match M::Pipeline::shader().into() {
             LoadPath::Id(id) => shaders.get(&id.into()).unwrap(),
@@ -142,17 +112,13 @@ impl<M: Material> PipelineExtractor for M {
             fragment_shader,
         };
 
-        println!(
-            "Creating pipeline for material: {}",
-            std::any::type_name::<M>()
-        );
-        pipelines.add::<M>(device, desc, layout);
+        pipelines.create_pipeline::<M>(device, desc);
     }
 
     fn remove_pipeline(arg: &mut ecs::system::ArgItem<Self::Arg>) {
-        let (_, _, _, _, _, pipelines, _) = arg;
+        let (_, _, _, _, pipelines, _) = arg;
 
-        pipelines.remove(&MaterialType::of::<M>());
+        pipelines.remove(MaterialType::of::<M>());
     }
 }
 
@@ -161,8 +127,8 @@ impl<M: Material> RenderAssetExtractor for M {
     type Asset = MaterialInstance;
     type Arg = (
         ReadRes<RenderDevice>,
-        WriteRes<MaterialLayouts>,
-        WriteRes<Events<ModifyMaterialType<M>>>,
+        WriteRes<MaterialPipelines>,
+        Main<'static, WorldActions>,
         M::Arg,
     );
 
@@ -171,20 +137,17 @@ impl<M: Material> RenderAssetExtractor for M {
         source: &mut Self::Source,
         arg: &mut ecs::system::ArgItem<Self::Arg>,
     ) -> Result<Self::Asset, crate::ExtractError> {
-        let (device, layouts, events, material_arg) = arg;
+        let (device, pipelines, events, material_arg) = arg;
 
         let ty = MaterialType::of::<M>();
-        let layout = match layouts.get(&ty) {
-            Some(layout) => layout.layout().clone(),
-            None => layouts.add::<M>(device, *id),
-        };
+        let layout = pipelines.create_layout::<M>(device, *id);
 
         let binding = match source.bind_group(device, &layout, material_arg) {
             Ok(binding) => binding,
             Err(error) => return Err(error.into()),
         };
 
-        events.add(ModifyMaterialType::new(false));
+        events.add(ExtractPipeline::<M>::new());
 
         let instance = MaterialInstance {
             ty,
@@ -201,11 +164,11 @@ impl<M: Material> RenderAssetExtractor for M {
         assets: &mut crate::RenderAssets<Self::Asset>,
         arg: &mut ecs::system::ArgItem<Self::Arg>,
     ) {
-        let (_, layouts, events, _) = arg;
+        let (_, layouts, _, _) = arg;
 
         if let Some(instance) = assets.remove(id) {
-            if layouts.remove_dependency(&instance.ty, id) {
-                events.add(ModifyMaterialType::new(true));
+            if layouts.remove_dependency(instance.ty, id) {
+                layouts.remove(instance.ty);
             }
         }
     }

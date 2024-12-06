@@ -1,11 +1,10 @@
-use std::sync::Arc;
-
 use super::{FilterMode, WrapMode};
 use crate::{
     resource::Id,
     wgpu::{CompareFunction, SamplerBorderColor},
     RenderAsset,
 };
+use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SamplerDesc<'a> {

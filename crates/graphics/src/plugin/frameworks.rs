@@ -1,3 +1,4 @@
+use super::phases::{PostExtract, PostRender};
 use crate::plugin::phases::{PreRender, Present, Render};
 use crate::renderer::RenderGraphBuilder;
 use crate::resource::extract::PipelineExtractors;
@@ -29,7 +30,6 @@ use pollster::block_on;
 use window::events::{WindowCreated, WindowResized};
 use window::Window;
 
-use super::phases::{PostExtract, PostRender};
 pub struct RenderApp;
 
 impl AppTag for RenderApp {
@@ -102,18 +102,23 @@ impl Framework for ResizeFramework {
 }
 
 impl ResizeFramework {
-    fn extract_resize_events(events: Res<Events<WindowResized>>, actions: SubActions<RenderApp>) {
-        actions.add(BatchEvents::new(events.iter().copied()));
+    fn extract_resize_events(
+        events: Res<Events<WindowResized>>,
+        mut actions: SubActions<RenderApp>,
+    ) {
+        actions.defer::<Extract>(BatchEvents::new(events.iter().copied()));
     }
 
     fn on_window_resized(
         events: Res<Events<WindowResized>>,
         device: Res<RenderDevice>,
         mut surface: ResMut<RenderSurface>,
+        mut texture: ResMut<RenderSurfaceTexture>,
         mut targets: ResMut<RenderAssets<RenderTarget>>,
         mut updates: ResMut<Events<ResizeRenderGraph>>,
     ) {
         if let Some(event) = events.last() {
+            texture.destroy();
             surface.resize(&device, event.size.width, event.size.height);
 
             if let Some(target) = targets.get_mut(&RenderSurface::ID) {

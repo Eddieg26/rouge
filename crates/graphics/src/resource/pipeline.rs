@@ -1,9 +1,9 @@
-use super::{binding::BindGroupLayout, mesh::MeshAttributeKind, shader::Shader, AtomicId, Handle};
+use super::{binding::BindGroupLayout, mesh::MeshAttributeKind, shader::Shader, AtomicId};
 use crate::{
     wgpu::{ColorTargetState, DepthStencilState, MultisampleState, PrimitiveState, VertexStepMode},
-    RenderAssets, RenderDevice,
+    RenderDevice,
 };
-use std::{borrow::Cow, num::NonZeroU32};
+use std::num::NonZeroU32;
 
 pub type RenderPipelineId = AtomicId<RenderPipeline>;
 
@@ -65,8 +65,7 @@ impl RenderPipeline {
             None => None,
         };
 
-        let instances = vertex_shader.meta().and_then(|m| m.instances());
-
+        let instances = desc.vertex.instances;
         let desc = wgpu::RenderPipelineDescriptor {
             label: desc.label,
             layout: layout.as_ref(),
@@ -143,6 +142,7 @@ pub struct VertexState<'a> {
     pub shader: &'a Shader,
     pub entry: &'a str,
     pub buffers: Vec<VertexBufferLayout>,
+    pub instances: Option<NonZeroU32>,
 }
 
 pub struct FragmentState<'a> {
@@ -161,21 +161,22 @@ pub struct RenderPipelineDesc<'a> {
     pub multisample: MultisampleState,
 }
 
+pub type ComputePipelineId = AtomicId<ComputePipeline>;
+
 pub struct ComputePipelineDesc<'a> {
     pub label: Option<&'a str>,
     pub layout: Option<&'a [&'a BindGroupLayout]>,
-    pub shader: Handle<Shader>,
-    pub entry: Cow<'static, str>,
+    pub shader: &'a Shader,
+    pub entry: &'a str,
 }
 
-pub struct ComputePipeline(wgpu::ComputePipeline);
+pub struct ComputePipeline {
+    id: ComputePipelineId,
+    inner: wgpu::ComputePipeline,
+}
 
 impl ComputePipeline {
-    pub fn create(
-        device: &RenderDevice,
-        desc: ComputePipelineDesc,
-        shaders: &RenderAssets<Shader>,
-    ) -> Option<Self> {
+    pub fn create(device: &RenderDevice, desc: ComputePipelineDesc) -> Self {
         let layout = desc.layout.map(|layout| {
             let layout = layout
                 .iter()
@@ -188,21 +189,27 @@ impl ComputePipeline {
             })
         });
 
-        let shader = match &desc.shader {
-            Handle::Ref(id) => shaders.get(id)?,
-            Handle::Owned(shader) => shader,
-        };
-
         let desc = wgpu::ComputePipelineDescriptor {
             label: desc.label,
             layout: layout.as_ref(),
-            module: shader.module(),
+            module: &desc.shader,
             entry_point: Some(&desc.entry),
             compilation_options: Default::default(),
             cache: None,
         };
 
-        Some(ComputePipeline(device.create_compute_pipeline(&desc)))
+        ComputePipeline {
+            id: ComputePipelineId::new(),
+            inner: device.create_compute_pipeline(&desc),
+        }
+    }
+
+    pub fn id(&self) -> ComputePipelineId {
+        self.id
+    }
+
+    pub fn inner(&self) -> &wgpu::ComputePipeline {
+        &self.inner
     }
 }
 
@@ -210,13 +217,16 @@ impl std::ops::Deref for ComputePipeline {
     type Target = wgpu::ComputePipeline;
 
     fn deref(&self) -> &Self::Target {
-        &self.0
+        &self.inner
     }
 }
 
 impl From<wgpu::ComputePipeline> for ComputePipeline {
-    fn from(pipeline: wgpu::ComputePipeline) -> Self {
-        Self(pipeline)
+    fn from(inner: wgpu::ComputePipeline) -> Self {
+        Self {
+            id: ComputePipelineId::new(),
+            inner,
+        }
     }
 }
 
@@ -232,6 +242,7 @@ pub mod extract {
             World,
         },
     };
+    use game::MainWorld;
     use std::collections::{hash_map::Entry, HashMap};
     use wgpu::ShaderStages;
 
@@ -328,6 +339,14 @@ pub mod extract {
                 shaders: HashMap::new(),
                 actions: IndexMap::new(),
             }
+        }
+
+        pub fn extractor(&self, ty: Type) -> Option<&PipelineExtractorState> {
+            self.extractors.get(&ty)
+        }
+
+        pub fn extractor_mut(&mut self, ty: Type) -> Option<&mut PipelineExtractorState> {
+            self.extractors.get_mut(&ty)
         }
 
         pub fn add_extractor<P: PipelineExtractor>(&mut self) {
@@ -431,10 +450,19 @@ pub mod extract {
                 WorldKind::Main => Some(world.resource_mut::<PipelineExtractors>().extract::<P>()),
                 WorldKind::Sub => {
                     let world = unsafe { world.cell() };
-                    let device = world.resource::<RenderDevice>();
-                    let shaders = world.resource::<RenderAssets<Shader>>();
-                    let mut arg = P::Arg::get(world);
-                    Some(P::extract_pipeline(&device, &shaders, &mut arg))
+                    let mut main_world = world.try_resource_mut::<MainWorld>()?;
+                    let extractor = main_world
+                        .resource_mut::<PipelineExtractors>()
+                        .extractor_mut(Type::of::<P>())?;
+
+                    if extractor.are_shaders_loaded() {
+                        let device = world.resource::<RenderDevice>();
+                        let shaders = world.resource::<RenderAssets<Shader>>();
+                        let mut arg = P::Arg::get(world);
+                        Some(P::extract_pipeline(&device, &shaders, &mut arg))
+                    } else {
+                        Some(extractor.action = Some(PipelineAction::Extract))
+                    }
                 }
             }
         }

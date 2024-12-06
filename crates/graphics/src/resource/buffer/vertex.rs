@@ -6,7 +6,7 @@ use wgpu::BufferUsages;
 pub trait Vertex: Pod + Zeroable + 'static {}
 
 pub struct VertexBuffer {
-    buffer: Buffer,
+    inner: Buffer,
     len: u64,
 }
 
@@ -21,11 +21,11 @@ impl VertexBuffer {
         let buffer = Buffer::with_data(device, data, usage | BufferUsages::VERTEX, label);
         let len = vertices.len() as u64;
 
-        Self { buffer, len }
+        Self { inner: buffer, len }
     }
 
-    pub fn buffer(&self) -> &Buffer {
-        &self.buffer
+    pub fn inner(&self) -> &Buffer {
+        &self.inner
     }
 
     pub fn len(&self) -> u64 {
@@ -33,11 +33,11 @@ impl VertexBuffer {
     }
 
     pub fn resize(&mut self, device: &RenderDevice, size: u64) {
-        self.buffer.resize(device, size);
+        self.inner.resize(device, size);
     }
 
     pub fn update<V: Vertex>(&mut self, device: &RenderDevice, offset: u64, vertices: &[V]) {
         let data = bytemuck::cast_slice(vertices);
-        self.buffer.update(device, offset, data);
+        self.inner.update(device, offset, data);
     }
 }

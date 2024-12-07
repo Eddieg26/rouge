@@ -42,8 +42,25 @@ pub enum DepthWrite {
     Off,
 }
 
-pub trait MeshPipeline: Sized + Send + Sync + 'static {
+pub trait MeshPipelineData: Resource + Send + 'static {
     fn new(device: &RenderDevice) -> Self;
+    fn bind_group_layout(&self) -> &BindGroupLayout;
+}
+
+impl<M: MeshPipelineData> RenderResourceExtractor for M {
+    type Arg = ReadRes<RenderDevice>;
+
+    fn can_extract(world: &ecs::world::World) -> bool {
+        world.has_resource::<RenderDevice>()
+    }
+
+    fn extract(arg: ecs::system::ArgItem<Self::Arg>) -> Result<Self, crate::ExtractError> {
+        Ok(Self::new(&arg))
+    }
+}
+
+pub trait MeshPipeline: Send + Sync + 'static {
+    type Data: MeshPipelineData;
 
     fn depth_write() -> DepthWrite {
         DepthWrite::On
@@ -56,50 +73,9 @@ pub trait MeshPipeline: Sized + Send + Sync + 'static {
     fn primitive() -> PrimitiveState;
     fn attributes() -> Vec<VertexAttribute>;
     fn shader() -> impl Into<LoadPath>;
-    fn bind_group_layout(&self) -> &BindGroupLayout;
 }
 
-pub struct MeshPipelineData<M: MeshPipeline> {
-    data: M,
-}
-
-impl<M: MeshPipeline> MeshPipelineData<M> {
-    pub fn new(device: &RenderDevice) -> Self {
-        Self {
-            data: M::new(device),
-        }
-    }
-}
-
-impl<M: MeshPipeline> std::ops::Deref for MeshPipelineData<M> {
-    type Target = M;
-
-    fn deref(&self) -> &Self::Target {
-        &self.data
-    }
-}
-
-impl<M: MeshPipeline> std::ops::DerefMut for MeshPipelineData<M> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.data
-    }
-}
-
-impl<M: MeshPipeline> Resource for MeshPipelineData<M> {}
-
-impl<M: MeshPipeline> RenderResourceExtractor for MeshPipelineData<M> {
-    type Arg = ReadRes<RenderDevice>;
-
-    fn can_extract(world: &ecs::world::World) -> bool {
-        world.has_resource::<RenderDevice>()
-    }
-
-    fn extract(arg: ecs::system::ArgItem<Self::Arg>) -> Result<Self, crate::ExtractError> {
-        Ok(Self::new(&arg))
-    }
-}
-
-pub trait Metadata: Sized + Send + Sync + 'static {
+pub trait Metadata: Send + Sync + 'static {
     fn new(device: &RenderDevice) -> Self;
     fn label() -> Option<&'static str>;
     fn model() -> ShaderModel;
@@ -273,7 +249,7 @@ pub struct MaterialPipelineDesc<'a, M: Material> {
     pub format: TextureFormat,
     pub depth_format: Option<TextureFormat>,
     pub global_layout: &'a GlobalLayout,
-    pub mesh: &'a M::Pipeline,
+    pub mesh: &'a <M::Pipeline as MeshPipeline>::Data,
     pub metadata: &'a M::Meta,
     pub vertex_shader: &'a Shader,
     pub fragment_shader: &'a Shader,

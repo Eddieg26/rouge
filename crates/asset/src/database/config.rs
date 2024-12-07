@@ -303,7 +303,7 @@ impl<'a> AssetMetaHandle<'a> {
         &'a self,
         path: &'a AssetPath,
         source: &'a AssetSource,
-    ) -> AssetFuture<Vec<Artifact>, ImportError> {
+    ) -> AssetFuture<'a, Vec<Artifact>, ImportError> {
         (self.meta.importers[self.index])(path, source)
     }
 
@@ -313,7 +313,7 @@ impl<'a> AssetMetaHandle<'a> {
         path: &'a AssetPath,
         source: &'a AssetSource,
         cache: &'a AssetCache,
-    ) -> Option<AssetFuture<Artifact>> {
+    ) -> Option<AssetFuture<'a, Artifact>> {
         self.meta.process(id, path, source, cache)
     }
 }

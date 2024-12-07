@@ -144,6 +144,10 @@ impl<A: Asset> RenderAssetActions<A> {
         self.actions.retain(&mut f);
     }
 
+    pub fn len(&self) -> usize {
+        self.actions.len()
+    }
+
     pub fn clear(&mut self) {
         self.actions.clear();
     }

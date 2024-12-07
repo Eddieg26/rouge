@@ -181,6 +181,10 @@ impl<'a, R: Resource> Res<'a, R> {
     pub fn new(ptr: &'a R) -> Self {
         Self { ptr }
     }
+
+    pub fn value(&self) -> &R {
+        &self.ptr
+    }
 }
 
 impl<'a, R: Resource> std::ops::Deref for Res<'a, R> {

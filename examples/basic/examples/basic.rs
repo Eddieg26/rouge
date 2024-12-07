@@ -23,7 +23,7 @@ use graphics::{
     },
     resource::{
         plugin::MaterialAppExt, BindGroupLayout, BindGroupLayoutBuilder, BlendMode, Material,
-        MeshPipeline, ShaderSource, Unlit, VertexAttribute,
+        MeshPipeline, MeshPipelineData, ShaderSource, Unlit, VertexAttribute,
     },
     wgpu::{PrimitiveState, ShaderStages},
     CreateBindGroup,
@@ -91,7 +91,7 @@ pub struct BasicMeshPipeline {
     layout: BindGroupLayout,
 }
 
-impl MeshPipeline for BasicMeshPipeline {
+impl MeshPipelineData for BasicMeshPipeline {
     fn new(device: &graphics::RenderDevice) -> Self {
         let layout = BindGroupLayoutBuilder::new()
             .with_uniform_buffer(
@@ -106,6 +106,14 @@ impl MeshPipeline for BasicMeshPipeline {
         Self { layout }
     }
 
+    fn bind_group_layout(&self) -> &graphics::resource::BindGroupLayout {
+        &self.layout
+    }
+}
+
+impl MeshPipeline for BasicMeshPipeline {
+    type Data = Self;
+
     fn primitive() -> PrimitiveState {
         PrimitiveState::default()
     }
@@ -117,11 +125,9 @@ impl MeshPipeline for BasicMeshPipeline {
     fn shader() -> impl Into<LoadPath> {
         LoadPath::Id(AssetId::from::<ShaderSource>(VERTEX_SHADER_ID))
     }
-
-    fn bind_group_layout(&self) -> &graphics::resource::BindGroupLayout {
-        &self.layout
-    }
 }
+
+impl Resource for BasicMeshPipeline {}
 
 #[derive(Clone, Copy, serde::Serialize, serde::Deserialize, Asset, CreateBindGroup)]
 pub struct UnlitColor {

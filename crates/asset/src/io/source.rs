@@ -200,35 +200,35 @@ impl AssetSource {
         self.io.read_dir(path.as_ref()).await
     }
 
-    pub fn is_dir<'a>(&'a self, path: &'a Path) -> AssetFuture<bool> {
+    pub fn is_dir<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, bool> {
         self.io.is_dir(path)
     }
 
-    pub fn writer<'a>(&'a self, path: &'a Path) -> AssetFuture<Box<dyn AssetWriter>> {
+    pub fn writer<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, Box<dyn AssetWriter>> {
         self.io.writer(path)
     }
 
-    pub fn rename<'a>(&'a self, from: &'a Path, to: &'a Path) -> AssetFuture<()> {
+    pub fn rename<'a>(&'a self, from: &'a Path, to: &'a Path) -> AssetFuture<'a, ()> {
         self.io.rename(from, to)
     }
 
-    pub fn create_dir<'a>(&'a self, path: &'a Path) -> AssetFuture<()> {
+    pub fn create_dir<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, ()> {
         self.io.create_dir(path)
     }
 
-    pub fn create_dir_all<'a>(&'a self, path: &'a Path) -> AssetFuture<()> {
+    pub fn create_dir_all<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, ()> {
         self.io.create_dir_all(path)
     }
 
-    pub fn remove<'a>(&'a self, path: &'a Path) -> AssetFuture<()> {
+    pub fn remove<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, ()> {
         self.io.remove(path)
     }
 
-    pub fn remove_dir<'a>(&'a self, path: &'a Path) -> AssetFuture<()> {
+    pub fn remove_dir<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, ()> {
         self.io.remove_dir(path)
     }
 
-    pub fn exists<'a>(&'a self, path: &'a Path) -> AssetFuture<bool> {
+    pub fn exists<'a>(&'a self, path: &'a Path) -> AssetFuture<'a, bool> {
         self.io.exists(path)
     }
 

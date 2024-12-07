@@ -51,7 +51,7 @@ impl Plugin for AssetPlugin {
         }
 
         if let Some(assets) = game.remove_resource::<PreloadAssets>() {
-            game.actions().add(LoadAssets::new(assets.assets));
+            game.actions().defer::<Init>(LoadAssets::new(assets.assets));
         }
 
         let tasks = game.tasks().clone();
@@ -165,7 +165,9 @@ async fn init(database: &mut AssetDatabase, events: &mut Events<DatabaseInitErro
     }
 
     match database.init().await {
-        Ok(_) => database.refresh(RefreshMode::FULL),
+        Ok(_) => {
+            database.refresh(RefreshMode::FULL);
+        }
         Err(error) => events.add(error),
     }
 }

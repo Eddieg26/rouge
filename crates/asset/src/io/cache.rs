@@ -402,3 +402,9 @@ impl<I: Into<AssetPath>> From<I> for LoadPath {
         LoadPath::Path(path.into())
     }
 }
+
+impl std::fmt::Display for LoadPath {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(self, f)
+    }
+}

@@ -159,7 +159,7 @@ impl RenderAppExt for GameBuilder {
                         assets.remove(id);
                     }
                 }
-
+                
                 actions.clear();
             },
         );

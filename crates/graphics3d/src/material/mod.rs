@@ -1,9 +1,10 @@
 use asset::{io::cache::LoadPath, Asset};
+use ecs::core::resource::Resource;
 use graphics::{
     encase::ShaderType,
     resource::{
         BindGroup, BindGroupLayout, BlendMode, Id, IntoBindGroupData, IntoBufferData, Material,
-        MeshPipeline, RenderTexture, ShaderModel, Unlit,
+        MeshPipeline, MeshPipelineData, RenderTexture, ShaderModel, Unlit,
     },
     wgpu::PrimitiveState,
     Color, CreateBindGroup, RenderDevice,
@@ -11,7 +12,19 @@ use graphics::{
 
 pub struct TestSurface;
 
+impl MeshPipelineData for TestSurface {
+    fn new(device: &RenderDevice) -> Self {
+        todo!()
+    }
+
+    fn bind_group_layout(&self) -> &BindGroupLayout {
+        todo!()
+    }
+}
+
 impl MeshPipeline for TestSurface {
+    type Data = Self;
+
     fn primitive() -> PrimitiveState {
         PrimitiveState::default()
     }
@@ -23,15 +36,9 @@ impl MeshPipeline for TestSurface {
     fn attributes() -> Vec<graphics::resource::VertexAttribute> {
         vec![]
     }
-
-    fn new(device: &RenderDevice) -> Self {
-        todo!()
-    }
-
-    fn bind_group_layout(&self) -> &BindGroupLayout {
-        todo!()
-    }
 }
+
+impl Resource for TestSurface {}
 
 #[derive(serde::Serialize, serde::Deserialize, Asset, CreateBindGroup)]
 pub struct Standard<S: MeshPipeline> {

@@ -149,13 +149,13 @@ impl App {
         self
     }
 
-    pub fn add_extract_phase<P: Phase>(&mut self) -> &mut Self {
-        self.world.add_sub_phase::<Extract, P>();
+    pub fn add_phase<P: Phase>(&mut self) -> &mut Self {
+        self.world.add_sub_phase::<Update, P>();
         self
     }
 
-    pub fn add_phase<P: Phase>(&mut self) -> &mut Self {
-        self.world.add_sub_phase::<Update, P>();
+    pub fn add_sub_phase<Main: Phase, Sub: Phase>(&mut self) -> &mut Self {
+        self.world.add_sub_phase::<Main, Sub>();
         self
     }
 
@@ -166,6 +166,11 @@ impl App {
 
     pub fn add_phase_after<P: Phase, After: Phase>(&mut self) -> &mut Self {
         self.world.add_phase_after::<P, After>();
+        self
+    }
+
+    pub fn add_extract_phase<P: Phase>(&mut self) -> &mut Self {
+        self.world.add_sub_phase::<Extract, P>();
         self
     }
 
@@ -435,6 +440,8 @@ impl<S: SystemArg + 'static> SystemArg for Main<'_, S> {
         S::access()
     }
 }
+
+pub type SMain<R> = Main<'static, R>;
 
 #[cfg(test)]
 

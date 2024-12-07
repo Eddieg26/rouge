@@ -40,7 +40,7 @@ impl WorldActions {
             .push(WorldActionFn::from(action.into()));
     }
 
-    pub fn defer<P: Phase>(&mut self, action: impl Into<WorldActionFn>) {
+    pub fn defer<P: Phase>(&self, action: impl Into<WorldActionFn>) {
         let mut deferred = self.deferred.lock().unwrap();
         deferred
             .entry(PhaseId::of::<P>())

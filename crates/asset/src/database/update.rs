@@ -8,9 +8,7 @@ use crate::{
     asset::{Asset, AssetId, AssetMetadata, Settings},
     importer::{ImportError, LoadError},
     io::{
-        cache::{
-            ArtifactMeta, AssetCache, AssetInfo, LoadPath, ErasedLoadedAsset, SharedLibrary,
-        },
+        cache::{ArtifactMeta, AssetCache, AssetInfo, ErasedLoadedAsset, LoadPath, SharedLibrary},
         source::{AssetPath, AssetSource},
     },
 };
@@ -23,7 +21,7 @@ use std::{ops::Deref, path::PathBuf};
 pub struct AssetImporter;
 
 impl AssetImporter {
-    pub async fn import(&self, mut paths: Vec<AssetPath>, database: &AssetDatabase) {
+    pub async fn import(&self, mut paths: HashSet<AssetPath>, database: &AssetDatabase) {
         let config = &database.config;
         let library = &database.library;
         let states = &database.states;
@@ -39,7 +37,7 @@ impl AssetImporter {
             let mut assets = HashMap::new();
             let mut errors = vec![];
 
-            for path in paths.drain(..) {
+            for path in paths.drain() {
                 imported.insert(path.clone());
                 match self.import_asset(&path, config, library).await {
                     Ok(imported) => {
@@ -88,7 +86,7 @@ impl AssetImporter {
                 .refresh_sources(config, library, RefreshMode::DEPS_MODIFIED)
                 .await;
 
-            paths.extend(result.imports.drain(..).filter_map(|path| {
+            paths.extend(result.imports.drain().filter_map(|path| {
                 if imported.contains(&path) {
                     None
                 } else {
@@ -294,7 +292,7 @@ impl ImportedAsset {
 pub struct AssetLoader;
 
 impl AssetLoader {
-    pub async fn load(&self, mut paths: Vec<LoadPath>, database: &AssetDatabase) {
+    pub async fn load(&self, mut paths: HashSet<LoadPath>, database: &AssetDatabase) {
         let config = &database.config;
         let library = &database.library;
         let states = &database.states;
@@ -303,89 +301,87 @@ impl AssetLoader {
         while !paths.is_empty() {
             let mut dependencies = IndexSet::new();
             let mut deps_loaded = IndexSet::new();
+            let mut errors = vec![];
 
             let loader_paths = std::mem::take(&mut paths);
-            for paths in loader_paths.chunks(100) {
-                let mut pool = vec![];
-                for path in paths {
-                    pool.push(self.load_asset(path, config, library, states));
-                }
 
-                let mut errors = vec![];
-                for result in join_all(pool.drain(..)).await {
-                    match result {
-                        Ok(Some(asset)) => {
-                            let id = &asset.meta.id;
-                            let deps = asset.meta.dependencies;
-                            let parent = asset.meta.parent;
+            for path in loader_paths {
+                let result = self.load_asset(&path, config, library, states).await;
+                match result {
+                    Ok(Some(asset)) => {
+                        let id = &asset.meta.id;
+                        let deps = asset.meta.dependencies;
+                        let parent = asset.meta.parent;
 
-                            if let Some(meta) = config.registry().get(id.ty()) {
-                                actions.add(meta.added(*id, asset.asset, None));
-                            }
-
-                            for id in states.write().await.loaded(*id, Some(deps), parent) {
-                                let meta = match config.registry().get(id.ty()) {
-                                    Some(meta) => meta,
-                                    None => continue,
-                                };
-
-                                actions.add(meta.loaded(id));
-                                deps_loaded.insert(id);
-                            }
-
-                            let states = states.read().await;
-                            let state = states.get(id).unwrap();
-                            for dep in state.dependencies() {
-                                if states.get_load_state(*dep).is_unloaded_or_failed() {
-                                    dependencies.insert(LoadPath::Id(*dep));
-                                }
-                            }
-
-                            if let Some(parent) = asset
-                                .meta
-                                .parent
-                                .filter(|p| states.get_load_state(*p).is_unloaded_or_failed())
-                            {
-                                dependencies.insert(LoadPath::Id(parent));
-                            }
-
-                            deps_loaded.insert(*id);
+                        if let Some(meta) = config.registry().get(id.ty()) {
+                            actions.add(meta.added(*id, asset.asset, None));
                         }
-                        Err(error) => {
-                            match error {
-                                LoadError::Io { id, error, path } => {
-                                    for id in states.write().await.failed(id) {
-                                        let meta = match config.registry().get(id.ty()) {
-                                            Some(meta) => meta,
-                                            None => continue,
-                                        };
 
-                                        actions.add(meta.loaded(id));
-                                        deps_loaded.insert(id);
-                                    }
+                        for id in states.write().await.loaded(*id, Some(deps), parent) {
+                            let meta = match config.registry().get(id.ty()) {
+                                Some(meta) => meta,
+                                None => continue,
+                            };
 
-                                    if let Some(meta) = config.registry().get(id.ty()) {
-                                        let error = LoadError::Io { id, error, path };
-                                        actions.add(meta.failed(id, error));
-                                    }
+                            actions.add(meta.loaded(id));
+                            deps_loaded.insert(id);
+                        }
 
+                        let states = states.read().await;
+                        let state = states.get(id).unwrap();
+                        for dep in state.dependencies() {
+                            if states.get_load_state(*dep).is_unloaded_or_failed() {
+                                dependencies.insert(LoadPath::Id(*dep));
+                            }
+                        }
+
+                        if let Some(parent) = asset
+                            .meta
+                            .parent
+                            .filter(|p| states.get_load_state(*p).is_unloaded_or_failed())
+                        {
+                            dependencies.insert(LoadPath::Id(parent));
+                        }
+
+                        deps_loaded.insert(*id);
+                    }
+                    Err(error) => {
+                        match error {
+                            LoadError::Io { id, error, path } => {
+                                for id in states.write().await.failed(id) {
+                                    let meta = match config.registry().get(id.ty()) {
+                                        Some(meta) => meta,
+                                        None => continue,
+                                    };
+
+                                    actions.add(meta.loaded(id));
                                     deps_loaded.insert(id);
                                 }
-                                LoadError::NotFound { path } => {
-                                    errors.push(LoadError::NotFound { path })
-                                }
-                                LoadError::NotRegistered { ty, path } => {
-                                    errors.push(LoadError::NotRegistered { ty, path })
-                                }
-                            };
-                        }
-                        _ => (),
-                    };
-                }
 
-                actions.add(BatchEvents::new(errors));
+                                if let Some(meta) = config.registry().get(id.ty()) {
+                                    let error = LoadError::Io { id, error, path };
+                                    actions.add(meta.failed(id, error));
+                                }
+
+                                deps_loaded.insert(id);
+                            }
+                            LoadError::NotFound { path } => {
+                                errors.push(LoadError::NotFound { path })
+                            }
+                            LoadError::NotRegistered { ty, path } => {
+                                errors.push(LoadError::NotRegistered { ty, path })
+                            }
+                        };
+                    }
+                    _ => (),
+                };
+
+                if errors.len() > 100 {
+                    actions.add(BatchEvents::new(errors.drain(..)));
+                }
             }
 
+            actions.add(BatchEvents::new(errors.drain(..)));
             paths.extend(dependencies);
         }
     }
@@ -504,9 +500,10 @@ impl AssetRefresher {
         let mut result = RefreshResult::default();
         for scan in imports {
             match scan {
-                ImportScan::Added(path) => result.imports.push(path),
+                ImportScan::Added(path) | ImportScan::Modified(path) => {
+                    result.imports.insert(path);
+                }
                 ImportScan::Removed(path) => result.removed.push(path),
-                ImportScan::Modified(path) => result.imports.push(path),
                 ImportScan::Error(error) => result.errors.push(error),
             }
         }
@@ -548,6 +545,7 @@ impl AssetRefresher {
             };
 
             let checksum = ArtifactMeta::calculate_checksum(&asset_bytes, &meta_bytes);
+
             if checksum != info.checksum {
                 return Some(ImportScan::Modified(path));
             }
@@ -591,10 +589,10 @@ impl AssetRefresher {
                 }
                 Ok(false) => {
                     let asset_path = AssetPath::new(asset_path.source().clone(), path);
-                    scans.extend(
-                        self.scan_file(asset_path, source, cache, library, mode)
-                            .await,
-                    );
+                    let scan = self
+                        .scan_file(asset_path, source, cache, library, mode)
+                        .await;
+                    scans.extend(scan);
                 }
                 Err(error) => {
                     let asset_path = AssetPath::new(asset_path.source().clone(), path);
@@ -690,6 +688,7 @@ pub fn import_error_id(error: &ImportError, library: &SharedLibrary) -> Option<A
     }
 }
 
+#[derive(Debug)]
 pub enum ImportScan {
     Added(AssetPath),
     Removed(AssetPath),
@@ -725,7 +724,7 @@ impl std::fmt::Debug for RefreshMode {
 
 #[derive(Debug, Default)]
 pub struct RefreshResult {
-    pub imports: Vec<AssetPath>,
+    pub imports: HashSet<AssetPath>,
     pub removed: Vec<AssetPath>,
     pub errors: Vec<ImportError>,
 }

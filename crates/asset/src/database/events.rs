@@ -11,6 +11,7 @@ use ecs::{
 };
 use hashbrown::HashSet;
 
+#[derive(Debug, Clone)]
 pub enum AssetEvent<A: Asset> {
     Imported {
         id: AssetId,

@@ -102,10 +102,7 @@ impl Framework for ResizeFramework {
 }
 
 impl ResizeFramework {
-    fn extract_resize_events(
-        events: Res<Events<WindowResized>>,
-        mut actions: SubActions<RenderApp>,
-    ) {
+    fn extract_resize_events(events: Res<Events<WindowResized>>, actions: SubActions<RenderApp>) {
         actions.defer::<Extract>(BatchEvents::new(events.iter().copied()));
     }
 
@@ -289,7 +286,6 @@ impl ExtractFramework {
         for event in events.iter() {
             let (id, loaded) = match event {
                 AssetEvent::Added { id } => (id, true),
-                AssetEvent::Loaded { id } => (id, true),
                 AssetEvent::Modified { id } => (id, true),
                 AssetEvent::Unloaded { id, .. } => (id, false),
                 AssetEvent::Failed { id, .. } => (id, false),

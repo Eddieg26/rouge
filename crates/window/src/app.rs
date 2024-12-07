@@ -94,7 +94,6 @@ impl ApplicationHandler for App {
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         if let Some(exit) = self.update() {
-            println!("Exiting: {:?}", exit);
             self.run_event(exit);
             event_loop.exit();
         }

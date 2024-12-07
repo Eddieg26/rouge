@@ -7,6 +7,7 @@ use async_std::sync::{Mutex, RwLock};
 use config::AssetConfig;
 use ecs::{core::resource::Resource, event::Event, task::TaskPool, world::action::WorldActions};
 use futures::executor::block_on;
+use hashbrown::HashSet;
 use state::{LoadState, SharedStates};
 use std::{collections::VecDeque, sync::Arc};
 use update::{AssetImporter, AssetLoader, AssetRefresher, RefreshMode};
@@ -24,9 +25,29 @@ pub enum DatabaseState {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DatabaseEvent {
-    Import(Vec<AssetPath>),
     Refresh(RefreshMode),
-    Load(Vec<LoadPath>),
+    Import(HashSet<AssetPath>),
+    Load(HashSet<LoadPath>),
+}
+
+impl DatabaseEvent {
+    pub fn merge(&mut self, other: Self) -> Option<Self> {
+        match (self, other) {
+            (DatabaseEvent::Import(paths), DatabaseEvent::Import(other)) => {
+                paths.extend(other);
+                None
+            }
+            (DatabaseEvent::Load(paths), DatabaseEvent::Load(other)) => {
+                paths.extend(other);
+                None
+            }
+            (DatabaseEvent::Refresh(mode), DatabaseEvent::Refresh(other)) => match *mode == other {
+                true => None,
+                false => Some(DatabaseEvent::Refresh(other)),
+            },
+            (_, other) => Some(other),
+        }
+    }
 }
 
 pub enum DatabaseInitError {
@@ -102,29 +123,52 @@ impl AssetDatabase {
     }
 
     pub fn refresh(&self, mode: RefreshMode) {
-        self.events
-            .lock_arc_blocking()
-            .push_front(DatabaseEvent::Refresh(mode));
+        let mut events = self.events.lock_blocking();
+        let event = DatabaseEvent::Refresh(mode);
+        let event = match events.back_mut() {
+            Some(last) => last.merge(event),
+            None => Some(event),
+        };
+
+        if let Some(event) = event {
+            events.push_back(event);
+        }
 
         self.update();
     }
 
     pub fn import(&self, paths: impl IntoIterator<Item = impl Into<AssetPath>>) {
-        let paths = paths.into_iter().map(Into::into).collect::<Vec<_>>();
+        let paths = paths.into_iter().map(Into::into).collect::<HashSet<_>>();
         if !paths.is_empty() {
-            self.events
-                .lock_arc_blocking()
-                .push_back(DatabaseEvent::Import(paths));
+            let mut events = self.events.lock_blocking();
+            let event = DatabaseEvent::Import(paths);
+            let event = match events.back_mut() {
+                Some(last) => last.merge(event),
+                None => Some(event),
+            };
+
+            if let Some(event) = event {
+                events.push_back(event);
+            }
+
             self.update();
         }
     }
 
     pub fn load(&self, paths: impl IntoIterator<Item = impl Into<LoadPath>>) {
-        let paths = paths.into_iter().map(Into::into).collect::<Vec<_>>();
+        let paths = paths.into_iter().map(Into::into).collect::<HashSet<_>>();
         if !paths.is_empty() {
-            self.events
-                .lock_arc_blocking()
-                .push_back(DatabaseEvent::Load(paths));
+            let mut events = self.events.lock_blocking();
+            let event = DatabaseEvent::Load(paths);
+            let event = match events.back_mut() {
+                Some(last) => last.merge(event),
+                None => Some(event),
+            };
+
+            if let Some(event) = event {
+                events.push_back(event);
+            }
+
             self.update();
         }
     }

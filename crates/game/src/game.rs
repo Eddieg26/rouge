@@ -452,7 +452,10 @@ impl<'a> FrameworkContext<'a> {
                 game.add_sub_phase::<Main, Sub>();
                 self
             }
-            FrameworkContextInner::App(_) => self,
+            FrameworkContextInner::App(app) => {
+                app.add_sub_phase::<Main, Sub>();
+                self
+            }
         }
     }
 

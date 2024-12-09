@@ -216,6 +216,40 @@ impl<'a> BindGroupEntries<'a> {
         self
     }
 
+    pub fn with_buffer(
+        mut self,
+        binding: u32,
+        buffer: &'a wgpu::Buffer,
+        offset: wgpu::BufferAddress,
+        size: Option<wgpu::BufferSize>,
+    ) -> Self {
+        self.entries.push(BindGroupEntry {
+            binding,
+            resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                buffer,
+                offset,
+                size,
+            }),
+        });
+        self
+    }
+
+    pub fn with_texture(mut self, binding: u32, view: &'a wgpu::TextureView) -> Self {
+        self.entries.push(BindGroupEntry {
+            binding,
+            resource: wgpu::BindingResource::TextureView(view),
+        });
+        self
+    }
+
+    pub fn with_sampler(mut self, binding: u32, sampler: &'a wgpu::Sampler) -> Self {
+        self.entries.push(BindGroupEntry {
+            binding,
+            resource: wgpu::BindingResource::Sampler(sampler),
+        });
+        self
+    }
+
     pub fn add_buffer(
         &mut self,
         binding: u32,

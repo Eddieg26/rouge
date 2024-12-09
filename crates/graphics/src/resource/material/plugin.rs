@@ -1,16 +1,13 @@
-use super::{
-    globals::{GlobalLayout, Globals},
-    Material, MaterialInstance, MaterialMetadata, MaterialPipelines,
-};
+use super::{Material, MaterialGlobals, MaterialInstance, MaterialMesh, MaterialPipelines};
 use crate::{
     plugin::{RenderApp, RenderAppExt, RenderPlugin},
     resource::{
         extract::{ExtractPipeline, PipelineExtractor},
-        material::{MeshPipeline, Metadata},
+        material::{MaterialModel, MeshPipeline},
         MaterialPipelineDesc, MaterialType, Shader, ShaderSource,
     },
     surface::RenderSurface,
-    RenderAssetExtractor, RenderAssets, RenderDevice, View,
+    RenderAssetExtractor, RenderAssets, RenderDevice,
 };
 use asset::{database::AssetDatabase, io::cache::LoadPath, plugin::AssetExt};
 use ecs::{
@@ -44,9 +41,9 @@ impl<M: Material> Plugin for MaterialPlugin<M> {
 
     fn start(&mut self, game: &mut GameBuilder) {
         game.add_render_asset_extractor::<M>()
-            .add_render_resource_extractor::<GlobalLayout>()
-            .add_render_resource_extractor::<MaterialMetadata<M::Meta>>()
-            .add_render_resource_extractor::<<M::Pipeline as MeshPipeline>::Data>()
+            .add_render_resource_extractor::<MaterialGlobals<M>>()
+            .add_render_resource_extractor::<MaterialMesh<M>>()
+            .add_render_resource_extractor::<M::Model>()
             .add_render_asset_dependency::<M, Shader>()
             .add_pipeline_extractor::<M>()
             .register_asset::<M>()
@@ -63,9 +60,9 @@ impl<M: Material> Plugin for MaterialPlugin<M> {
 impl<M: Material> PipelineExtractor for M {
     type Arg = (
         ReadRes<RenderSurface>,
-        ReadRes<GlobalLayout>,
-        ReadRes<<M::Pipeline as MeshPipeline>::Data>,
-        ReadRes<MaterialMetadata<M::Meta>>,
+        ReadRes<MaterialGlobals<M>>,
+        ReadRes<MaterialMesh<M>>,
+        ReadRes<M::Model>,
         WriteRes<MaterialPipelines>,
         SMain<ReadRes<AssetDatabase>>,
     );
@@ -82,7 +79,7 @@ impl<M: Material> PipelineExtractor for M {
         shaders: &RenderAssets<Shader>,
         arg: &mut ecs::system::ArgItem<Self::Arg>,
     ) {
-        let (surface, global_layout, mesh, metadata, pipelines, database) = arg;
+        let (surface, globals, mesh, model, pipelines, database) = arg;
 
         let vertex_shader = match M::Pipeline::shader().into() {
             LoadPath::Id(id) => shaders.get(&id.into()).unwrap(),
@@ -105,9 +102,9 @@ impl<M: Material> PipelineExtractor for M {
         let desc = MaterialPipelineDesc {
             format: surface.format(),
             depth_format: Some(surface.depth_format()),
-            global_layout: &global_layout,
+            globals: globals.value(),
             mesh: mesh.value(),
-            metadata: &metadata.metadata,
+            model: model.value(),
             vertex_shader,
             fragment_shader,
         };
@@ -153,7 +150,7 @@ impl<M: Material> RenderAssetExtractor for M {
             ty,
             binding,
             mode: M::mode(),
-            model: M::Meta::model(),
+            model: M::Model::model(),
         };
 
         Ok(instance)
@@ -176,15 +173,10 @@ impl<M: Material> RenderAssetExtractor for M {
 
 pub trait MaterialAppExt: 'static {
     fn add_material<M: Material>(&mut self) -> &mut Self;
-    fn add_view_globals<V: View>(&mut self) -> &mut Self;
 }
 
 impl MaterialAppExt for GameBuilder {
     fn add_material<M: Material>(&mut self) -> &mut Self {
         self.add_plugin(MaterialPlugin::<M>::new())
-    }
-
-    fn add_view_globals<V: View>(&mut self) -> &mut Self {
-        self.add_render_resource_extractor::<Globals<V>>()
     }
 }

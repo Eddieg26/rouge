@@ -11,3 +11,4 @@ spatial = { path = "../spatial" }
 graphics = { path = "../graphics" }
 crc32fast = { workspace = true }
 serde = { workspace = true }
+glam = { workspace = true, features = ["serde", "bytemuck"] }

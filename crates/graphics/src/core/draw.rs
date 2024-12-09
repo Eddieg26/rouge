@@ -9,13 +9,15 @@ use crate::{
 };
 use bytemuck::{Pod, Zeroable};
 use ecs::{
-    core::{entity::Entity, IndexMap},
-    system::SystemArg,
+    core::{entity::Entity, resource::Resource, IndexMap},
+    system::{ArgItem, SystemArg},
 };
 use encase::ShaderType;
 use glam::{Mat4, Vec4};
 use spatial::rect::Rect;
 use std::{collections::HashMap, hash::Hash, ops::Range};
+
+use super::{RenderAsset, RenderAssets};
 
 pub trait Draw: Sized + Send + Sync + 'static {
     fn entity(&self) -> Entity;
@@ -30,6 +32,14 @@ pub trait BatchDraw: Draw {
     fn can_batch(&self) -> bool;
 }
 
+pub trait View: Clone + Send + Sync + 'static {
+    fn sort(&self, _: &Self) -> std::cmp::Ordering {
+        std::cmp::Ordering::Equal
+    }
+}
+
+impl View for () {}
+
 #[derive(Debug, Default, Clone, Copy, Pod, Zeroable, ShaderType)]
 #[repr(C)]
 pub struct RenderViewData {
@@ -40,9 +50,8 @@ pub struct RenderViewData {
     pub frustum: [Vec4; 6],
 }
 
-pub trait View: Clone + Send + Sync + 'static {}
-
 pub struct RenderView<V: View> {
+    pub entity: Entity,
     pub data: RenderViewData,
     pub viewport: Viewport,
     view: V,
@@ -56,7 +65,11 @@ impl<V: View> std::ops::Deref for RenderView<V> {
     }
 }
 
-#[derive(Debug, Clone)]
+impl<V: View> RenderAsset for RenderView<V> {
+    type Id = Entity;
+}
+
+#[derive(Debug, Clone, Copy)]
 pub struct Viewport {
     pub x: f32,
     pub y: f32,
@@ -140,6 +153,8 @@ impl<D: Draw + Ord> DrawCalls<D> {
     }
 }
 
+impl<D: Draw> Resource for DrawCalls<D> {}
+
 pub struct BatchDrawCalls<D: BatchDraw> {
     calls: Vec<D>,
     unbatched_indices: Vec<u32>,
@@ -216,6 +231,8 @@ impl<D: BatchDraw + Ord> BatchDrawCalls<D> {
         });
     }
 }
+
+impl<D: BatchDraw> Resource for BatchDrawCalls<D> {}
 
 pub struct RenderState<'a> {
     pass: &'a mut wgpu::RenderPass<'a>,
@@ -432,30 +449,23 @@ impl<'a> RenderState<'a> {
     }
 }
 
-pub trait DrawSystem {
-    type Draw: Draw;
-    type View: View;
+pub trait ViewExtractor: Send + Sync + 'static {
     type Arg: SystemArg;
+    type View: View;
 
-    fn draw(
-        &mut self,
-        view: &RenderView<Self::View>,
-        draw_calls: &DrawCalls<Self::Draw>,
-        state: &mut RenderState,
-        arg: Self::Arg,
-    );
+    fn extract(views: &mut RenderAssets<RenderView<Self::View>>, arg: &ArgItem<Self::Arg>);
 }
 
-pub trait BatchDrawSystem {
-    type Draw: BatchDraw;
-    type View: View;
+pub trait DrawExtractor: Send + Sync + 'static {
     type Arg: SystemArg;
+    type Draw: Draw;
 
-    fn draw(
-        &mut self,
-        view: &RenderView<Self::View>,
-        draw_calls: &BatchDrawCalls<Self::Draw>,
-        state: &mut RenderState,
-        arg: Self::Arg,
-    );
+    fn extract(calls: &mut DrawCalls<Self::Draw>, arg: &ArgItem<Self::Arg>);
+}
+
+pub trait BatchDrawExtractor: Send + Sync + 'static {
+    type Arg: SystemArg;
+    type Draw: BatchDraw;
+
+    fn extract(calls: &mut BatchDrawCalls<Self::Draw>, arg: &ArgItem<Self::Arg>);
 }

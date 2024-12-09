@@ -3,12 +3,8 @@ use super::{
     RenderPipelineDesc, Shader, VertexBufferLayout, VertexState,
 };
 use crate::{RenderAsset, RenderDevice, RenderResourceExtractor};
-use asset::{io::cache::LoadPath, AssetId};
-use ecs::{
-    core::{map::Entry, resource::Resource, IndexMap, Type},
-    system::unlifetime::ReadRes,
-};
-use globals::GlobalLayout;
+use asset::{asset::Asset, io::cache::LoadPath, AssetId};
+use ecs::core::{map::Entry, resource::Resource, IndexMap, Type};
 use std::{collections::HashSet, num::NonZeroU32};
 use wgpu::{BlendState, PrimitiveState, TextureFormat};
 
@@ -40,87 +36,6 @@ impl Into<BlendState> for BlendMode {
 pub enum DepthWrite {
     On,
     Off,
-}
-
-pub trait MeshPipelineData: Resource + Send + 'static {
-    fn new(device: &RenderDevice) -> Self;
-    fn bind_group_layout(&self) -> &BindGroupLayout;
-}
-
-impl<M: MeshPipelineData> RenderResourceExtractor for M {
-    type Arg = ReadRes<RenderDevice>;
-
-    fn can_extract(world: &ecs::world::World) -> bool {
-        world.has_resource::<RenderDevice>()
-    }
-
-    fn extract(arg: ecs::system::ArgItem<Self::Arg>) -> Result<Self, crate::ExtractError> {
-        Ok(Self::new(&arg))
-    }
-}
-
-pub trait MeshPipeline: Send + Sync + 'static {
-    type Data: MeshPipelineData;
-
-    fn depth_write() -> DepthWrite {
-        DepthWrite::On
-    }
-
-    fn instances() -> Option<NonZeroU32> {
-        None
-    }
-
-    fn primitive() -> PrimitiveState;
-    fn attributes() -> Vec<VertexAttribute>;
-    fn shader() -> impl Into<LoadPath>;
-}
-
-pub trait Metadata: Send + Sync + 'static {
-    fn new(device: &RenderDevice) -> Self;
-    fn label() -> Option<&'static str>;
-    fn model() -> ShaderModel;
-
-    fn bind_group_layout(&self) -> Option<&BindGroupLayout>;
-}
-
-pub struct MaterialMetadata<M: Metadata> {
-    metadata: M,
-}
-
-impl<M: Metadata> MaterialMetadata<M> {
-    pub fn new(device: &RenderDevice) -> Self {
-        Self {
-            metadata: M::new(device),
-        }
-    }
-}
-
-impl<M: Metadata> std::ops::Deref for MaterialMetadata<M> {
-    type Target = M;
-
-    fn deref(&self) -> &Self::Target {
-        &self.metadata
-    }
-}
-
-impl<M: Metadata> std::ops::DerefMut for MaterialMetadata<M> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.metadata
-    }
-}
-
-impl<M: Metadata> Resource for MaterialMetadata<M> {}
-
-impl<M: Metadata> RenderResourceExtractor for MaterialMetadata<M> {
-    type Arg = ReadRes<RenderDevice>;
-
-    fn can_extract(world: &ecs::world::World) -> bool {
-        world.has_resource::<RenderDevice>()
-    }
-
-    fn extract(arg: ecs::system::ArgItem<Self::Arg>) -> Result<Self, crate::ExtractError> {
-        Ok(Self::new(&arg))
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -191,17 +106,47 @@ impl From<MeshAttributeKind> for VertexAttribute {
     }
 }
 
-pub struct Unlit;
+pub trait MaterialBinding: RenderResourceExtractor + Send {
+    fn bind_group_layout(&self) -> &BindGroupLayout;
+}
 
-impl Metadata for Unlit {
-    fn new(_: &RenderDevice) -> Self {
-        Self
+pub trait MaterialModel: RenderResourceExtractor + Send {
+    fn model() -> ShaderModel;
+
+    fn bind_group_layout(&self) -> Option<&BindGroupLayout>;
+}
+
+pub trait MeshPipeline: Send + Sync + 'static {
+    type GlobalBinding: MaterialBinding;
+    type MeshBinding: MaterialBinding;
+
+    fn depth_write() -> DepthWrite {
+        DepthWrite::On
     }
 
-    fn label() -> Option<&'static str> {
+    fn instances() -> Option<NonZeroU32> {
         None
     }
 
+    fn primitive() -> PrimitiveState;
+    fn attributes() -> Vec<VertexAttribute>;
+    fn shader() -> impl Into<LoadPath>;
+}
+
+pub type MaterialGlobals<M> = <<M as Material>::Pipeline as MeshPipeline>::GlobalBinding;
+pub type MaterialMesh<M> = <<M as Material>::Pipeline as MeshPipeline>::MeshBinding;
+
+pub trait Material: Asset + CreateBindGroup<Data = ()> + 'static {
+    type Pipeline: MeshPipeline;
+    type Model: MaterialModel;
+
+    fn mode() -> BlendMode;
+    fn shader() -> impl Into<LoadPath>;
+}
+
+pub struct Unlit;
+
+impl MaterialModel for Unlit {
     fn model() -> ShaderModel {
         ShaderModel::Unlit
     }
@@ -211,12 +156,18 @@ impl Metadata for Unlit {
     }
 }
 
-pub trait Material: asset::asset::Asset + CreateBindGroup<Data = ()> + 'static {
-    type Pipeline: MeshPipeline;
-    type Meta: Metadata;
+impl Resource for Unlit {}
 
-    fn mode() -> BlendMode;
-    fn shader() -> impl Into<LoadPath>;
+impl RenderResourceExtractor for Unlit {
+    type Arg = ();
+
+    fn can_extract(_: &ecs::world::World) -> bool {
+        true
+    }
+
+    fn extract(_: ecs::system::ArgItem<Self::Arg>) -> Result<Self, crate::ExtractError> {
+        Ok(Self)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -248,9 +199,9 @@ impl RenderAsset for MaterialInstance {
 pub struct MaterialPipelineDesc<'a, M: Material> {
     pub format: TextureFormat,
     pub depth_format: Option<TextureFormat>,
-    pub global_layout: &'a GlobalLayout,
-    pub mesh: &'a <M::Pipeline as MeshPipeline>::Data,
-    pub metadata: &'a M::Meta,
+    pub globals: &'a MaterialGlobals<M>,
+    pub mesh: &'a MaterialMesh<M>,
+    pub model: &'a M::Model,
     pub vertex_shader: &'a Shader,
     pub fragment_shader: &'a Shader,
 }
@@ -332,9 +283,9 @@ impl MaterialPipelines {
         let MaterialPipelineDesc {
             format,
             depth_format,
-            global_layout,
+            globals,
             mesh,
-            metadata,
+            model: metadata,
             vertex_shader,
             fragment_shader,
         } = desc;
@@ -349,7 +300,7 @@ impl MaterialPipelines {
         let material_layout = pipeline.layout.clone();
 
         let mut layouts = vec![
-            global_layout.inner(),
+            globals.bind_group_layout(),
             mesh.bind_group_layout(),
             &material_layout,
         ];

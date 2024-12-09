@@ -19,7 +19,7 @@ pub struct RenderContext<'a> {
     resources: &'a GraphResources,
     target: &'a RenderTarget,
     textures: &'a RenderAssets<RenderTexture>,
-    actions: Vec<RenderNodeAction>,
+    buffers: Vec<wgpu::CommandBuffer>,
 }
 
 impl<'a> RenderContext<'a> {
@@ -35,7 +35,7 @@ impl<'a> RenderContext<'a> {
             resources,
             target,
             textures: world.resource::<RenderAssets<RenderTexture>>(),
-            actions: Vec::new(),
+            buffers: Vec::new(),
         }
     }
 
@@ -49,6 +49,12 @@ impl<'a> RenderContext<'a> {
 
     pub fn target(&self) -> &RenderTarget {
         self.target
+    }
+
+    pub fn override_target(&self, id: impl Into<Id<RenderTarget>>) -> Option<&RenderTarget> {
+        self.world
+            .resource::<RenderAssets<RenderTarget>>()
+            .get(&id.into())
     }
 
     pub fn textures(&self) -> &RenderAssets<RenderTexture> {
@@ -89,15 +95,10 @@ impl<'a> RenderContext<'a> {
     }
 
     pub fn submit(&mut self, encoder: wgpu::CommandEncoder) {
-        self.actions
-            .push(RenderNodeAction::Submit(encoder.finish()));
+        self.buffers.push(encoder.finish());
     }
 
-    pub fn flush(&mut self) {
-        self.actions.push(RenderNodeAction::Flush);
-    }
-
-    pub fn finish(self) -> Vec<RenderNodeAction> {
-        self.actions
+    pub fn finish(self) -> Vec<wgpu::CommandBuffer> {
+        self.buffers
     }
 }

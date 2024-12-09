@@ -114,11 +114,16 @@ impl RenderPass {
 
     pub fn begin<'a>(
         &self,
-        target: &RenderTarget,
-        ctx: &RenderContext<'a>,
-        clear: Option<Color>,
         encoder: &'a mut wgpu::CommandEncoder,
+        ctx: &RenderContext<'a>,
+        target: Option<&RenderTarget>,
+        clear: Option<Color>,
     ) -> Option<wgpu::RenderPass<'a>> {
+        let target = match target {
+            Some(target) => target,
+            None => ctx.target(),
+        };
+
         let mut color_attachments = vec![];
         for color in self.colors.iter() {
             let view = match color.attachment {

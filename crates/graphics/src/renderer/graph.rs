@@ -1,5 +1,5 @@
 use super::{
-    context::{RenderContext, RenderNodeAction},
+    context::RenderContext,
     resources::{BufferDesc, GraphResources, RenderGraphBuffer, RenderGraphTexture, TextureDesc},
 };
 use crate::{
@@ -260,29 +260,17 @@ impl RenderGraph {
         };
 
         for group in &self.order {
-            let mut actions = vec![];
+            let mut buffers = vec![];
             for node in group {
                 let mut ctx = RenderContext::new(world, device, &self.resources, target);
                 self.nodes[*node].run(&mut ctx);
 
-                let buffers = ctx.finish();
-                if !buffers.is_empty() {
-                    actions.extend(buffers);
-                    actions.push(RenderNodeAction::Flush);
-                }
+                buffers.extend(ctx.finish());
             }
 
-            let mut buffers = vec![];
-            for action in actions {
-                match action {
-                    RenderNodeAction::Submit(buffer) => buffers.push(buffer),
-                    RenderNodeAction::Flush => {
-                        if !buffers.is_empty() {
-                            device.queue.submit(buffers.drain(..));
-                            // device.queue.on_submitted_work_done(|| {});
-                        }
-                    }
-                }
+            if !buffers.is_empty() {
+                device.queue.submit(buffers.drain(..));
+                device.queue.on_submitted_work_done(|| {});
             }
         }
     }

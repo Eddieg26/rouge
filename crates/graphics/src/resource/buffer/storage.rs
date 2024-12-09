@@ -13,12 +13,88 @@ pub struct StorageBuffer<T: ShaderType> {
     label: Label,
     value: T,
     data: EncaseStorageBuffer<Vec<u8>>,
-    inner: Option<Buffer>,
+    inner: Buffer,
     usage: BufferUsages,
     is_dirty: bool,
 }
 
 impl<T: ShaderType> StorageBuffer<T> {
+    pub fn with_label(mut self, label: Label) -> Self {
+        self.label = label;
+        self
+    }
+
+    pub fn with_usage(mut self, usage: BufferUsages) -> Self {
+        self.usage = usage;
+        self
+    }
+
+    pub fn value(&self) -> &T {
+        &self.value
+    }
+
+    pub fn data(&self) -> &[u8] {
+        self.data.as_ref().as_slice()
+    }
+
+    pub fn inner(&self) -> &Buffer {
+        &self.inner
+    }
+
+    pub fn is_dirty(&self) -> bool {
+        self.is_dirty
+    }
+
+    pub fn binding(&self) -> BindingResource {
+        self.inner.as_entire_binding()
+    }
+}
+
+impl<T: ShaderType + WriteInto> StorageBuffer<T> {
+    pub fn new(device: &RenderDevice, value: T) -> Self {
+        let mut data = EncaseStorageBuffer::new(vec![]);
+        data.write(&value).unwrap();
+
+        let buffer = Buffer::with_data(
+            device,
+            data.as_ref(),
+            BufferUsages::COPY_DST | BufferUsages::UNIFORM,
+            None,
+        );
+
+        Self {
+            label: None,
+            value,
+            data,
+            inner: buffer,
+            usage: BufferUsages::COPY_DST | BufferUsages::UNIFORM,
+            is_dirty: false,
+        }
+    }
+    pub fn set(&mut self, value: T) {
+        self.value = value;
+        self.is_dirty = true;
+    }
+
+    pub fn update(&mut self, device: &RenderDevice) {
+        if self.is_dirty {
+            self.data.write(&self.value).unwrap();
+            self.inner.update(device, 0, self.data.as_ref());
+            self.is_dirty = false;
+        }
+    }
+}
+
+pub struct LazyStorageBuffer<T: ShaderType> {
+    label: Label,
+    value: T,
+    data: EncaseStorageBuffer<Vec<u8>>,
+    inner: Option<Buffer>,
+    usage: BufferUsages,
+    is_dirty: bool,
+}
+
+impl<T: ShaderType> LazyStorageBuffer<T> {
     pub fn new(value: T) -> Self {
         Self {
             label: None,
@@ -61,7 +137,7 @@ impl<T: ShaderType> StorageBuffer<T> {
     }
 }
 
-impl<T: ShaderType + WriteInto> StorageBuffer<T> {
+impl<T: ShaderType + WriteInto> LazyStorageBuffer<T> {
     pub fn set(&mut self, value: T) {
         self.value = value;
         self.is_dirty = true;

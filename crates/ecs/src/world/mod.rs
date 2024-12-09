@@ -33,6 +33,9 @@ pub mod cell;
 pub mod query;
 pub mod registry;
 pub mod spawner;
+pub mod statik;
+
+pub use statik::*;
 
 pub struct World {
     id: WorldId,

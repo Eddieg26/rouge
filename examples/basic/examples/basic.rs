@@ -22,11 +22,11 @@ use graphics::{
         pass::{Attachment, LoadOp, Operations, RenderPass, StoreOp},
     },
     resource::{
-        plugin::MaterialAppExt, BindGroupLayout, BindGroupLayoutBuilder, BlendMode, Material,
-        MeshPipeline, MeshPipelineData, ShaderSource, Unlit, VertexAttribute,
+        globals::GlobalView, plugin::MaterialAppExt, BindGroupLayout, BindGroupLayoutBuilder,
+        BlendMode, Material, MaterialBinding, MeshPipeline, ShaderSource, Unlit, VertexAttribute,
     },
     wgpu::{PrimitiveState, ShaderStages},
-    CreateBindGroup,
+    CreateBindGroup, RenderDevice, RenderResourceExtractor,
 };
 use std::{future::Future, path::PathBuf};
 use uuid::Uuid;
@@ -42,7 +42,7 @@ use ecs::{
         resource::{Res, Resource},
     },
     event::{Event, Events},
-    system::systems::Root,
+    system::{systems::Root, unlifetime::ReadRes},
     world::{
         self,
         action::WorldAction,
@@ -91,28 +91,9 @@ pub struct BasicMeshPipeline {
     layout: BindGroupLayout,
 }
 
-impl MeshPipelineData for BasicMeshPipeline {
-    fn new(device: &graphics::RenderDevice) -> Self {
-        let layout = BindGroupLayoutBuilder::new()
-            .with_uniform_buffer(
-                0,
-                ShaderStages::VERTEX,
-                true,
-                Some(glam::Mat4::min_size()),
-                None,
-            )
-            .build(device);
-
-        Self { layout }
-    }
-
-    fn bind_group_layout(&self) -> &graphics::resource::BindGroupLayout {
-        &self.layout
-    }
-}
-
 impl MeshPipeline for BasicMeshPipeline {
-    type Data = Self;
+    type GlobalBinding = GlobalView<()>;
+    type MeshBinding = BasicMeshPipeline;
 
     fn primitive() -> PrimitiveState {
         PrimitiveState::default()
@@ -124,6 +105,35 @@ impl MeshPipeline for BasicMeshPipeline {
 
     fn shader() -> impl Into<LoadPath> {
         LoadPath::Id(AssetId::from::<ShaderSource>(VERTEX_SHADER_ID))
+    }
+}
+
+impl MaterialBinding for BasicMeshPipeline {
+    fn bind_group_layout(&self) -> &BindGroupLayout {
+        &self.layout
+    }
+}
+
+impl RenderResourceExtractor for BasicMeshPipeline {
+    type Arg = ReadRes<RenderDevice>;
+
+    fn can_extract(world: &World) -> bool {
+        world.has_resource::<RenderDevice>()
+    }
+
+    fn extract(arg: ecs::system::ArgItem<Self::Arg>) -> Result<Self, ExtractError> {
+        let device = arg;
+        let layout = BindGroupLayoutBuilder::new()
+            .with_uniform_buffer(
+                0,
+                ShaderStages::VERTEX,
+                true,
+                Some(glam::Mat4::min_size()),
+                None,
+            )
+            .build(&device);
+
+        Ok(Self { layout })
     }
 }
 
@@ -143,7 +153,7 @@ impl From<Color> for UnlitColor {
 
 impl Material for UnlitColor {
     type Pipeline = BasicMeshPipeline;
-    type Meta = Unlit;
+    type Model = Unlit;
 
     fn mode() -> BlendMode {
         BlendMode::Opaque
@@ -178,7 +188,7 @@ impl RenderGraphNode for BasicRenderNode {
 
     fn run(&mut self, ctx: &mut graphics::renderer::context::RenderContext) {
         let mut encoder = ctx.encoder();
-        if let Some(_) = self.pass.begin(ctx.target(), ctx, None, &mut encoder) {}
+        if let Some(_) = self.pass.begin(&mut encoder, ctx, None, None) {}
 
         ctx.submit(encoder);
     }

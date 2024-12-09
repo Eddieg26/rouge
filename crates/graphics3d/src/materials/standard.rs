@@ -1,58 +1,27 @@
 use asset::{io::cache::LoadPath, Asset};
-use ecs::core::resource::Resource;
 use graphics::{
     encase::ShaderType,
     resource::{
-        BindGroup, BindGroupLayout, BlendMode, Id, IntoBindGroupData, IntoBufferData, Material,
-        MeshPipeline, MeshPipelineData, RenderTexture, ShaderModel, Unlit,
+        BlendMode, Id, IntoBindGroupData, IntoBufferData, Material, MeshPipeline, RenderTexture,
+        Unlit,
     },
-    wgpu::PrimitiveState,
-    Color, CreateBindGroup, RenderDevice,
+    Color, CreateBindGroup,
 };
 
-pub struct TestSurface;
-
-impl MeshPipelineData for TestSurface {
-    fn new(device: &RenderDevice) -> Self {
-        todo!()
-    }
-
-    fn bind_group_layout(&self) -> &BindGroupLayout {
-        todo!()
-    }
-}
-
-impl MeshPipeline for TestSurface {
-    type Data = Self;
-
-    fn primitive() -> PrimitiveState {
-        PrimitiveState::default()
-    }
-
-    fn shader() -> impl Into<LoadPath> {
-        ""
-    }
-
-    fn attributes() -> Vec<graphics::resource::VertexAttribute> {
-        vec![]
-    }
-}
-
-impl Resource for TestSurface {}
-
 #[derive(serde::Serialize, serde::Deserialize, Asset, CreateBindGroup)]
+#[uniform(0, StandardBufferData)]
 pub struct Standard<S: MeshPipeline> {
     albedo_color: Color,
     other_color: Color,
     #[texture(1)]
-    #[sampler(1)]
+    #[sampler(2)]
     albedo_texture: Option<Id<RenderTexture>>,
     _marker: std::marker::PhantomData<S>,
 }
 
 impl<S: MeshPipeline> Material for Standard<S> {
     type Pipeline = S;
-    type Meta = Unlit;
+    type Model = Unlit;
 
     fn mode() -> BlendMode {
         BlendMode::Opaque

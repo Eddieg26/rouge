@@ -13,11 +13,15 @@ use crate::{
     },
     RenderResourceExtractors,
 };
+use crate::{
+    BatchDrawCalls, BatchDrawExtractor, DrawCalls, DrawExtractor, RenderView, ViewExtractor,
+};
 use asset::{
     database::events::AssetEvent,
     plugin::{AssetExt, AssetPlugin},
     Assets,
 };
+use ecs::system::StaticArg;
 use ecs::{
     core::resource::{Res, ResMut},
     event::Events,
@@ -97,6 +101,9 @@ pub trait RenderAppExt {
     ) -> &mut Self;
     fn add_render_resource_extractor<R: RenderResourceExtractor>(&mut self) -> &mut Self;
     fn add_pipeline_extractor<P: PipelineExtractor>(&mut self) -> &mut Self;
+    fn add_view_extractor<V: ViewExtractor>(&mut self) -> &mut Self;
+    fn add_draw_call_extractor<D: DrawExtractor>(&mut self) -> &mut Self;
+    fn add_batch_draw_call_extractor<D: BatchDrawExtractor>(&mut self) -> &mut Self;
 }
 
 impl RenderAppExt for GameBuilder {
@@ -159,7 +166,7 @@ impl RenderAppExt for GameBuilder {
                         assets.remove(id);
                     }
                 }
-                
+
                 actions.clear();
             },
         );
@@ -185,6 +192,42 @@ impl RenderAppExt for GameBuilder {
     fn add_pipeline_extractor<P: PipelineExtractor>(&mut self) -> &mut Self {
         self.resource_mut::<PipelineExtractors>()
             .add_extractor::<P>();
+        self
+    }
+
+    fn add_view_extractor<V: ViewExtractor>(&mut self) -> &mut Self {
+        self.register_render_asset::<RenderView<V::View>>();
+        self.add_systems(
+            Extract,
+            |mut views: ResMut<RenderAssets<RenderView<V::View>>>, arg: StaticArg<V::Arg>| {
+                V::extract(&mut views, arg.inner());
+            },
+        )
+    }
+
+    fn add_draw_call_extractor<D: DrawExtractor>(&mut self) -> &mut Self {
+        self.sub_app_mut::<RenderApp>()
+            .add_resource(DrawCalls::<D::Draw>::new())
+            .add_systems(
+                Extract,
+                |mut calls: ResMut<DrawCalls<D::Draw>>, arg: StaticArg<D::Arg>| {
+                    D::extract(&mut calls, arg.inner());
+                },
+            );
+
+        self
+    }
+
+    fn add_batch_draw_call_extractor<D: BatchDrawExtractor>(&mut self) -> &mut Self {
+        self.sub_app_mut::<RenderApp>()
+            .add_resource(BatchDrawCalls::<D::Draw>::new())
+            .add_systems(
+                Extract,
+                |mut calls: ResMut<BatchDrawCalls<D::Draw>>, arg: StaticArg<D::Arg>| {
+                    D::extract(&mut calls, arg.inner());
+                },
+            );
+
         self
     }
 }

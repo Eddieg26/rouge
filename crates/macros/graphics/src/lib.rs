@@ -45,6 +45,7 @@ fn generate_create_bind_group(input: DeriveInput) -> Result<TokenStream> {
     let mut layout = proc_macro2::TokenStream::new();
     let mut entries = Vec::<proc_macro2::TokenStream>::new();
     let mut type_defs = Vec::new();
+    let mut uniform_buffer_def = quote::quote! {};
 
     for attribute in &input.attrs {
         if let Some(ident) = attribute.path().get_ident() {
@@ -76,6 +77,8 @@ fn generate_create_bind_group(input: DeriveInput) -> Result<TokenStream> {
                         uniform_buffers.push(Buffer::with_data(device, uniform_buffer.as_ref().as_slice(), BufferUsages::UNIFORM, None));
                         #BIND_GROUP_BUILDER.add_buffer(#binding, uniform_buffers.last().unwrap().inner(), 0, None);
                     });
+
+                    uniform_buffer_def = quote::quote! {let mut uniform_buffers = Vec::new();}
                 } else {
                     return Err(Error::new_spanned(attribute, "Invalid attribute"));
                 }
@@ -174,7 +177,6 @@ fn generate_create_bind_group(input: DeriveInput) -> Result<TokenStream> {
         }
     }
 
-    let mut uniform_buffer_def = quote::quote! {};
     for (binding, fields) in uniforms {
         let field = match fields.len() {
             0 => return Err(Error::new_spanned(binding, "Empty fields not supported")),

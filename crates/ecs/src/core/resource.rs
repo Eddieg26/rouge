@@ -191,7 +191,7 @@ impl<'a, R: Resource> std::ops::Deref for Res<'a, R> {
     type Target = R;
 
     fn deref(&self) -> &Self::Target {
-        &self.ptr
+        self.ptr
     }
 }
 
@@ -202,6 +202,14 @@ pub struct ResMut<'a, R: Resource> {
 impl<'a, R: Resource> ResMut<'a, R> {
     pub fn new(ptr: &'a mut R) -> Self {
         Self { ptr }
+    }
+
+    pub fn value(&self) -> &R {
+        &self.ptr
+    }
+
+    pub fn value_mut(&mut self) -> &mut R {
+        &mut self.ptr
     }
 }
 

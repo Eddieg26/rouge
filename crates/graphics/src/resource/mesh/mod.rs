@@ -238,6 +238,11 @@ impl Mesh {
         }
     }
 
+    pub fn with_attribute(mut self, attribute: MeshAttribute) -> Self {
+        self.add_attribute(attribute);
+        self
+    }
+
     pub fn with_read_write(mut self, read_write: ReadWrite) -> Self {
         self.read_write = read_write;
         self
@@ -404,7 +409,7 @@ impl Mesh {
         }
     }
 
-    pub fn buffers(&mut self, device: &RenderDevice) -> MeshBuffers {
+    pub fn buffers(&mut self, device: &RenderDevice) -> RenderMesh {
         let mut vertex_buffers = vec![];
         let mut attributes = vec![];
         let count = self.vertex_count();
@@ -415,7 +420,7 @@ impl Mesh {
         };
 
         for attribute in self.attributes() {
-            let buffer = MeshBuffers::create_vertex_buffer(device, attribute, count, flags);
+            let buffer = RenderMesh::create_vertex_buffer(device, attribute, count, flags);
             vertex_buffers.push(buffer);
             attributes.push(attribute.kind());
         }
@@ -436,7 +441,7 @@ impl Mesh {
             None => None,
         };
 
-        MeshBuffers {
+        RenderMesh {
             vertex_count: count,
             layout: attributes.into(),
             vertex_buffers: vertex_buffers.into_boxed_slice(),
@@ -444,7 +449,7 @@ impl Mesh {
         }
     }
 
-    pub fn update(&mut self, buffers: &mut MeshBuffers, device: &RenderDevice) {
+    pub fn update(&mut self, buffers: &mut RenderMesh, device: &RenderDevice) {
         let vertex_count = self.vertex_count();
         buffers.vertex_count = vertex_count;
         for values in self.attributes.iter() {
@@ -537,14 +542,14 @@ impl<'a> IntoIterator for &'a MeshLayout {
     }
 }
 
-pub struct MeshBuffers {
+pub struct RenderMesh {
     layout: MeshLayout,
     vertex_buffers: Box<[VertexBuffer]>,
     index_buffer: Option<Box<IndexBuffer<u32>>>,
     vertex_count: usize,
 }
 
-impl MeshBuffers {
+impl RenderMesh {
     pub fn layout(&self) -> &MeshLayout {
         &self.layout
     }
@@ -603,13 +608,13 @@ impl MeshBuffers {
     }
 }
 
-impl RenderAsset for MeshBuffers {
+impl RenderAsset for RenderMesh {
     type Id = AssetId;
 }
 
 impl RenderAssetExtractor for Mesh {
     type Source = Mesh;
-    type Asset = MeshBuffers;
+    type Asset = RenderMesh;
     type Arg = ReadRes<RenderDevice>;
 
     fn extract(

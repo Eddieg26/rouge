@@ -200,7 +200,7 @@ impl RenderAppExt for GameBuilder {
         self.add_systems(
             Extract,
             |mut views: ResMut<RenderAssets<RenderView<V::View>>>, arg: StaticArg<V::Arg>| {
-                V::extract(&mut views, arg.inner());
+                V::extract(&mut views, arg.into_inner());
             },
         )
     }
@@ -211,7 +211,7 @@ impl RenderAppExt for GameBuilder {
             .add_systems(
                 Extract,
                 |mut calls: ResMut<DrawCalls<D::Draw>>, arg: StaticArg<D::Arg>| {
-                    D::extract(&mut calls, arg.inner());
+                    D::extract(&mut calls, arg.into_inner());
                 },
             );
 
@@ -224,7 +224,7 @@ impl RenderAppExt for GameBuilder {
             .add_systems(
                 Extract,
                 |mut calls: ResMut<BatchDrawCalls<D::Draw>>, arg: StaticArg<D::Arg>| {
-                    D::extract(&mut calls, arg.inner());
+                    D::extract(&mut calls, arg.into_inner());
                 },
             );
 

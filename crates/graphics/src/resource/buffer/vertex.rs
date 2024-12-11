@@ -1,4 +1,6 @@
-use super::{Buffer, Label};
+use std::ops::RangeBounds;
+
+use super::{Buffer, BufferSlice, Label};
 use crate::core::RenderDevice;
 use bytemuck::{Pod, Zeroable};
 use wgpu::BufferUsages;
@@ -34,6 +36,10 @@ impl VertexBuffer {
 
     pub fn resize(&mut self, device: &RenderDevice, size: u64) {
         self.inner.resize(device, size);
+    }
+
+    pub fn slice<S: RangeBounds<u64>>(&self, range: S) -> BufferSlice {
+        self.inner.slice(range)
     }
 
     pub fn update<V: Vertex>(&mut self, device: &RenderDevice, offset: u64, vertices: &[V]) {

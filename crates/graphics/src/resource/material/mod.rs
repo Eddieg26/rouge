@@ -117,8 +117,8 @@ pub trait MaterialModel: RenderResourceExtractor + Send {
 }
 
 pub trait MeshPipeline: Send + Sync + 'static {
-    type GlobalBinding: MaterialBinding;
-    type MeshBinding: MaterialBinding;
+    type View: MaterialBinding;
+    type Mesh: MaterialBinding;
 
     fn depth_write() -> DepthWrite {
         DepthWrite::On
@@ -133,8 +133,8 @@ pub trait MeshPipeline: Send + Sync + 'static {
     fn shader() -> impl Into<LoadPath>;
 }
 
-pub type MaterialGlobals<M> = <<M as Material>::Pipeline as MeshPipeline>::GlobalBinding;
-pub type MaterialMesh<M> = <<M as Material>::Pipeline as MeshPipeline>::MeshBinding;
+pub type MaterialView<M> = <<M as Material>::Pipeline as MeshPipeline>::View;
+pub type MaterialMesh<M> = <<M as Material>::Pipeline as MeshPipeline>::Mesh;
 
 pub trait Material: Asset + CreateBindGroup<Data = ()> + 'static {
     type Pipeline: MeshPipeline;
@@ -199,7 +199,7 @@ impl RenderAsset for MaterialInstance {
 pub struct MaterialPipelineDesc<'a, M: Material> {
     pub format: TextureFormat,
     pub depth_format: Option<TextureFormat>,
-    pub globals: &'a MaterialGlobals<M>,
+    pub globals: &'a MaterialView<M>,
     pub mesh: &'a MaterialMesh<M>,
     pub model: &'a M::Model,
     pub vertex_shader: &'a Shader,

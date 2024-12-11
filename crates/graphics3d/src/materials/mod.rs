@@ -39,8 +39,8 @@ impl Mesh3d {
 }
 
 impl MeshPipeline for Mesh3d {
-    type GlobalBinding = GlobalView<()>;
-    type MeshBinding = Mesh3d;
+    type View = GlobalView<()>;
+    type Mesh = Mesh3d;
 
     fn primitive() -> PrimitiveState {
         PrimitiveState::default()

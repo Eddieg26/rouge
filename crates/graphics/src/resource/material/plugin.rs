@@ -1,4 +1,4 @@
-use super::{Material, MaterialGlobals, MaterialInstance, MaterialMesh, MaterialPipelines};
+use super::{Material, MaterialView, MaterialInstance, MaterialMesh, MaterialPipelines};
 use crate::{
     plugin::{RenderApp, RenderAppExt, RenderPlugin},
     resource::{
@@ -41,7 +41,7 @@ impl<M: Material> Plugin for MaterialPlugin<M> {
 
     fn start(&mut self, game: &mut GameBuilder) {
         game.add_render_asset_extractor::<M>()
-            .add_render_resource_extractor::<MaterialGlobals<M>>()
+            .add_render_resource_extractor::<MaterialView<M>>()
             .add_render_resource_extractor::<MaterialMesh<M>>()
             .add_render_resource_extractor::<M::Model>()
             .add_render_asset_dependency::<M, Shader>()
@@ -60,7 +60,7 @@ impl<M: Material> Plugin for MaterialPlugin<M> {
 impl<M: Material> PipelineExtractor for M {
     type Arg = (
         ReadRes<RenderSurface>,
-        ReadRes<MaterialGlobals<M>>,
+        ReadRes<MaterialView<M>>,
         ReadRes<MaterialMesh<M>>,
         ReadRes<M::Model>,
         WriteRes<MaterialPipelines>,

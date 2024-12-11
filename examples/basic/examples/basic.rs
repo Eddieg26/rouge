@@ -1,62 +1,46 @@
+use std::num::NonZeroU64;
+
 use asset::{
-    database::{events::AssetEvent, AssetDatabase},
     embed_asset,
-    importer::{DefaultProcessor, ImportContext, ImportError, Importer},
-    io::{
-        cache::{Artifact, ArtifactMeta, AssetCache, LoadPath},
-        embedded::EmbeddedFs,
-        local::LocalFs,
-        source::{AssetPath, AssetSource},
-        vfs::VirtualFs,
-        AssetIoError, FileSystem,
-    },
-    plugin::{AssetExt, AssetPlugin},
-    Asset, AssetId, AssetRef, Assets, AsyncReadExt, AsyncWriteExt,
+    io::{cache::LoadPath, embedded::EmbeddedFs},
+    plugin::AssetExt,
+    Asset, AssetId, AssetRef,
 };
-use graphics::{
-    core::{Color, ExtractError},
-    encase::ShaderType,
-    plugin::{RenderApp, RenderPlugin},
-    renderer::{
-        graph::{RenderGraphBuilder, RenderGraphNode},
-        pass::{Attachment, LoadOp, Operations, RenderPass, StoreOp},
-    },
-    resource::{
-        globals::GlobalView, plugin::MaterialAppExt, BindGroupLayout, BindGroupLayoutBuilder,
-        BlendMode, Material, MaterialBinding, MeshPipeline, ShaderSource, Unlit, VertexAttribute,
-    },
-    wgpu::{PrimitiveState, ShaderStages},
-    CreateBindGroup, RenderDevice, RenderResourceExtractor,
-};
-use std::{future::Future, path::PathBuf};
-use uuid::Uuid;
-use window::plugin::WindowPlugin;
-// use asset::{
-//     asset::{Asset, AssetId, AssetType},
-//     io::{embed::EmbeddedFS, local::LocalFS, AssetSourceConfig},
-// };
 use ecs::{
     core::{
         component::Component,
         entity::Entity,
         resource::{Res, Resource},
     },
-    event::{Event, Events},
-    system::{systems::Root, unlifetime::ReadRes},
-    world::{
-        self,
-        action::WorldAction,
-        cell::WorldCell,
-        query::{Not, Query},
-        World,
-    },
+    event::Events,
+    system::unlifetime::{Read, ReadRes, StaticQuery},
+    world::World,
 };
-use game::{Game, PostInit, Update};
-use pollster::block_on;
+use game::{Game, Main, SMain};
+use glam::Vec3;
+use graphics::{
+    core::{Color, ExtractError},
+    encase::ShaderType,
+    plugin::{RenderApp, RenderAppExt, RenderPlugin},
+    renderer::{
+        graph::{RenderGraphBuilder, RenderGraphNode},
+        pass::{Attachment, RenderPass, StoreOp},
+    },
+    resource::{
+        globals::GlobalView, plugin::MaterialAppExt, BindGroupLayout, BindGroupLayoutBuilder,
+        BlendMode, Material, MaterialBinding, Mesh, MeshAttribute, MeshAttributeKind, MeshPipeline,
+        MeshTopology, RenderMesh, ShaderSource, UniformBuffer, Unlit, VertexAttribute,
+    },
+    wgpu::{PrimitiveState, ShaderStages},
+    CreateBindGroup, Draw, DrawCalls, DrawExtractor, RenderAssets, RenderDevice,
+    RenderResourceExtractor, RenderState,
+};
+use uuid::Uuid;
 
 const VERTEX_SHADER_ID: Uuid = Uuid::from_u128(0);
 const FRAGMENT_SHADER_ID: Uuid = Uuid::from_u128(1);
 const MATERIAL_ID: Uuid = Uuid::from_u128(0);
+const MESH_ID: Uuid = Uuid::from_u128(1);
 
 fn main() {
     let embedded = EmbeddedFs::new("assets");
@@ -66,10 +50,19 @@ fn main() {
     embed_asset!(embedded, fs_id, "assets/fragment.wgsl", ());
     let mat_id = AssetId::from::<UnlitColor>(MATERIAL_ID);
 
+    let triangle =
+        Mesh::new(MeshTopology::TriangleList).with_attribute(MeshAttribute::Position(vec![
+            Vec3::new(0.0, 0.5, 0.0),
+            Vec3::new(-0.5, -0.5, 0.0),
+            Vec3::new(0.5, -0.5, 0.0),
+        ]));
+    let mesh_id = AssetId::from::<Mesh>(MESH_ID);
+
     Game::new()
         .add_plugin(RenderPlugin)
         .add_material::<UnlitColor>()
         .add_asset(mat_id, UnlitColor::from(Color::green()), vec![])
+        .add_asset(mesh_id, triangle, vec![])
         .scoped_resource::<RenderGraphBuilder>(|_, builder| {
             builder.add_node(BasicRenderNode::new());
         })
@@ -80,11 +73,51 @@ fn main() {
                 }
             });
         })
+        .add_draw_call_extractor::<DrawMesh>()
         .embed_assets("basic", embedded)
-        .add_systems(PostInit, |db: Res<AssetDatabase>| {
-            db.load(["basic://assets/embedded.txt"]);
-        })
         .run();
+}
+
+pub struct GlobalValue {
+    layout: BindGroupLayout,
+    buffer: UniformBuffer<f32>,
+}
+impl GlobalValue {
+    pub fn new(device: &RenderDevice) -> Self {
+        let layout = BindGroupLayoutBuilder::new()
+            .with_uniform_buffer(0, ShaderStages::VERTEX, true, NonZeroU64::new(4), None)
+            .build(device);
+        let buffer = UniformBuffer::new(device, 1f32);
+
+        Self { layout, buffer }
+    }
+
+    pub fn layout(&self) -> &BindGroupLayout {
+        &self.layout
+    }
+
+    pub fn buffer(&self) -> &UniformBuffer<f32> {
+        &self.buffer
+    }
+}
+
+impl MaterialBinding for GlobalValue {
+    fn bind_group_layout(&self) -> &BindGroupLayout {
+        todo!()
+    }
+}
+
+impl Resource for GlobalValue {}
+impl RenderResourceExtractor for GlobalValue {
+    type Arg = ReadRes<RenderDevice>;
+
+    fn can_extract(world: &World) -> bool {
+        world.has_resource::<RenderDevice>()
+    }
+
+    fn extract(arg: ecs::system::ArgItem<Self::Arg>) -> Result<Self, ExtractError> {
+        Ok(Self::new(&arg))
+    }
 }
 
 pub struct BasicMeshPipeline {
@@ -92,8 +125,8 @@ pub struct BasicMeshPipeline {
 }
 
 impl MeshPipeline for BasicMeshPipeline {
-    type GlobalBinding = GlobalView<()>;
-    type MeshBinding = BasicMeshPipeline;
+    type View = GlobalValue;
+    type Mesh = BasicMeshPipeline;
 
     fn primitive() -> PrimitiveState {
         PrimitiveState::default()
@@ -188,8 +221,74 @@ impl RenderGraphNode for BasicRenderNode {
 
     fn run(&mut self, ctx: &mut graphics::renderer::context::RenderContext) {
         let mut encoder = ctx.encoder();
-        if let Some(_) = self.pass.begin(&mut encoder, ctx, None, None) {}
+        if let Some(mut pass) = self.pass.begin(&mut encoder, ctx, None, None) {
+            let mut state = RenderState::new(&mut pass);
+            let meshes = ctx.resource::<RenderAssets<RenderMesh>>();
+            let calls = ctx.resource::<DrawCalls<DrawMesh>>();
+
+            for call in calls {
+                let mesh = match meshes.get(&call.mesh) {
+                    Some(mesh) => mesh,
+                    None => continue,
+                };
+
+                let position = match mesh.vertex_buffer(MeshAttributeKind::Position) {
+                    Some(position) => position,
+                    None => continue,
+                };
+
+                state.set_vertex_buffer(0, position.slice(..));
+
+                // Set object bind group
+            }
+        }
 
         ctx.submit(encoder);
     }
 }
+
+pub struct DrawMesh {
+    pub entity: Entity,
+    pub mesh: AssetId,
+    pub material: AssetRef<UnlitColor>,
+}
+
+impl Draw for DrawMesh {
+    fn entity(&self) -> ecs::core::entity::Entity {
+        self.entity
+    }
+}
+
+impl DrawExtractor for DrawMesh {
+    type Arg = SMain<StaticQuery<(Entity, Read<MeshRenderer>)>>;
+    type Draw = DrawMesh;
+
+    fn extract(calls: &mut graphics::DrawCalls<Self::Draw>, arg: ecs::system::ArgItem<Self::Arg>) {
+        for (entity, renderer) in arg.into_inner() {
+            calls.add(DrawMesh {
+                entity,
+                mesh: renderer.mesh,
+                material: renderer.material,
+            });
+        }
+    }
+}
+
+pub struct MeshRenderer {
+    pub mesh: AssetId,
+    pub material: AssetRef<UnlitColor>,
+}
+
+impl Component for MeshRenderer {}
+
+pub struct DrawMaterial<M: Material> {
+    pub material: AssetRef<M>,
+}
+
+// Draw Material
+// Set Render Pipeline
+// Set View Bind Group
+// Set Mesh Bind Group
+// Set Material Bind Group
+// Set Extra Bind Group
+// Draw Mesh

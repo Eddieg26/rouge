@@ -153,6 +153,15 @@ impl<D: Draw + Ord> DrawCalls<D> {
     }
 }
 
+impl<'a, D: Draw> IntoIterator for &'a DrawCalls<D> {
+    type Item = &'a D;
+    type IntoIter = std::slice::Iter<'a, D>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.calls.iter()
+    }
+}
+
 impl<D: Draw> Resource for DrawCalls<D> {}
 
 pub struct BatchDrawCalls<D: BatchDraw> {
@@ -453,19 +462,19 @@ pub trait ViewExtractor: Send + Sync + 'static {
     type Arg: SystemArg;
     type View: View;
 
-    fn extract(views: &mut RenderAssets<RenderView<Self::View>>, arg: &ArgItem<Self::Arg>);
+    fn extract(views: &mut RenderAssets<RenderView<Self::View>>, arg: ArgItem<Self::Arg>);
 }
 
 pub trait DrawExtractor: Send + Sync + 'static {
     type Arg: SystemArg;
     type Draw: Draw;
 
-    fn extract(calls: &mut DrawCalls<Self::Draw>, arg: &ArgItem<Self::Arg>);
+    fn extract(calls: &mut DrawCalls<Self::Draw>, arg: ArgItem<Self::Arg>);
 }
 
 pub trait BatchDrawExtractor: Send + Sync + 'static {
     type Arg: SystemArg;
     type Draw: BatchDraw;
 
-    fn extract(calls: &mut BatchDrawCalls<Self::Draw>, arg: &ArgItem<Self::Arg>);
+    fn extract(calls: &mut BatchDrawCalls<Self::Draw>, arg: ArgItem<Self::Arg>);
 }

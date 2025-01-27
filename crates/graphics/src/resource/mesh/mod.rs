@@ -1,8 +1,11 @@
-use super::buffer::{IndexBuffer, Indices, Vertex, VertexBuffer};
-use crate::core::{
-    AssetUsage, Color, ReadWrite, RenderAsset, RenderAssetExtractor, RenderAssets, RenderDevice,
+use super::buffer::{IndexBuffer, Indices, VertexBuffer};
+use crate::{
+    core::{Color, RenderDevice},
+    extract::{
+        AssetUsage, ExtractError, ReadWrite, RenderAsset, RenderAssetExtractor, RenderAssets,
+    },
 };
-use asset::{asset::Asset, AssetId};
+use asset::{asset::Asset, AssetId, AssetRef};
 use ecs::system::{unlifetime::ReadRes, ArgItem};
 use spatial::bounds::BoundingBox;
 use std::{hash::Hash, ops::Range};
@@ -123,11 +126,6 @@ impl MeshAttribute {
     }
 }
 
-impl Vertex for glam::Vec2 {}
-impl Vertex for glam::Vec3 {}
-impl Vertex for glam::Vec4 {}
-impl Vertex for Color {}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum MeshAttributeKind {
     Position,
@@ -191,16 +189,16 @@ bitflags::bitflags! {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct SubMesh {
-    pub start_vertex: u32,
-    pub vertex_count: u32,
-    pub start_index: u32,
-    pub index_count: u32,
+    pub start_vertex: u64,
+    pub vertex_count: u64,
+    pub start_index: u64,
+    pub index_count: u64,
 }
 
 impl SubMesh {
-    pub fn new(start_vertex: u32, vertex_count: u32, start_index: u32, index_count: u32) -> Self {
+    pub fn new(start_vertex: u64, vertex_count: u64, start_index: u64, index_count: u64) -> Self {
         Self {
             start_vertex,
             vertex_count,
@@ -211,6 +209,18 @@ impl SubMesh {
 }
 
 impl Asset for SubMesh {}
+
+#[derive(Clone, Copy)]
+pub struct MeshId {
+    pub id: AssetRef<Mesh>,
+    pub sub: Option<SubMesh>,
+}
+
+impl From<AssetRef<Mesh>> for MeshId {
+    fn from(id: AssetRef<Mesh>) -> Self {
+        Self { id, sub: None }
+    }
+}
 
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct Mesh {
@@ -613,36 +623,35 @@ impl RenderAsset for RenderMesh {
 }
 
 impl RenderAssetExtractor for Mesh {
-    type Source = Mesh;
-    type Asset = RenderMesh;
+    type Target = RenderMesh;
     type Arg = ReadRes<RenderDevice>;
 
     fn extract(
         _: &AssetId,
-        source: &mut Self::Source,
+        mesh: &mut Self,
         device: &mut ArgItem<Self::Arg>,
-    ) -> Result<Self::Asset, crate::core::ExtractError> {
-        let buffers = source.buffers(device);
+    ) -> Result<Self::Target, ExtractError> {
+        let buffers = mesh.buffers(device);
         Ok(buffers)
     }
 
     fn update(
         _: &AssetId,
-        source: &mut Self::Source,
-        asset: &mut Self::Asset,
+        mesh: &mut Self,
+        asset: &mut Self::Target,
         device: &mut ArgItem<Self::Arg>,
-    ) -> Result<(), crate::core::ExtractError> {
-        Ok(source.update(asset, device))
+    ) -> Result<(), ExtractError> {
+        Ok(mesh.update(asset, device))
     }
 
-    fn usage(_: &AssetId, source: &Self::Source) -> crate::core::AssetUsage {
+    fn usage(_: &AssetId, source: &Self) -> AssetUsage {
         match source.read_write {
             ReadWrite::Enabled => AssetUsage::Keep,
             ReadWrite::Disabled => AssetUsage::Discard,
         }
     }
 
-    fn remove(id: &AssetId, assets: &mut RenderAssets<Self::Asset>, _: &mut ArgItem<Self::Arg>) {
+    fn remove(id: &AssetId, assets: &mut RenderAssets<Self::Target>, _: &mut ArgItem<Self::Arg>) {
         assets.remove(id);
     }
 }

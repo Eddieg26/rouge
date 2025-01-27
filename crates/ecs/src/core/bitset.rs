@@ -41,6 +41,10 @@ impl Bitset {
         self.iter().all(|index| other.get(index))
     }
 
+    pub fn intersects(&self, other: &Self) -> bool {
+        self.iter().any(|index| other.get(index))
+    }
+
     pub fn len(&self) -> usize {
         self.bits.len() * 64
     }

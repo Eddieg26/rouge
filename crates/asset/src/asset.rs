@@ -113,15 +113,44 @@ impl<A: Asset> AssetRef<A> {
         }
     }
 
-    pub fn from(id: Uuid) -> Self {
+    pub fn id(&self) -> &AssetId {
+        &self.id
+    }
+}
+
+impl<A: Asset> From<AssetId> for AssetRef<A> {
+    fn from(id: AssetId) -> Self {
+        Self {
+            id,
+            _marker: PhantomData::default(),
+        }
+    }
+}
+
+impl<A: Asset> From<&AssetId> for AssetRef<A> {
+    fn from(id: &AssetId) -> Self {
+        Self {
+            id: *id,
+            _marker: PhantomData::default(),
+        }
+    }
+}
+
+impl<A: Asset> From<Uuid> for AssetRef<A> {
+    fn from(id: Uuid) -> Self {
         Self {
             id: AssetId::from::<A>(id),
             _marker: PhantomData::default(),
         }
     }
+}
 
-    pub fn id(&self) -> &AssetId {
-        &self.id
+impl<A: Asset> From<&Uuid> for AssetRef<A> {
+    fn from(id: &Uuid) -> Self {
+        Self {
+            id: AssetId::from::<A>(*id),
+            _marker: PhantomData::default(),
+        }
     }
 }
 
@@ -334,6 +363,10 @@ impl<A: Asset> Assets<A> {
 
     pub fn add(&mut self, id: AssetId, asset: A) -> Option<A> {
         self.assets.insert(id, asset)
+    }
+
+    pub fn extend(&mut self, assets: impl IntoIterator<Item = (AssetId, A)>) {
+        self.assets.extend(assets)
     }
 
     pub fn get(&self, id: &AssetId) -> Option<&A> {

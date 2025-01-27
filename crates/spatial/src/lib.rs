@@ -1,11 +1,23 @@
+pub mod aabb;
 pub mod bounds;
 pub mod circle;
+pub mod frustum;
 pub mod plugin;
 pub mod point;
 pub mod rect;
 pub mod size;
 pub mod sphere;
 pub mod transform;
+
+pub use aabb::*;
+pub use bounds::*;
+pub use circle::*;
+pub use frustum::*;
+pub use point::*;
+pub use rect::*;
+pub use size::*;
+pub use sphere::*;
+pub use transform::*;
 
 pub trait Mat3Ext {
     fn to_scale_rotation_translation(&self) -> (glam::Vec2, f32, glam::Vec2);

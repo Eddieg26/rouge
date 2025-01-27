@@ -1,4 +1,4 @@
-use super::{Buffer, BufferArrayIndex, BufferData, Label, StaticArray};
+use super::{Buffer, BufferArrayIndex, BufferData, DynamicOffset, Label, StaticArray};
 use crate::{
     core::RenderDevice,
     encase::{
@@ -238,9 +238,10 @@ impl<B: ShaderType> StorageBufferArray<B> {
 }
 
 impl<B: ShaderType + WriteInto> StorageBufferArray<B> {
-    pub fn push(&mut self, value: &B) {
-        self.data.write(value).unwrap();
+    pub fn push(&mut self, value: &B) -> DynamicOffset<B> {
+        let offset = self.data.write(value).unwrap() as u32;
         self.is_dirty = true;
+        offset.into()
     }
 
     pub fn set(&mut self, index: usize, value: B) {
@@ -338,7 +339,12 @@ impl<B: BufferData> BatchedStorageBuffer<B> {
     }
 
     pub fn binding(&self) -> Option<BindingResource> {
-        self.buffer.binding()
+        let mut binding = self.buffer.binding();
+        if let Some(BindingResource::Buffer(binding)) = &mut binding {
+            binding.size = Some(self.size());
+        }
+
+        binding
     }
 
     pub fn push(&mut self, value: B) -> BufferArrayIndex<B> {

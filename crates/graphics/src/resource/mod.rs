@@ -10,7 +10,6 @@ pub mod mesh;
 pub mod pipeline;
 pub mod shader;
 pub mod texture;
-pub mod material;
 
 pub use binding::*;
 pub use buffer::*;
@@ -18,7 +17,6 @@ pub use mesh::*;
 pub use pipeline::*;
 pub use shader::*;
 pub use texture::*;
-pub use material::*;
 
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct Id<T> {

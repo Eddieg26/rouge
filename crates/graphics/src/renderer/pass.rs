@@ -1,7 +1,7 @@
 use super::{context::RenderContext, resources::RenderGraphTexture};
 use crate::{
     core::Color,
-    resource::{texture::target::RenderTarget, Id},
+    resource::{texture::render::RenderTarget, Id},
 };
 use std::hash::Hash;
 
@@ -127,13 +127,13 @@ impl RenderPass {
         let mut color_attachments = vec![];
         for color in self.colors.iter() {
             let view = match color.attachment {
-                Attachment::Surface => ctx.texture(&target.color)?.view(),
+                Attachment::Surface => &target.color,
                 Attachment::Texture(ref id) => ctx.graph_texture(id)?,
             };
 
             let resolve_target = match color.resolve_target {
                 Some(attachment) => match attachment {
-                    Attachment::Surface => Some(ctx.texture(&target.color)?.view()),
+                    Attachment::Surface => Some(&target.color),
                     Attachment::Texture(ref id) => Some(ctx.graph_texture(id)?).map(|v| &**v),
                 },
                 None => None,
@@ -162,7 +162,7 @@ impl RenderPass {
         let depth_stencil_attachment = match &self.depth {
             Some(attachment) => Some(wgpu::RenderPassDepthStencilAttachment {
                 view: match attachment.attachment {
-                    Attachment::Surface => ctx.texture(&target.color)?.view(),
+                    Attachment::Surface => target.depth.as_ref()?,
                     Attachment::Texture(ref id) => ctx.graph_texture(id)?,
                 },
                 depth_ops: Some(wgpu::Operations {

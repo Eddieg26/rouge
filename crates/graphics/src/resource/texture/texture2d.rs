@@ -1,10 +1,16 @@
 use super::{
     sampler::{Sampler, SamplerDesc},
-    FilterMode, RenderTexture, Texture, TextureDimension, TextureFormat, WrapMode,
+    FilterMode, GpuTexture, Texture, TextureDimension, TextureFormat, WrapMode,
 };
-use crate::core::{RenderAssetExtractor, RenderAssets, RenderDevice};
+use crate::{
+    core::RenderDevice,
+    extract::{
+        asset::{RenderAssetExtractor, RenderAssets},
+        ExtractError,
+    },
+};
 use asset::{Asset, Settings};
-use ecs::system::unlifetime::{ReadRes, WriteRes};
+use ecs::system::unlifetime::ReadRes;
 use std::ops::Range;
 
 #[derive(Clone, serde::Serialize, serde::Deserialize, Asset)]
@@ -156,18 +162,14 @@ impl Default for Texture2dSettings {
 impl Settings for Texture2dSettings {}
 
 impl RenderAssetExtractor for Texture2d {
-    type Source = Texture2d;
-    type Asset = RenderTexture;
-    type Arg = (ReadRes<RenderDevice>, WriteRes<RenderAssets<Sampler>>);
+    type Target = GpuTexture;
+    type Arg = ReadRes<RenderDevice>;
 
     fn extract(
-        id: &asset::AssetId,
-        source: &mut Self::Source,
-        arg: &mut ecs::system::ArgItem<Self::Arg>,
-    ) -> Result<Self::Asset, crate::core::ExtractError> {
-        let (device, samplers) = arg;
-
-        let texture = RenderTexture::create(device, source);
+        _: &asset::AssetId,
+        source: &mut Self,
+        device: &mut ecs::system::ArgItem<Self::Arg>,
+    ) -> Result<Self::Target, ExtractError> {
         let sampler = Sampler::create(
             device,
             &SamplerDesc {
@@ -182,7 +184,7 @@ impl RenderAssetExtractor for Texture2d {
             },
         );
 
-        samplers.add(id.into(), sampler);
+        let texture = GpuTexture::create(device, source, sampler);
 
         source.pixels.clear();
 
@@ -191,16 +193,14 @@ impl RenderAssetExtractor for Texture2d {
 
     fn remove(
         id: &asset::AssetId,
-        assets: &mut crate::core::RenderAssets<Self::Asset>,
-        arg: &mut ecs::system::ArgItem<Self::Arg>,
+        assets: &mut RenderAssets<Self::Target>,
+        _: &mut ecs::system::ArgItem<Self::Arg>,
     ) {
-        let (.., samplers) = arg;
-
-        samplers.remove(&id.into());
         assets.remove(&id.into());
     }
 }
 
+#[derive(serde::Serialize, serde::Deserialize, Asset)]
 pub struct Texture2dArray {
     width: u32,
     height: u32,
@@ -326,5 +326,44 @@ impl Texture for Texture2dArray {
 
     fn pixels(&self, range: Range<usize>) -> &[u8] {
         &self.pixels[range]
+    }
+}
+
+impl RenderAssetExtractor for Texture2dArray {
+    type Target = GpuTexture;
+    type Arg = ReadRes<RenderDevice>;
+
+    fn extract(
+        _: &asset::AssetId,
+        source: &mut Self,
+        device: &mut ecs::system::ArgItem<Self::Arg>,
+    ) -> Result<Self::Target, ExtractError> {
+        let sampler = Sampler::create(
+            device,
+            &SamplerDesc {
+                label: None,
+                wrap_mode: source.wrap_mode,
+                filter_mode: source.filter_mode,
+                border_color: match source.wrap_mode {
+                    WrapMode::ClampToBorder => Some(wgpu::SamplerBorderColor::TransparentBlack),
+                    _ => None,
+                },
+                ..Default::default()
+            },
+        );
+
+        let texture = GpuTexture::create(device, source, sampler);
+
+        source.pixels.clear();
+
+        Ok(texture)
+    }
+
+    fn remove(
+        id: &asset::AssetId,
+        assets: &mut RenderAssets<Self::Target>,
+        _: &mut ecs::system::ArgItem<Self::Arg>,
+    ) {
+        assets.remove(&id.into());
     }
 }

@@ -1,4 +1,4 @@
-use crate::resource::{texture::target::RenderTarget, Id};
+use crate::resource::{texture::render::RenderTarget, Id};
 use crate::wgpu::{
     HandleError, HasDisplayHandle, HasWindowHandle, SurfaceTargetUnsafe, TextureFormat,
 };

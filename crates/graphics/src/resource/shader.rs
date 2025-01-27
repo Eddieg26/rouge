@@ -1,6 +1,9 @@
 use crate::{
-    asset::{AssetUsage, ExtractError, RenderAsset, RenderAssetExtractor, RenderAssets},
     device::RenderDevice,
+    extract::{
+        asset::{RenderAsset, RenderAssetExtractor, RenderAssets},
+        AssetUsage, ExtractError,
+    },
     resource::Id,
 };
 use asset::{
@@ -278,24 +281,23 @@ impl std::ops::Deref for Shader {
     }
 }
 
-impl RenderAssetExtractor for Shader {
-    type Source = ShaderSource;
-    type Asset = Shader;
+impl RenderAssetExtractor for ShaderSource {
+    type Target = Shader;
     type Arg = ReadRes<RenderDevice>;
 
     fn extract(
         _: &AssetId,
-        source: &mut Self::Source,
+        source: &mut Self,
         arg: &mut ArgItem<Self::Arg>,
-    ) -> Result<Self::Asset, ExtractError> {
+    ) -> Result<Self::Target, ExtractError> {
         Ok(Shader::create(&arg, source))
     }
 
-    fn remove(id: &AssetId, assets: &mut RenderAssets<Self::Asset>, _: &mut ArgItem<Self::Arg>) {
+    fn remove(id: &AssetId, assets: &mut RenderAssets<Self::Target>, _: &mut ArgItem<Self::Arg>) {
         assets.remove(&Id::<Shader>::from(id));
     }
 
-    fn usage(_: &AssetId, _: &Self::Source) -> AssetUsage {
+    fn usage(_: &AssetId, _: &Self) -> AssetUsage {
         AssetUsage::Discard
     }
 }

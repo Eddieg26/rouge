@@ -1,8 +1,7 @@
-use super::{FilterMode, WrapMode};
+use super::{FilterMode, Texture, WrapMode};
 use crate::{
-    resource::Id,
     wgpu::{CompareFunction, SamplerBorderColor},
-    RenderAsset,
+    RenderDevice,
 };
 use std::sync::Arc;
 
@@ -37,7 +36,7 @@ impl Default for SamplerDesc<'_> {
 pub struct Sampler(Arc<wgpu::Sampler>);
 
 impl Sampler {
-    pub fn create(device: &wgpu::Device, desc: &SamplerDesc) -> Self {
+    pub fn create(device: &RenderDevice, desc: &SamplerDesc) -> Self {
         let address_mode = desc.wrap_mode.into();
         let filter_mode = desc.filter_mode.into();
 
@@ -59,6 +58,22 @@ impl Sampler {
         Self(Arc::new(sampler))
     }
 
+    pub fn from_texture<T: Texture>(device: &RenderDevice, texture: &T) -> Self {
+        Self::create(
+            device,
+            &SamplerDesc {
+                label: None,
+                wrap_mode: texture.wrap_mode(),
+                filter_mode: texture.filter_mode(),
+                border_color: match texture.wrap_mode() {
+                    WrapMode::ClampToBorder => Some(wgpu::SamplerBorderColor::TransparentBlack),
+                    _ => None,
+                },
+                ..Default::default()
+            },
+        )
+    }
+
     pub fn inner(&self) -> &wgpu::Sampler {
         &self.0
     }
@@ -76,8 +91,4 @@ impl From<wgpu::Sampler> for Sampler {
     fn from(sampler: wgpu::Sampler) -> Self {
         Self(Arc::new(sampler))
     }
-}
-
-impl RenderAsset for Sampler {
-    type Id = Id<Sampler>;
 }

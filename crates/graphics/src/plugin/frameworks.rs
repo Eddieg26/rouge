@@ -1,40 +1,25 @@
-use super::phases::{PostExtract, PostRender};
-use crate::plugin::phases::{PreRender, Present, Render};
-use crate::renderer::RenderGraphBuilder;
-use crate::resource::extract::PipelineExtractors;
-use crate::resource::{
-    RenderTarget, RenderTargetTexture, ResizeRenderGraph, Sampler, SamplerDesc, ShaderSource,
-};
-use crate::surface::RenderSurfaceError;
 use crate::{
-    renderer::RenderGraph,
-    resource::RenderTexture,
-    surface::{RenderSurface, RenderSurfaceTexture},
-    RenderAssets,
+    extract::{ExtractError, RenderAssetExtractors, RenderAssets, RenderResourceExtractors},
+    plugin::phases::{PostExtract, PostRender, PreRender, Present, Render},
+    renderer::{RenderGraph, RenderGraphBuilder},
+    resource::{AddRenderTarget, GpuTexture, RenderTarget, RenderTargetEvent, UpdateRenderTarget},
+    surface::{RenderSurface, RenderSurfaceError, RenderSurfaceTexture},
+    RenderApp, RenderDevice, RenderInstance,
 };
-use crate::{
-    ExtractError, RenderAssetExtractors, RenderDevice, RenderInstance, RenderResourceExtractors,
-};
-use asset::database::events::AssetEvent;
-use asset::database::AssetDatabase;
-use asset::io::cache::LoadPath;
-use ecs::core::resource::NonSend;
-use ecs::event::{Event, Events};
-use ecs::world::action::{BatchEvents, WorldAction, WorldActions};
 use ecs::{
     core::resource::{Res, ResMut},
-    world::World,
+    event::Events,
+    world::{
+        action::{BatchEvents, WorldAction, WorldActions},
+        World,
+    },
 };
-use game::{AppTag, ExitGame, Extract, Framework, Main, SubActions};
+use game::{ExitGame, Extract, Framework, MainWorld, SubActions};
 use pollster::block_on;
-use window::events::{WindowCreated, WindowResized};
-use window::Window;
-
-pub struct RenderApp;
-
-impl AppTag for RenderApp {
-    const NAME: &'static str = "Render";
-}
+use window::{
+    events::{WindowCreated, WindowResized},
+    Window,
+};
 
 pub struct RenderFramework;
 
@@ -42,6 +27,7 @@ impl Framework for RenderFramework {
     fn apply(&self, context: &mut game::FrameworkContext) {
         context
             .add_resource(RenderGraphBuilder::new())
+            .observe::<WindowCreated, _>(Self::extract_surface)
             .add_sub_app::<RenderApp>()
             .add_phase::<PreRender>()
             .add_phase::<Render>()
@@ -54,21 +40,25 @@ impl Framework for RenderFramework {
     }
 }
 impl RenderFramework {
+    fn extract_surface(actions: SubActions<RenderApp>) {
+        actions.defer::<Extract>(ExtractSurface);
+    }
+
     fn set_surface_texture(
         surface: Res<RenderSurface>,
-        mut textures: ResMut<RenderAssets<RenderTexture>>,
+        mut targets: ResMut<RenderAssets<RenderTarget>>,
         mut surface_texture: ResMut<RenderSurfaceTexture>,
     ) {
-        let surface = match surface.texture() {
+        let texture = match surface.texture() {
             Ok(texture) => texture,
             Err(_) => return,
         };
 
-        let texture = RenderTexture::new(None, surface.texture.create_view(&Default::default()));
+        targets
+            .get_mut(&RenderSurface::ID)
+            .map(|target| target.color = texture.texture.create_view(&Default::default()));
 
-        textures.add(RenderSurface::ID.to(), texture);
-
-        surface_texture.set(surface);
+        surface_texture.set(texture);
     }
 
     fn run_render_graph(mut graph: Option<ResMut<RenderGraph>>, world: &World) {
@@ -79,7 +69,7 @@ impl RenderFramework {
 
     fn present_surface_texture(
         mut surface_texture: ResMut<RenderSurfaceTexture>,
-        mut textures: ResMut<RenderAssets<RenderTexture>>,
+        mut textures: ResMut<RenderAssets<GpuTexture>>,
     ) {
         surface_texture.present();
         textures.remove(&RenderSurface::ID.to());
@@ -91,13 +81,12 @@ pub struct ResizeFramework;
 impl Framework for ResizeFramework {
     fn apply(&self, context: &mut game::FrameworkContext) {
         context
+            .register_event::<WindowResized>()
             .observe::<WindowResized, _>(Self::extract_resize_events)
-            .observe::<AssetEvent<RenderTargetTexture>, _>(Self::on_update_render_targets)
             .sub_app_mut::<RenderApp>()
             .register_event::<WindowResized>()
-            .register_event::<ResizeRenderGraph>()
-            .observe::<WindowResized, _>(Self::on_window_resized)
-            .observe::<ResizeRenderGraph, _>(Self::on_resize_render_graph);
+            .observe::<WindowResized, _>(Self::resize_surface)
+            .observe::<RenderTargetEvent, _>(Self::resize_render_graph);
     }
 }
 
@@ -106,13 +95,13 @@ impl ResizeFramework {
         actions.defer::<Extract>(BatchEvents::new(events.iter().copied()));
     }
 
-    fn on_window_resized(
+    fn resize_surface(
+        actions: WorldActions,
         events: Res<Events<WindowResized>>,
         device: Res<RenderDevice>,
         mut surface: ResMut<RenderSurface>,
         mut texture: ResMut<RenderSurfaceTexture>,
         mut targets: ResMut<RenderAssets<RenderTarget>>,
-        mut updates: ResMut<Events<ResizeRenderGraph>>,
     ) {
         if let Some(event) = events.last() {
             texture.destroy();
@@ -121,55 +110,32 @@ impl ResizeFramework {
             if let Some(target) = targets.get_mut(&RenderSurface::ID) {
                 target.width = event.size.width;
                 target.height = event.size.height;
-                updates.add(ResizeRenderGraph);
             }
+
+            actions.add(UpdateRenderTarget::new(RenderSurface::ID));
         }
     }
 
-    fn on_resize_render_graph(
+    fn resize_render_graph(
         targets: Res<RenderAssets<RenderTarget>>,
         device: Res<RenderDevice>,
         mut graph: Option<ResMut<RenderGraph>>,
     ) {
-        let (width, height) = targets.max_size();
         if let Some(graph) = graph.as_mut() {
+            let (width, height) = targets.max_size();
             graph.resize(&device, width, height);
         }
     }
-
-    fn on_update_render_targets(
-        events: Res<Events<AssetEvent<RenderTargetTexture>>>,
-        actions: SubActions<RenderApp>,
-    ) {
-        if events
-            .iter()
-            .any(|event| !matches!(event, AssetEvent::Imported { .. }))
-        {
-            actions.add(ResizeRenderGraph);
-        }
-    }
 }
 
-pub struct CreateSurfaceFramework;
+pub struct ExtractSurface;
 
-impl Framework for CreateSurfaceFramework {
-    fn apply(&self, context: &mut game::FrameworkContext) {
-        context
-            .observe::<WindowCreated, _>(Self::create_render_surface)
-            .sub_app_mut::<RenderApp>()
-            .register_event::<SurfaceCreated>();
-    }
-}
-
-impl CreateSurfaceFramework {
-    fn create_render_surface(
-        window: NonSend<Window>,
-        actions: &WorldActions,
-        render_actions: SubActions<RenderApp>,
-    ) {
-        let instance = RenderInstance::create();
-        let actions = actions.clone();
+impl WorldAction for ExtractSurface {
+    fn execute(self, world: &mut World) -> Option<()> {
         let runner = async {
+            let window = world.resource::<MainWorld>().non_send_resource::<Window>();
+            let instance = RenderInstance::create();
+
             let mut surface = match RenderSurface::create(&instance, &window).await {
                 Ok(surface) => surface,
                 Err(error) => return Err(CreateSurfaceError::Surface(error)),
@@ -182,19 +148,62 @@ impl CreateSurfaceFramework {
 
             surface.configure(&device);
 
-            render_actions.add(AddRenderSurface { surface, device });
+            let size = wgpu::Extent3d {
+                width: surface.width(),
+                height: surface.height(),
+                depth_or_array_layers: 1,
+            };
+
+            let color = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("Surface Color"),
+                size,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: surface.format(),
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[surface.format()],
+            });
+
+            let depth = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("Surface Depth"),
+                size,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: surface.depth_format(),
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[surface.depth_format()],
+            });
+
+            let target = RenderTarget {
+                width: surface.width(),
+                height: surface.height(),
+                color: color.create_view(&Default::default()),
+                depth: Some(depth.create_view(&Default::default())),
+            };
+
+            world.add_resource(surface);
+            world.add_resource(device);
+
+            world
+                .actions()
+                .add(AddRenderTarget::new(RenderSurface::ID, target));
 
             Ok(())
         };
 
         if let Err(error) = block_on(runner) {
-            actions.add(ExitGame::failure(error));
+            world
+                .resource::<MainWorld>()
+                .actions()
+                .add(ExitGame::failure(error));
         }
+
+        Some(())
     }
 }
-
-pub struct SurfaceCreated;
-impl Event for SurfaceCreated {}
 
 #[derive(Debug)]
 pub enum CreateSurfaceError {
@@ -213,90 +222,16 @@ impl std::fmt::Display for CreateSurfaceError {
 
 impl std::error::Error for CreateSurfaceError {}
 
-pub struct AddRenderSurface {
-    pub surface: RenderSurface,
-    pub device: RenderDevice,
-}
-
-impl WorldAction for AddRenderSurface {
-    fn execute(self, world: &mut World) -> Option<()> {
-        let world = unsafe { world.cell() };
-        let surface = self.surface;
-        let device = self.device;
-
-        let target = RenderTarget {
-            width: surface.width(),
-            height: surface.height(),
-            format: surface.format(),
-            color: RenderSurface::ID.to(),
-            sampler: RenderSurface::ID.to(),
-        };
-
-        let sampler = Sampler::create(&device, &SamplerDesc::default());
-
-        world.get_mut().add_resource(surface);
-        world.get_mut().add_resource(device);
-
-        world
-            .resource_mut::<RenderAssets<Sampler>>()
-            .add(target.sampler, sampler);
-
-        world
-            .resource_mut::<RenderAssets<RenderTarget>>()
-            .add(RenderSurface::ID, target);
-
-        world
-            .resource_mut::<Events<SurfaceCreated>>()
-            .add(SurfaceCreated);
-
-        Some(())
-    }
-}
-
 pub struct ExtractFramework;
 
 impl Framework for ExtractFramework {
     fn apply(&self, context: &mut game::FrameworkContext) {
         context
             .add_resource(RenderAssetExtractors::new())
-            .add_resource(RenderResourceExtractors::new())
-            .add_resource(PipelineExtractors::new())
+            .add_resource(RenderResourceExtractors::default())
             .register_event::<ExtractError>()
-            .observe::<AssetEvent<ShaderSource>, _>(Self::on_shader_loaded)
             .sub_app_mut::<RenderApp>()
             .add_sub_phase::<Extract, PostExtract>()
-            .add_systems(PostExtract, Self::extract_pipeline_actions)
             .register_event::<ExtractError>();
-    }
-}
-
-impl ExtractFramework {
-    fn extract_pipeline_actions(
-        mut extractors: Main<ResMut<PipelineExtractors>>,
-        actions: &WorldActions,
-    ) {
-        actions.extend(extractors.actions.drain(..).map(|(_, action)| action));
-    }
-
-    fn on_shader_loaded(
-        events: Res<Events<AssetEvent<ShaderSource>>>,
-        database: Res<AssetDatabase>,
-        mut extractors: ResMut<PipelineExtractors>,
-    ) {
-        for event in events.iter() {
-            let (id, loaded) = match event {
-                AssetEvent::Added { id } => (id, true),
-                AssetEvent::Modified { id } => (id, true),
-                AssetEvent::Unloaded { id, .. } => (id, false),
-                AssetEvent::Failed { id, .. } => (id, false),
-                _ => continue,
-            };
-
-            extractors.shader_updated(LoadPath::Id(*id), loaded);
-            let library = database.library().read_blocking();
-            if let Some(path) = library.get_path(id) {
-                extractors.shader_updated(LoadPath::Path(path.clone()), loaded);
-            }
-        }
     }
 }

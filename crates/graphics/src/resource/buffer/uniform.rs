@@ -1,6 +1,6 @@
 use encase::internal::AlignmentValue;
 
-use super::{Buffer, BufferArrayIndex, BufferData, Label, StaticArray};
+use super::{Buffer, BufferArrayIndex, BufferData, BufferSlice, DynamicOffset, Label, StaticArray};
 use crate::{
     encase::{
         internal::{CreateFrom, Reader, WriteInto},
@@ -9,7 +9,7 @@ use crate::{
     wgpu::{BindingResource, BufferUsages},
     RenderDevice,
 };
-use std::{marker::PhantomData, num::NonZero};
+use std::{marker::PhantomData, num::NonZero, ops::RangeBounds};
 
 pub struct UniformBuffer<T: ShaderType> {
     label: Label,
@@ -275,6 +275,10 @@ impl<B: ShaderType> UniformBufferArray<B> {
         self.inner.as_ref().map(|b| b.as_entire_binding())
     }
 
+    pub fn slice<S: RangeBounds<u64>>(&self, range: S) -> Option<BufferSlice> {
+        self.inner.as_ref().map(|b| b.slice(range))
+    }
+
     pub fn min_alignment(device: &RenderDevice) -> u64 {
         AlignmentValue::new(device.limits().min_uniform_buffer_offset_alignment as u64)
             .round_up(B::min_size().get())
@@ -282,9 +286,10 @@ impl<B: ShaderType> UniformBufferArray<B> {
 }
 
 impl<B: ShaderType + WriteInto> UniformBufferArray<B> {
-    pub fn push(&mut self, value: &B) {
-        self.data.write(value).unwrap();
+    pub fn push(&mut self, value: &B) -> DynamicOffset<B> {
+        let offset = self.data.write(value).unwrap() as u32;
         self.is_dirty = true;
+        offset.into()
     }
 
     pub fn set(&mut self, index: usize, value: B) {
@@ -475,7 +480,16 @@ impl<B: BufferData> BatchedUniformBuffer<B> {
     }
 
     pub fn binding(&self) -> Option<BindingResource> {
-        self.buffer.binding()
+        let mut binding = self.buffer.binding();
+        if let Some(BindingResource::Buffer(binding)) = &mut binding {
+            binding.size = Some(self.size());
+        }
+
+        binding
+    }
+
+    pub fn slice<S: RangeBounds<u64>>(&self, range: S) -> Option<BufferSlice> {
+        self.buffer.slice(range)
     }
 
     pub fn push(&mut self, value: B) -> BufferArrayIndex<B> {

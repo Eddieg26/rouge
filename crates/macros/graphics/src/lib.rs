@@ -139,7 +139,7 @@ fn generate_create_bind_group(input: DeriveInput) -> Result<TokenStream> {
                     visibility,
                 } => {
                     entries.push(quote::quote! {
-                        let id: Option<Id<RenderTexture>> = self.#field_name.into_optional_id();
+                        let id: Option<Id<GpuTexture>> = self.#field_name.into_optional_id();
                         match id {
                             Some(id) => match textures.get(&id) {
                                 Some(texture) => #BIND_GROUP_BUILDER.add_texture(#binding, texture.view()),
@@ -159,10 +159,10 @@ fn generate_create_bind_group(input: DeriveInput) -> Result<TokenStream> {
                     visibility,
                 } => {
                     entries.push(quote::quote! {
-                        let id: Option<Id<Sampler>> = self.#field_name.into_optional_id();
+                        let id: Option<Id<GpuTexture>> = self.#field_name.into_optional_id();
                         match id {
-                            Some(id) => match samplers.get(&id) {
-                                Some(sampler) => #BIND_GROUP_BUILDER.add_sampler(#binding, sampler.inner()),
+                            Some(id) => match textures.get(&id) {
+                                Some(texture) => #BIND_GROUP_BUILDER.add_sampler(#binding, texture.sampler().inner()),
                                 None => #BIND_GROUP_BUILDER.add_sampler(#binding, fallbacks.sampler.inner()),
                             },
                             None => #BIND_GROUP_BUILDER.add_sampler(#binding, fallbacks.sampler.inner()),
@@ -273,8 +273,7 @@ fn generate_create_bind_group(input: DeriveInput) -> Result<TokenStream> {
             type Data = #bind_group_data;
 
             type Arg = (
-                #ecs::system::unlifetime::ReadRes<#graphics::RenderAssets<#graphics::resource::RenderTexture>>,
-                #ecs::system::unlifetime::ReadRes<#graphics::RenderAssets<#graphics::resource::Sampler>>,
+                #ecs::system::unlifetime::ReadRes<#graphics::extract::RenderAssets<#graphics::resource::GpuTexture>>,
                 #ecs::system::unlifetime::ReadRes<#graphics::resource::Fallbacks>
             );
 
@@ -282,15 +281,15 @@ fn generate_create_bind_group(input: DeriveInput) -> Result<TokenStream> {
                 Some(#type_name)
             }
 
-            fn bind_group(
+            fn create_bind_group(
                 &self,
                 device: &graphics::RenderDevice,
                 layout: &graphics::resource::BindGroupLayout,
                 arg: &#ecs::system::ArgItem<Self::Arg>,
             ) -> Result<#graphics::resource::BindGroup<Self::Data>, #graphics::resource::CreateBindGroupError> {
-                use #graphics::{wgpu::BufferUsages, resource::{Buffer, BindGroup, BindGroupEntries, TextureDimension, Sampler, RenderTexture, IntoBufferData, IntoOptionalId}};
+                use #graphics::{wgpu::BufferUsages, resource::{Buffer, BindGroup, BindGroupEntries, TextureDimension, Sampler, GpuTexture, IntoBufferData, IntoOptionalId}};
 
-                let (textures, samplers, fallbacks) = arg;
+                let (textures, fallbacks) = arg;
 
                 #uniform_buffer_def
                 let mut #BIND_GROUP_BUILDER = BindGroupEntries::new();
@@ -300,7 +299,7 @@ fn generate_create_bind_group(input: DeriveInput) -> Result<TokenStream> {
                 Ok(BindGroup::create(device, layout, #BIND_GROUP_BUILDER.entries(), #get_bind_group_data))
             }
 
-            fn bind_group_layout(device: &#graphics::RenderDevice) -> #graphics::resource::BindGroupLayout {
+            fn create_bind_group_layout(device: &#graphics::RenderDevice) -> #graphics::resource::BindGroupLayout {
                 use #graphics::{wgpu::{TextureSampleType, SamplerBindingType, ShaderStages}, resource::{BindGroupLayoutBuilder, TextureDimension}};
 
                 let mut #BIND_GROUP_LAYOUT_BUILDER = BindGroupLayoutBuilder::new();

@@ -308,6 +308,10 @@ pub trait SystemArg {
         true
     }
 
+    fn validate(_world: &WorldCell) -> bool {
+        true
+    }
+
     fn done(_world: &WorldCell) {}
 }
 

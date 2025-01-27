@@ -8,6 +8,7 @@ use crate::{
     wgpu::{BindingResource, BufferUsages},
     RenderDevice,
 };
+use bytemuck::{Pod, Zeroable};
 use std::{
     marker::PhantomData,
     num::NonZero,
@@ -29,8 +30,11 @@ pub use vertex::*;
 
 pub type BufferId = AtomicId<Buffer>;
 
-pub trait BufferData: Clone + ShaderType + ShaderSize + WriteInto + 'static {}
-impl<T: Clone + ShaderType + ShaderSize + WriteInto + 'static> BufferData for T {}
+pub trait BufferData:
+    Clone + ShaderType + ShaderSize + WriteInto + Pod + Zeroable + 'static
+{
+}
+impl<T: Clone + ShaderType + ShaderSize + WriteInto + Pod + Zeroable + 'static> BufferData for T {}
 
 pub struct Buffer {
     id: BufferId,
@@ -198,6 +202,28 @@ impl<T: BufferData> BufferArrayIndex<T> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct DynamicOffset<T>(u32, PhantomData<T>);
+impl<T> From<u32> for DynamicOffset<T> {
+    fn from(offset: u32) -> Self {
+        Self(offset, Default::default())
+    }
+}
+
+impl<T> DynamicOffset<T> {
+    pub fn get(&self) -> u32 {
+        self.0
+    }
+}
+
+impl<T> std::ops::Deref for DynamicOffset<T> {
+    type Target = u32;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 pub struct BufferArray<T: BufferData> {
     label: Label,
     data: Vec<u8>,
@@ -236,6 +262,10 @@ impl<T: BufferData> BufferArray<T> {
 
     pub fn binding(&self) -> Option<BindingResource> {
         self.inner.as_ref().map(|buffer| buffer.as_entire_binding())
+    }
+
+    pub fn slice<S: RangeBounds<u64>>(&self, range: S) -> Option<BufferSlice> {
+        self.inner.as_ref().map(|buffer| buffer.slice(range))
     }
 
     pub fn element_size(&self) -> usize {

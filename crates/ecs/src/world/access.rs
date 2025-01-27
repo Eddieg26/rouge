@@ -93,6 +93,10 @@ impl<R: Resource + Send> SystemArg for Res<'_, R> {
         }]
     }
 
+    fn validate(world: &WorldCell) -> bool {
+        world.has_resource::<R>()
+    }
+
     fn is_send() -> bool {
         true
     }
@@ -132,6 +136,10 @@ impl<R: Resource + Send> SystemArg for ResMut<'_, R> {
             access: crate::system::AccessType::Write,
             send: true,
         }]
+    }
+
+    fn validate(world: &WorldCell) -> bool {
+        world.has_resource::<R>()
     }
 
     fn is_send() -> bool {
@@ -183,6 +191,10 @@ impl<R: Resource> SystemArg for NonSend<'_, R> {
         }]
     }
 
+    fn validate(world: &WorldCell) -> bool {
+        world.has_non_send_resource::<R>()
+    }
+
     fn is_send() -> bool {
         false
     }
@@ -224,6 +236,10 @@ impl<R: Resource> SystemArg for NonSendMut<'_, R> {
         }]
     }
 
+    fn validate(world: &WorldCell) -> bool {
+        world.has_non_send_resource::<R>()
+    }
+
     fn is_send() -> bool {
         false
     }
@@ -245,6 +261,22 @@ impl<R: Resource + Send> SystemArg for Removed<R> {
     fn get<'a>(world: WorldCell<'a>) -> Self::Item<'a> {
         let resource = world.remove_resource::<R>();
         Self { resource }
+    }
+
+    fn access() -> Vec<crate::system::WorldAccess> {
+        vec![crate::system::WorldAccess::Resource {
+            ty: ResourceId::of::<R>(),
+            access: crate::system::AccessType::Write,
+            send: true,
+        }]
+    }
+
+    fn is_send() -> bool {
+        true
+    }
+
+    fn validate(world: &WorldCell) -> bool {
+        world.has_resource::<R>()
     }
 }
 

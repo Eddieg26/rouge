@@ -1,4 +1,4 @@
-use glam::Vec3;
+use glam::{Vec3, Vec3A};
 
 #[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
 pub struct BoundingBox {
@@ -16,7 +16,7 @@ impl BoundingBox {
         Self { min, max }
     }
 
-    pub fn mid(&self) -> Vec3 {
+    pub fn center(&self) -> Vec3 {
         (self.min + self.max) / 2.0
     }
 
@@ -54,6 +54,24 @@ impl BoundingBox {
             min: min.min(max),
             max: min.max(max),
         }
+    }
+
+    pub fn relative_radius(&self, normal: Vec3A) -> f32 {
+        let radius = Vec3A::from(self.size() * 0.5);
+        radius.abs().dot(normal).abs()
+    }
+
+    pub fn points(&self) -> [Vec3; 8] {
+        [
+            self.min,
+            Vec3::new(self.max.x, self.min.y, self.min.z),
+            Vec3::new(self.max.x, self.min.y, self.max.z),
+            Vec3::new(self.min.x, self.max.y, self.min.z),
+            Vec3::new(self.min.x, self.max.y, self.max.z),
+            Vec3::new(self.max.x, self.max.y, self.min.z),
+            Vec3::new(self.max.x, self.max.y, self.max.z),
+            self.max,
+        ]
     }
 }
 

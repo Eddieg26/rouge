@@ -3,13 +3,14 @@ use super::{
     resources::{BufferDesc, GraphResources, RenderGraphBuffer, RenderGraphTexture, TextureDesc},
 };
 use crate::{
-    core::{ExtractError, RenderAssets, RenderDevice, RenderResourceExtractor},
-    resource::{texture::target::RenderTarget, Id},
+    core::RenderDevice,
+    extract::{RenderAssets, RenderResourceExtractor},
+    resource::{texture::RenderTarget, Id},
     surface::RenderSurface,
 };
 use ecs::{
     core::{resource::Resource, IndexMap},
-    system::unlifetime::ReadRes,
+    system::{unlifetime::ReadRes, ArgItem},
     world::{access::Removed, World},
 };
 use std::{any::TypeId, collections::HashMap};
@@ -291,31 +292,20 @@ impl Resource for RenderGraph {}
 
 impl RenderResourceExtractor for RenderGraph {
     type Arg = (
-        ReadRes<RenderDevice>,
         ReadRes<RenderAssets<RenderTarget>>,
         Removed<RenderGraphBuilder>,
     );
 
-    fn can_extract(world: &World) -> bool {
-        world.has_resource::<RenderDevice>()
-            && world.has_resource::<RenderAssets<RenderTarget>>()
-            && world.has_resource::<RenderGraphBuilder>()
-    }
-
-    fn extract(arg: ecs::system::ArgItem<Self::Arg>) -> Result<Self, ExtractError> {
-        let (device, targets, builder) = arg;
+    fn extract(device: &RenderDevice, arg: ArgItem<Self::Arg>) -> Self {
+        let (targets, builder) = arg;
         if let Some(builder) = builder.into_inner() {
             let (width, height) = targets.max_size();
             match builder.build(&device, width, height) {
-                Ok(graph) => Ok(graph),
-                Err(error) => Err(ExtractError::from_error(error)),
+                Ok(graph) => graph,
+                Err(_) => RenderGraph::default(),
             }
         } else {
-            Ok(Default::default())
+            RenderGraph::default()
         }
-    }
-
-    fn default() -> Option<Self> {
-        Some(Default::default())
     }
 }

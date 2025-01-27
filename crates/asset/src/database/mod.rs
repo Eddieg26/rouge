@@ -1,8 +1,8 @@
-use crate::io::{
+use crate::{io::{
     cache::{LoadPath, SharedLibrary},
     source::AssetPath,
     AssetIoError,
-};
+}, AssetId};
 use async_std::sync::{Mutex, RwLock};
 use config::AssetConfig;
 use ecs::{core::resource::Resource, event::Event, task::TaskPool, world::action::WorldActions};
@@ -120,6 +120,11 @@ impl AssetDatabase {
         };
 
         self.states.read_blocking().get_load_state(id)
+    }
+
+    pub fn path_id(&self, path: &AssetPath) -> Option<AssetId> {
+        let library = self.library.read_arc_blocking();
+        library.get_id(path)
     }
 
     pub fn refresh(&self, mode: RefreshMode) {

@@ -1,11 +1,17 @@
-pub mod asset;
+use game::AppTag;
+
 pub mod color;
 pub mod device;
-pub mod draw;
 pub mod export;
+pub mod viewport;
 
-pub use asset::*;
 pub use color::*;
 pub use device::*;
-pub use draw::*;
 pub use export::*;
+pub use viewport::*;
+
+pub struct RenderApp;
+
+impl AppTag for RenderApp {
+    const NAME: &'static str = "Render";
+}

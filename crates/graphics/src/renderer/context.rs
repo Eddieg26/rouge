@@ -1,8 +1,9 @@
 use super::resources::{GraphResources, RenderGraphBuffer, RenderGraphTexture};
 use crate::{
-    core::{RenderAssets, RenderDevice},
+    core::RenderDevice,
+    extract::RenderAssets,
     resource::{
-        texture::{target::RenderTarget, RenderTexture},
+        texture::{render::RenderTarget, GpuTexture},
         Id,
     },
 };
@@ -18,7 +19,8 @@ pub struct RenderContext<'a> {
     device: &'a RenderDevice,
     resources: &'a GraphResources,
     target: &'a RenderTarget,
-    textures: &'a RenderAssets<RenderTexture>,
+    targets: &'a RenderAssets<RenderTarget>,
+    textures: &'a RenderAssets<GpuTexture>,
     buffers: Vec<wgpu::CommandBuffer>,
 }
 
@@ -34,7 +36,8 @@ impl<'a> RenderContext<'a> {
             device,
             resources,
             target,
-            textures: world.resource::<RenderAssets<RenderTexture>>(),
+            targets: world.resource::<RenderAssets<RenderTarget>>(),
+            textures: world.resource::<RenderAssets<GpuTexture>>(),
             buffers: Vec::new(),
         }
     }
@@ -52,16 +55,14 @@ impl<'a> RenderContext<'a> {
     }
 
     pub fn override_target(&self, id: impl Into<Id<RenderTarget>>) -> Option<&RenderTarget> {
-        self.world
-            .resource::<RenderAssets<RenderTarget>>()
-            .get(&id.into())
+        self.targets.get(&id.into())
     }
 
-    pub fn textures(&self) -> &RenderAssets<RenderTexture> {
+    pub fn textures(&self) -> &RenderAssets<GpuTexture> {
         self.textures
     }
 
-    pub fn texture(&self, id: &Id<RenderTexture>) -> Option<&RenderTexture> {
+    pub fn texture(&self, id: &Id<GpuTexture>) -> Option<&GpuTexture> {
         self.textures.get(id)
     }
 

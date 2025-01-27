@@ -1,29 +1,29 @@
 use super::{
-    RenderTexture, Sampler, SamplerDesc, Texture1d, Texture2d, Texture2dArray, Texture3d,
-    TextureCube, TextureCubeArray, TextureDimension,
+    GpuTexture, Sampler, SamplerDesc, Texture1d, Texture2d, Texture2dArray, Texture3d, TextureCube,
+    TextureCubeArray, TextureDimension,
 };
-use crate::{RenderDevice, RenderResourceExtractor};
-use ecs::{core::resource::Resource, system::unlifetime::ReadRes};
+use crate::{extract::RenderResourceExtractor, RenderDevice};
+use ecs::{core::resource::Resource, system::ArgItem};
 
 pub struct Fallbacks {
-    pub d1: RenderTexture,
-    pub d2_array: RenderTexture,
-    pub d2: RenderTexture,
-    pub d3: RenderTexture,
-    pub cube: RenderTexture,
-    pub cube_array: RenderTexture,
+    pub d1: GpuTexture,
+    pub d2_array: GpuTexture,
+    pub d2: GpuTexture,
+    pub d3: GpuTexture,
+    pub cube: GpuTexture,
+    pub cube_array: GpuTexture,
     pub sampler: Sampler,
 }
 
 impl Fallbacks {
     pub fn new(device: &RenderDevice) -> Self {
-        let d1 = RenderTexture::create(device, &Texture1d::default());
-        let d2 = RenderTexture::create(device, &Texture2d::default());
-        let d2_array = RenderTexture::create(device, &Texture2dArray::default());
-        let d3 = RenderTexture::create(device, &Texture3d::default());
-        let cube = RenderTexture::create(device, &TextureCube::default());
-        let cube_array = RenderTexture::create(device, &TextureCubeArray::default());
         let sampler = Sampler::create(device, &SamplerDesc::default());
+        let d1 = GpuTexture::create(device, &Texture1d::default(), sampler.clone());
+        let d2 = GpuTexture::create(device, &Texture2d::default(), sampler.clone());
+        let d2_array = GpuTexture::create(device, &Texture2dArray::default(), sampler.clone());
+        let d3 = GpuTexture::create(device, &Texture3d::default(), sampler.clone());
+        let cube = GpuTexture::create(device, &TextureCube::default(), sampler.clone());
+        let cube_array = GpuTexture::create(device, &TextureCubeArray::default(), sampler.clone());
 
         Self {
             d1,
@@ -36,7 +36,7 @@ impl Fallbacks {
         }
     }
 
-    pub fn texture(&self, dimension: TextureDimension) -> &RenderTexture {
+    pub fn texture(&self, dimension: TextureDimension) -> &GpuTexture {
         match dimension {
             TextureDimension::D1 => &self.d1,
             TextureDimension::D2 => &self.d2,
@@ -51,13 +51,9 @@ impl Fallbacks {
 impl Resource for Fallbacks {}
 
 impl RenderResourceExtractor for Fallbacks {
-    type Arg = ReadRes<RenderDevice>;
+    type Arg = ();
 
-    fn can_extract(world: &ecs::world::World) -> bool {
-        world.has_resource::<RenderDevice>()
-    }
-
-    fn extract(device: ecs::system::ArgItem<Self::Arg>) -> Result<Self, crate::ExtractError> {
-        Ok(Self::new(&device))
+    fn extract(device: &RenderDevice, _: ArgItem<Self::Arg>) -> Self {
+        Self::new(&device)
     }
 }

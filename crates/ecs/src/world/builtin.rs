@@ -173,6 +173,25 @@ pub mod actions {
             Some(())
         }
     }
+
+    pub struct RemoveResource<R: Resource + Send> {
+        _marker: std::marker::PhantomData<R>,
+    }
+
+    impl<R: Resource + Send> RemoveResource<R> {
+        pub fn new() -> Self {
+            Self {
+                _marker: std::marker::PhantomData,
+            }
+        }
+    }
+
+    impl<R: Resource + Send> WorldAction for RemoveResource<R> {
+        fn execute(self, world: &mut World) -> Option<()> {
+            world.remove_resource::<R>();
+            Some(())
+        }
+    }
 }
 
 pub mod events {

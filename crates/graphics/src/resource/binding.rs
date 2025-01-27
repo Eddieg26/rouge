@@ -1,10 +1,11 @@
-use super::{sampler::Sampler, texture::TextureDimension, AtomicId, Id, RenderTexture};
+use super::{sampler::Sampler, texture::TextureDimension, AtomicId, GpuTexture, Id};
 use crate::{
+    extract::ExtractError,
     wgpu::{
         BindGroupEntry, BindGroupLayoutEntry, BindingType, BufferBindingType, SamplerBindingType,
         ShaderStages, StorageTextureAccess, TextureFormat, TextureSampleType,
     },
-    ExtractError, RenderDevice,
+    RenderDevice,
 };
 use ecs::system::{ArgItem, SystemArg};
 use encase::ShaderType;
@@ -360,7 +361,7 @@ impl<D: Send + Sync + Clone + 'static> std::ops::Deref for BindGroup<D> {
 pub enum CreateBindGroupError {
     Error(Arc<dyn Error + Send + Sync + 'static>),
     InvalidLayout,
-    MissingTexture { id: Id<RenderTexture> },
+    MissingTexture { id: Id<GpuTexture> },
     MissingSampler { id: Id<Sampler> },
     MissingBuffer,
 }
@@ -407,13 +408,13 @@ pub trait CreateBindGroup {
         None
     }
 
-    fn bind_group(
+    fn create_bind_group(
         &self,
         device: &RenderDevice,
         layout: &BindGroupLayout,
         arg: &ArgItem<Self::Arg>,
     ) -> Result<BindGroup<Self::Data>, CreateBindGroupError>;
-    fn bind_group_layout(device: &RenderDevice) -> BindGroupLayout;
+    fn create_bind_group_layout(device: &RenderDevice) -> BindGroupLayout;
 }
 
 pub trait IntoBufferData<T: ShaderType> {

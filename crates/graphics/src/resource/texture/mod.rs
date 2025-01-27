@@ -1,21 +1,22 @@
 use super::Id;
 use crate::{
+    extract::asset::RenderAsset,
     wgpu::{TextureAspect, TextureFormat},
-    RenderAsset, RenderDevice,
+    RenderDevice,
 };
 use std::{ops::Range, sync::Arc};
 
 pub mod fallbacks;
+pub mod render;
 pub mod sampler;
-pub mod target;
 pub mod texture1d;
 pub mod texture2d;
 pub mod texture3d;
 pub mod texture_cube;
 
 pub use fallbacks::*;
+pub use render::*;
 pub use sampler::*;
-pub use target::*;
 pub use texture1d::*;
 pub use texture2d::*;
 pub use texture3d::*;
@@ -117,20 +118,38 @@ pub trait Texture: 'static {
     fn pixels(&self, range: Range<usize>) -> &[u8];
 }
 
-pub struct RenderTexture {
+pub struct GpuTexture {
     texture: Arc<Option<wgpu::Texture>>,
     view: wgpu::TextureView,
+    sampler: Sampler,
+    format: TextureFormat,
+    width: u32,
+    height: u32,
+    mip_level_count: u32,
 }
 
-impl RenderTexture {
-    pub fn new(texture: Option<wgpu::Texture>, view: wgpu::TextureView) -> Self {
+impl GpuTexture {
+    pub fn new(
+        texture: wgpu::Texture,
+        view: wgpu::TextureView,
+        sampler: Sampler,
+        format: TextureFormat,
+        width: u32,
+        height: u32,
+        mip_level_count: u32,
+    ) -> Self {
         Self {
-            texture: Arc::new(texture),
+            texture: Arc::new(Some(texture)),
             view,
+            sampler,
+            format,
+            width,
+            height,
+            mip_level_count,
         }
     }
 
-    pub fn create<T: Texture>(device: &RenderDevice, texture: &T) -> Self {
+    pub fn create<T: Texture>(device: &RenderDevice, texture: &T, sampler: Sampler) -> Self {
         let size = wgpu::Extent3d {
             width: texture.width(),
             height: texture.height(),
@@ -193,6 +212,11 @@ impl RenderTexture {
         Self {
             texture: Arc::new(Some(created)),
             view,
+            sampler,
+            mip_level_count,
+            format: texture.format(),
+            width: size.width,
+            height: size.height,
         }
     }
 
@@ -203,9 +227,29 @@ impl RenderTexture {
     pub fn view(&self) -> &wgpu::TextureView {
         &self.view
     }
+
+    pub fn sampler(&self) -> &Sampler {
+        &self.sampler
+    }
+
+    pub fn format(&self) -> TextureFormat {
+        self.format
+    }
+
+    pub fn width(&self) -> u32 {
+        self.width
+    }
+
+    pub fn height(&self) -> u32 {
+        self.height
+    }
+
+    pub fn mip_level_count(&self) -> u32 {
+        self.mip_level_count
+    }
 }
 
-impl std::ops::Deref for RenderTexture {
+impl std::ops::Deref for GpuTexture {
     type Target = wgpu::TextureView;
 
     fn deref(&self) -> &Self::Target {
@@ -213,6 +257,6 @@ impl std::ops::Deref for RenderTexture {
     }
 }
 
-impl RenderAsset for RenderTexture {
-    type Id = Id<RenderTexture>;
+impl RenderAsset for GpuTexture {
+    type Id = Id<GpuTexture>;
 }

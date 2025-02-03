@@ -27,6 +27,7 @@ use wgpu::{BlendState, PrimitiveState, TextureFormat};
 
 pub mod draw;
 pub mod plugin;
+pub mod v2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BlendMode {

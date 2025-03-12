@@ -208,6 +208,17 @@ impl SubMesh {
     }
 }
 
+impl From<&Mesh> for SubMesh {
+    fn from(mesh: &Mesh) -> Self {
+        Self {
+            start_vertex: 0,
+            vertex_count: mesh.vertex_count() as u64,
+            start_index: 0,
+            index_count: mesh.index_count() as u64,
+        }
+    }
+}
+
 impl Asset for SubMesh {}
 
 #[derive(Clone, Copy)]
@@ -589,6 +600,18 @@ impl RenderMesh {
             .map(move |i| &mut self.vertex_buffers[i])
     }
 
+    pub fn vertex_buffers_by_attributes(
+        &self,
+        attributes: &[MeshAttributeKind],
+    ) -> Option<Vec<&VertexBuffer>> {
+        let buffers = attributes
+            .iter()
+            .filter_map(|a| self.attribute_index(*a).map(|i| &self.vertex_buffers[i]))
+            .collect::<Vec<_>>();
+
+        (buffers.len() == attributes.len()).then(|| buffers)
+    }
+
     pub fn vertex_count(&self) -> usize {
         self.vertex_count
     }
@@ -615,6 +638,17 @@ impl RenderMesh {
             MeshAttribute::Tangent(v) => VertexBuffer::new(device, &v[..count], usage, None),
             MeshAttribute::Color(v) => VertexBuffer::new(device, &v[..count], usage, None),
         }
+    }
+}
+
+impl From<&RenderMesh> for SubMesh {
+    fn from(mesh: &RenderMesh) -> Self {
+        SubMesh::new(
+            0,
+            mesh.vertex_count() as u64,
+            0,
+            mesh.index_buffer().map_or(0, |i| i.len() as u64),
+        )
     }
 }
 

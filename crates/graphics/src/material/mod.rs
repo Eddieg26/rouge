@@ -133,13 +133,12 @@ pub struct ExtractedView<V: View> {
     pub viewport: Viewport,
 }
 
-impl<V: View> Copy for ExtractedView<V> {}
 impl<V: View> Clone for ExtractedView<V> {
     fn clone(&self) -> Self {
         Self {
             entity: self.entity,
             data: self.data,
-            viewport: self.viewport,
+            viewport: self.viewport.clone(),
         }
     }
 }
@@ -151,13 +150,12 @@ pub struct RenderView<V: View> {
     pub dynamic_offset: DynamicOffset<V::Uniform>,
 }
 
-impl<V: View> Copy for RenderView<V> {}
 impl<V: View> Clone for RenderView<V> {
     fn clone(&self) -> Self {
         Self {
             entity: self.entity,
             data: self.data,
-            viewport: self.viewport,
+            viewport: self.viewport.clone(),
             dynamic_offset: self.dynamic_offset,
         }
     }

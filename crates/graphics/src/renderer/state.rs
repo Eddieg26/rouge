@@ -92,12 +92,11 @@ impl<'a> RenderState<'a> {
             y,
             width,
             height,
-            min_depth,
-            max_depth,
+            depth,
         } = viewport;
 
         self.pass
-            .set_viewport(x, y, width, height, min_depth, max_depth);
+            .set_viewport(x, y, width, height, depth.start, depth.end);
     }
 
     pub fn set_scissor_rect(&mut self, x: u32, y: u32, width: u32, height: u32) {

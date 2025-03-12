@@ -1,14 +1,13 @@
 use spatial::rect::Rect;
 use std::ops::Range;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct Viewport {
     pub x: f32,
     pub y: f32,
     pub width: f32,
     pub height: f32,
-    pub min_depth: f32,
-    pub max_depth: f32,
+    pub depth: Range<f32>,
 }
 
 impl Viewport {
@@ -18,8 +17,7 @@ impl Viewport {
             y,
             width,
             height,
-            min_depth: depth.start,
-            max_depth: depth.end,
+            depth,
         }
     }
 }
@@ -31,8 +29,7 @@ impl Default for Viewport {
             y: 0.0,
             width: 1.0,
             height: 1.0,
-            min_depth: 0.0,
-            max_depth: 1.0,
+            depth: 0.0..1.0,
         }
     }
 }

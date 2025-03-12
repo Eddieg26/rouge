@@ -135,8 +135,9 @@ impl<V: Vertex> VertexBufferArray<V> {
 
 impl<V: Vertex + BufferData> VertexBufferArray<V> {
     pub fn push(&mut self, value: V) -> BufferArrayIndex<V> {
+        let index = self.vertices.len() as u32;
         self.vertices.push(value);
         self.is_dirty = true;
-        BufferArrayIndex::new(self.vertices.len() as u32, None)
+        BufferArrayIndex::new(index, None)
     }
 }

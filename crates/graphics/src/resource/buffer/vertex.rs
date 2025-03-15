@@ -1,143 +1,83 @@
-use super::{Buffer, BufferArrayIndex, BufferData, BufferSlice, Label};
-use crate::core::RenderDevice;
+use super::{Buffer, BufferSlice};
+use crate::RenderDevice;
 use bytemuck::{Pod, Zeroable};
 use std::ops::RangeBounds;
-use wgpu::BufferUsages;
-
-pub trait Vertex: Pod + Zeroable + 'static {}
-impl<P: Pod + Zeroable> Vertex for P {}
+use wgpu::{BufferAddress, BufferUsages};
 
 pub struct VertexBuffer {
-    inner: Buffer,
-    len: u64,
+    inner: Option<Buffer>,
+    usage: BufferUsages,
+    len: usize,
 }
 
 impl VertexBuffer {
-    pub fn new<V: Vertex>(
+    pub fn new<T: Pod + Zeroable>(
         device: &RenderDevice,
-        vertices: &[V],
-        usage: BufferUsages,
-        label: Label,
+        vertices: &[T],
+        usage: Option<BufferUsages>,
     ) -> Self {
-        let data = bytemuck::cast_slice(vertices);
-        let buffer = Buffer::with_data(device, data, usage | BufferUsages::VERTEX, label);
-        let len = vertices.len() as u64;
+        let usage = match usage {
+            Some(usage) => usage | BufferUsages::INDEX,
+            None => BufferUsages::INDEX,
+        };
 
-        Self { inner: buffer, len }
-    }
-
-    pub fn inner(&self) -> &Buffer {
-        &self.inner
-    }
-
-    pub fn len(&self) -> u64 {
-        self.len
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.len == 0
-    }
-
-    pub fn usage(&self) -> BufferUsages {
-        self.inner.usage()
-    }
-
-    pub fn resize(&mut self, device: &RenderDevice, size: u64) {
-        self.inner.resize(device, size);
-    }
-
-    pub fn slice<S: RangeBounds<u64>>(&self, range: S) -> BufferSlice {
-        self.inner.slice(range)
-    }
-
-    pub fn binding(&self) -> wgpu::BindingResource<'_> {
-        self.inner.as_entire_binding()
-    }
-
-    pub fn update<V: Vertex>(&mut self, device: &RenderDevice, offset: u64, vertices: &[V]) {
-        let data = bytemuck::cast_slice(vertices);
-        self.inner.update(device, offset, data);
-    }
-}
-
-pub struct VertexBufferArray<V: Vertex> {
-    inner: Option<Buffer>,
-    usage: BufferUsages,
-    label: Label,
-    vertices: Vec<V>,
-    is_dirty: bool,
-}
-
-impl<V: Vertex> VertexBufferArray<V> {
-    pub fn new(usage: BufferUsages, label: Label) -> Self {
         Self {
-            inner: None,
-            label,
+            inner: if vertices.len() > 0 {
+                Some(Buffer::with_data(
+                    device,
+                    bytemuck::cast_slice(vertices),
+                    usage,
+                    None,
+                ))
+            } else {
+                None
+            },
             usage,
-            is_dirty: false,
-            vertices: vec![],
+            len: vertices.len(),
         }
     }
 
-    pub fn inner(&self) -> Option<&Buffer> {
+    pub fn buffer(&self) -> Option<&Buffer> {
         self.inner.as_ref()
     }
 
-    pub fn label(&self) -> &Label {
-        &self.label
+    pub fn slice<S: RangeBounds<BufferAddress>>(&self, bounds: S) -> Option<BufferSlice> {
+        self.buffer().map(|buffer| buffer.slice(bounds))
     }
 
-    pub fn len(&self) -> u64 {
-        self.vertices.len() as u64
+    pub fn len(&self) -> usize {
+        self.len
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.vertices.is_empty()
-    }
-
-    pub fn usage(&self) -> BufferUsages {
-        self.usage
-    }
-
-    pub fn slice<S: RangeBounds<u64>>(&self, range: S) -> Option<BufferSlice> {
-        self.inner.as_ref().map(|buffer| buffer.slice(range))
-    }
-
-    pub fn binding(&self) -> Option<wgpu::BindingResource<'_>> {
-        self.inner.as_ref().map(|buffer| buffer.as_entire_binding())
-    }
-
-    pub fn clear(&mut self) {
-        self.vertices.clear();
-        self.is_dirty = true;
-    }
-
-    pub fn update(&mut self, device: &RenderDevice) {
-        match self.inner.as_mut() {
-            Some(buffer) if self.is_dirty => {
-                let size = (self.vertices.len() * std::mem::size_of::<V>()) as u64;
-                if size != buffer.size() {
-                    buffer.resize(device, size);
+    pub fn update<T: Pod + Zeroable>(&mut self, device: &RenderDevice, vertices: &[T]) {
+        if vertices.len() > 0 {
+            if let Some(buffer) = &mut self.inner {
+                let size = vertices.len() * std::mem::size_of::<T>();
+                if size > buffer.size() as usize {
+                    *buffer = Buffer::with_data(
+                        device,
+                        bytemuck::cast_slice(vertices),
+                        buffer.as_ref().usage(),
+                        None,
+                    );
+                    self.len = vertices.len();
+                } else {
+                    device
+                        .queue
+                        .write_buffer(buffer.as_ref(), 0, bytemuck::cast_slice(vertices));
                 }
-                buffer.update(device, 0, bytemuck::cast_slice(&self.vertices));
-                self.is_dirty = false;
+            } else {
+                self.inner = Some(Buffer::with_data(
+                    device,
+                    bytemuck::cast_slice(vertices),
+                    self.usage,
+                    None,
+                ));
+                self.len = vertices.len();
             }
-            None if !self.vertices.is_empty() => {
-                let data = bytemuck::cast_slice(&self.vertices);
-                let buffer = Buffer::with_data(device, data, self.usage, self.label.clone());
-                self.inner = Some(buffer);
-                self.is_dirty = false;
-            }
-            _ => {}
+        } else {
+            self.inner = None;
+            self.len = 0;
         }
-    }
-}
-
-impl<V: Vertex + BufferData> VertexBufferArray<V> {
-    pub fn push(&mut self, value: V) -> BufferArrayIndex<V> {
-        let index = self.vertices.len() as u32;
-        self.vertices.push(value);
-        self.is_dirty = true;
-        BufferArrayIndex::new(index, None)
     }
 }

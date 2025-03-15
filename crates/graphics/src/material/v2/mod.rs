@@ -1,16 +1,15 @@
-use std::{collections::HashMap, hash::Hash};
-
 use crate::{
     extract::RenderAssets,
     renderer::state::RenderState,
     resource::{
-        BindGroup, BindGroupLayout, BufferData, Mesh, MeshAttributeKind, RenderBufferArray,
-        RenderMesh, SubMesh, VertexBufferLayout,
+        BindGroup, BindGroupLayout, BufferData, Mesh, MeshAttributeKind, RenderMesh, SubMesh,
+        VertexBufferLayout,
     },
     Viewport,
 };
 use asset::{asset::Asset, io::cache::LoadPath, AssetRef};
 use spatial::Aabb;
+use std::{collections::HashMap, hash::Hash};
 use wgpu::{BlendState, PrimitiveState};
 
 pub trait View: BufferData + Send + Sync + 'static {

@@ -237,7 +237,7 @@ impl From<AssetRef<Mesh>> for MeshId {
 pub struct Mesh {
     topology: MeshTopology,
     attributes: Vec<MeshAttribute>,
-    indices: Option<Indices<u32>>,
+    indices: Option<Indices>,
     bounds: BoundingBox,
     read_write: ReadWrite,
     sub_meshes: Vec<SubMesh>,
@@ -303,11 +303,11 @@ impl Mesh {
         self.dirty
     }
 
-    pub fn indices(&self) -> Option<&Indices<u32>> {
+    pub fn indices(&self) -> Option<&Indices> {
         self.indices.as_ref()
     }
 
-    pub fn indices_mut(&mut self) -> Option<&mut Indices<u32>> {
+    pub fn indices_mut(&mut self) -> Option<&mut Indices> {
         let indices = self.indices.as_mut();
 
         if indices.is_some() {
@@ -345,14 +345,14 @@ impl Mesh {
         removed
     }
 
-    pub fn set_indices(&mut self, indices: Indices<u32>) {
+    pub fn set_indices(&mut self, indices: Indices) {
         self.indices = Some(indices);
         self.dirty |= MeshDirty::INDICES;
     }
 
-    pub fn add_indices(&mut self, indices: Indices<u32>) {
+    pub fn add_indices(&mut self, indices: Indices) {
         match self.indices {
-            Some(ref mut i) => i.extend(indices),
+            Some(ref mut i) => i.extend(&indices),
             None => self.indices = Some(indices),
         }
     }
@@ -430,47 +430,67 @@ impl Mesh {
         }
     }
 
-    pub fn buffers(&mut self, device: &RenderDevice) -> RenderMesh {
-        let mut vertex_buffers = vec![];
-        let mut attributes = vec![];
-        let count = self.vertex_count();
+    pub fn layout(&self) -> MeshLayout {
+        MeshLayout::from(self.attributes.iter().map(|a| a.kind()).collect::<Vec<_>>())
+    }
 
-        let flags = match self.read_write {
+    pub fn create_buffers(&mut self, device: &RenderDevice) -> MeshBuffers {
+        let vertex_count = self.vertex_count();
+        let mut vertex_buffers = Vec::with_capacity(self.attributes.len());
+        let mut attributes = Vec::with_capacity(self.attributes.len());
+
+        let usage = match self.read_write {
             ReadWrite::Enabled => BufferUsages::COPY_DST | BufferUsages::MAP_WRITE,
             ReadWrite::Disabled => BufferUsages::empty(),
         };
 
-        for attribute in self.attributes() {
-            let buffer = RenderMesh::create_vertex_buffer(device, attribute, count, flags);
-            vertex_buffers.push(buffer);
+        for attribute in &mut self.attributes {
+            let buffer = match attribute {
+                MeshAttribute::Position(values) => {
+                    VertexBuffer::new(device, &values[..vertex_count], Some(usage))
+                }
+                MeshAttribute::Normal(values) => {
+                    VertexBuffer::new(device, &values[..vertex_count], Some(usage))
+                }
+                MeshAttribute::TexCoord0(values) => {
+                    VertexBuffer::new(device, &values[..vertex_count], Some(usage))
+                }
+                MeshAttribute::TexCoord1(values) => {
+                    VertexBuffer::new(device, &values[..vertex_count], Some(usage))
+                }
+                MeshAttribute::Tangent(values) => {
+                    VertexBuffer::new(device, &values[..vertex_count], Some(usage))
+                }
+                MeshAttribute::Color(values) => {
+                    VertexBuffer::new(device, &values[..vertex_count], Some(usage))
+                }
+            };
+
             attributes.push(attribute.kind());
+            vertex_buffers.push(buffer);
+
+            if self.read_write == ReadWrite::Disabled {
+                attribute.clear();
+            }
         }
 
-        let indices = match self.read_write {
-            ReadWrite::Enabled => self.indices.clone(),
-            ReadWrite::Disabled => {
-                self.attributes.clear();
-                self.indices.take()
+        let index_buffer = self.indices.as_mut().map(|indices| {
+            let buffer = IndexBuffer::new(device, &indices, Some(usage));
+            if self.read_write == ReadWrite::Disabled {
+                indices.clear();
             }
-        };
+            buffer
+        });
 
-        let index_buffer = match indices {
-            Some(indices) => {
-                let buffer = IndexBuffer::new(device, indices, flags, None);
-                Some(Box::new(buffer))
-            }
-            None => None,
-        };
-
-        RenderMesh {
-            vertex_count: count,
+        MeshBuffers {
             layout: attributes.into(),
-            vertex_buffers: vertex_buffers.into_boxed_slice(),
+            vertex_buffers,
             index_buffer,
+            vertex_count,
         }
     }
 
-    pub fn update(&mut self, buffers: &mut RenderMesh, device: &RenderDevice) {
+    pub fn update(&mut self, buffers: &mut MeshBuffers, device: &RenderDevice) {
         let vertex_count = self.vertex_count();
         buffers.vertex_count = vertex_count;
         for values in self.attributes.iter() {
@@ -478,22 +498,16 @@ impl Mesh {
                 match buffers.vertex_buffer_mut(values.kind()) {
                     Some(buffer) => {
                         match values {
-                            MeshAttribute::Position(v) => {
-                                buffer.update(device, 0, &v[..vertex_count])
-                            }
-                            MeshAttribute::Normal(v) => {
-                                buffer.update(device, 0, &v[..vertex_count])
-                            }
+                            MeshAttribute::Position(v) => buffer.update(device, &v[..vertex_count]),
+                            MeshAttribute::Normal(v) => buffer.update(device, &v[..vertex_count]),
                             MeshAttribute::TexCoord0(v) => {
-                                buffer.update(device, 0, &v[..vertex_count])
+                                buffer.update(device, &v[..vertex_count])
                             }
                             MeshAttribute::TexCoord1(v) => {
-                                buffer.update(device, 0, &v[..vertex_count])
+                                buffer.update(device, &v[..vertex_count])
                             }
-                            MeshAttribute::Tangent(v) => {
-                                buffer.update(device, 0, &v[..vertex_count])
-                            }
-                            MeshAttribute::Color(v) => buffer.update(device, 0, &v[..vertex_count]),
+                            MeshAttribute::Tangent(v) => buffer.update(device, &v[..vertex_count]),
+                            MeshAttribute::Color(v) => buffer.update(device, &v[..vertex_count]),
                         }
                         self.dirty.remove(MeshDirty::POSITION);
                     }
@@ -505,7 +519,7 @@ impl Mesh {
         if self.dirty.contains(MeshDirty::INDICES) {
             match (buffers.index_buffer_mut(), self.indices()) {
                 (Some(index), Some(indices)) => {
-                    index.update(device, 0, indices);
+                    index.update(device, indices);
                     self.dirty.remove(MeshDirty::INDICES);
                 }
                 _ => (),
@@ -563,101 +577,64 @@ impl<'a> IntoIterator for &'a MeshLayout {
     }
 }
 
-pub struct RenderMesh {
+pub struct MeshBuffers {
     layout: MeshLayout,
-    vertex_buffers: Box<[VertexBuffer]>,
-    index_buffer: Option<Box<IndexBuffer<u32>>>,
+    vertex_buffers: Vec<VertexBuffer>,
+    index_buffer: Option<IndexBuffer>,
     vertex_count: usize,
 }
 
-impl RenderMesh {
+impl MeshBuffers {
     pub fn layout(&self) -> &MeshLayout {
         &self.layout
-    }
-
-    pub fn has_attribute(&self, kind: MeshAttributeKind) -> bool {
-        self.layout.contains(&kind)
-    }
-
-    pub fn attribute_index(&self, kind: MeshAttributeKind) -> Option<usize> {
-        self.layout.iter().position(|k| *k == kind)
     }
 
     pub fn vertex_buffers(&self) -> &[VertexBuffer] {
         &self.vertex_buffers
     }
 
-    pub fn get_vertex_buffer(&self, index: usize) -> Option<&VertexBuffer> {
+    pub fn vertex_buffer(&self, attribute: MeshAttributeKind) -> Option<&VertexBuffer> {
+        let index = self.layout.iter().position(|a| a == &attribute)?;
+
         self.vertex_buffers.get(index)
     }
 
-    pub fn vertex_buffer(&self, kind: MeshAttributeKind) -> Option<&VertexBuffer> {
-        self.attribute_index(kind).map(|i| &self.vertex_buffers[i])
+    pub fn vertex_buffer_mut(&mut self, attribute: MeshAttributeKind) -> Option<&mut VertexBuffer> {
+        let index = self.layout.iter().position(|a| a == &attribute)?;
+
+        self.vertex_buffers.get_mut(index)
     }
 
-    pub fn vertex_buffer_mut(&mut self, kind: MeshAttributeKind) -> Option<&mut VertexBuffer> {
-        self.attribute_index(kind)
-            .map(move |i| &mut self.vertex_buffers[i])
+    pub fn index_buffer(&self) -> Option<&IndexBuffer> {
+        self.index_buffer.as_ref()
     }
 
-    pub fn vertex_buffers_by_attributes(
-        &self,
-        attributes: &[MeshAttributeKind],
-    ) -> Option<Vec<&VertexBuffer>> {
-        let buffers = attributes
-            .iter()
-            .filter_map(|a| self.attribute_index(*a).map(|i| &self.vertex_buffers[i]))
-            .collect::<Vec<_>>();
-
-        (buffers.len() == attributes.len()).then(|| buffers)
+    pub fn index_buffer_mut(&mut self) -> Option<&mut IndexBuffer> {
+        self.index_buffer.as_mut()
     }
 
     pub fn vertex_count(&self) -> usize {
         self.vertex_count
     }
-
-    pub fn index_buffer(&self) -> Option<&IndexBuffer<u32>> {
-        self.index_buffer.as_ref().map(|b| b.as_ref())
-    }
-
-    pub fn index_buffer_mut(&mut self) -> Option<&mut IndexBuffer<u32>> {
-        self.index_buffer.as_mut().map(|b| b.as_mut())
-    }
-
-    fn create_vertex_buffer(
-        device: &RenderDevice,
-        attribute: &MeshAttribute,
-        count: usize,
-        usage: BufferUsages,
-    ) -> VertexBuffer {
-        match attribute {
-            MeshAttribute::Position(v) => VertexBuffer::new(device, &v[..count], usage, None),
-            MeshAttribute::Normal(v) => VertexBuffer::new(device, &v[..count], usage, None),
-            MeshAttribute::TexCoord0(v) => VertexBuffer::new(device, &v[..count], usage, None),
-            MeshAttribute::TexCoord1(v) => VertexBuffer::new(device, &v[..count], usage, None),
-            MeshAttribute::Tangent(v) => VertexBuffer::new(device, &v[..count], usage, None),
-            MeshAttribute::Color(v) => VertexBuffer::new(device, &v[..count], usage, None),
-        }
-    }
 }
 
-impl From<&RenderMesh> for SubMesh {
-    fn from(mesh: &RenderMesh) -> Self {
+impl From<&MeshBuffers> for SubMesh {
+    fn from(mesh: &MeshBuffers) -> Self {
         SubMesh::new(
             0,
-            mesh.vertex_count() as u64,
+            mesh.vertex_count as u64,
             0,
             mesh.index_buffer().map_or(0, |i| i.len() as u64),
         )
     }
 }
 
-impl RenderAsset for RenderMesh {
+impl RenderAsset for MeshBuffers {
     type Id = AssetId;
 }
 
 impl RenderAssetExtractor for Mesh {
-    type Target = RenderMesh;
+    type Target = MeshBuffers;
     type Arg = ReadRes<RenderDevice>;
 
     fn extract(
@@ -665,7 +642,7 @@ impl RenderAssetExtractor for Mesh {
         mesh: &mut Self,
         device: &mut ArgItem<Self::Arg>,
     ) -> Result<Self::Target, ExtractError> {
-        let buffers = mesh.buffers(device);
+        let buffers = mesh.create_buffers(device);
         Ok(buffers)
     }
 

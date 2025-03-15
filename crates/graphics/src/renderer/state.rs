@@ -124,15 +124,16 @@ impl<'a> RenderState<'a> {
     }
 
     pub fn draw_indirect(&mut self, buffer: &Buffer, offset: u64) {
-        self.pass.draw_indirect(buffer.inner(), offset);
+        self.pass.draw_indirect(buffer.as_ref(), offset);
     }
 
     pub fn draw_indexed_indirect(&mut self, buffer: &Buffer, offset: u64) {
-        self.pass.draw_indexed_indirect(buffer.inner(), offset);
+        self.pass.draw_indexed_indirect(buffer.as_ref(), offset);
     }
 
     pub fn multi_draw_indirect(&mut self, buffer: &Buffer, offset: u64, count: u32) {
-        self.pass.multi_draw_indirect(buffer.inner(), offset, count);
+        self.pass
+            .multi_draw_indirect(buffer.as_ref(), offset, count);
     }
 
     pub fn multi_draw_indirect_count(
@@ -144,9 +145,9 @@ impl<'a> RenderState<'a> {
         max_count: u32,
     ) {
         self.pass.multi_draw_indirect_count(
-            buffer.inner(),
+            buffer.as_ref(),
             offset,
-            count_buffer.inner(),
+            count_buffer.as_ref(),
             count_offset,
             max_count,
         );
@@ -154,7 +155,7 @@ impl<'a> RenderState<'a> {
 
     pub fn multi_draw_indexed_indirect(&mut self, buffer: &Buffer, offset: u64, count: u32) {
         self.pass
-            .multi_draw_indexed_indirect(buffer.inner(), offset, count);
+            .multi_draw_indexed_indirect(buffer.as_ref(), offset, count);
     }
 
     pub fn multi_draw_indexed_indirect_count(
@@ -166,9 +167,9 @@ impl<'a> RenderState<'a> {
         max_count: u32,
     ) {
         self.pass.multi_draw_indexed_indirect_count(
-            buffer.inner(),
+            buffer.as_ref(),
             offset,
-            count_buffer.inner(),
+            count_buffer.as_ref(),
             count_offset,
             max_count,
         );

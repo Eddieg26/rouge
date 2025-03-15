@@ -1,21 +1,10 @@
-use super::{Buffer, BufferId, BufferSlice, BufferSliceId, Label};
-use crate::{
-    wgpu::{BufferUsages, IndexFormat},
-    RenderDevice,
-};
+use super::{Buffer, BufferId, BufferSlice, BufferSliceId};
+use crate::RenderDevice;
 use bytemuck::{Pod, Zeroable};
-use std::{marker::PhantomData, ops::RangeBounds};
+use wgpu::{BufferUsages, IndexFormat};
 
-pub trait Index:
-    Copy + Clone + Pod + Zeroable + serde::Serialize + for<'a> serde::Deserialize<'a> + 'static
-{
+pub trait Index: Copy + Clone + Pod + Zeroable {
     fn format() -> wgpu::IndexFormat;
-}
-
-impl Index for u32 {
-    fn format() -> wgpu::IndexFormat {
-        wgpu::IndexFormat::Uint32
-    }
 }
 
 impl Index for u16 {
@@ -24,101 +13,143 @@ impl Index for u16 {
     }
 }
 
-#[derive(Clone)]
-pub struct Indices<I: Index> {
-    indices: Vec<I>,
+impl Index for u32 {
+    fn format() -> wgpu::IndexFormat {
+        wgpu::IndexFormat::Uint32
+    }
 }
 
-impl<I: Index> Indices<I> {
-    pub fn new(indices: Vec<I>) -> Self {
-        Self { indices }
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+pub struct Indices {
+    data: Vec<u8>,
+    format: IndexFormat,
+}
+
+impl Indices {
+    pub fn new<T: Index>(indices: &[T]) -> Self {
+        let size = std::mem::size_of::<T>() as u64 * indices.len() as u64;
+        let format = T::format();
+
+        match format {
+            wgpu::IndexFormat::Uint16 => assert!(size <= u16::MAX as u64),
+            wgpu::IndexFormat::Uint32 => assert!(size <= u32::MAX as u64),
+        }
+
+        Indices {
+            data: bytemuck::cast_slice(indices).to_vec(),
+            format: T::format(),
+        }
     }
 
-    pub fn extend(&mut self, indices: Indices<I>) {
-        self.indices.extend(indices.indices);
+    pub fn format(&self) -> IndexFormat {
+        self.format
+    }
+
+    pub fn data(&self) -> &[u8] {
+        &self.data
+    }
+
+    pub fn as_ref<T: Index>(&self) -> &[T] {
+        bytemuck::cast_slice(&self.data)
+    }
+
+    pub fn len(&self) -> usize {
+        match self.format {
+            wgpu::IndexFormat::Uint16 => self.data.len() / std::mem::size_of::<u16>(),
+            wgpu::IndexFormat::Uint32 => self.data.len() / std::mem::size_of::<u32>(),
+        }
     }
 
     pub fn size(&self) -> u64 {
-        (self.indices.len() * size_of::<I>()) as u64
+        self.data.len() as u64
     }
 
-    pub fn format(&self) -> wgpu::IndexFormat {
-        I::format()
+    pub fn push<T: Index>(&mut self, indices: &[T]) -> u64 {
+        let index = self.data.len();
+        self.data.extend_from_slice(bytemuck::cast_slice(indices));
+        index as u64
     }
-}
 
-impl<I: Index> serde::Serialize for Indices<I> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        self.indices.serialize(serializer)
+    pub fn set<T: Index>(&mut self, offset: usize, indices: &[T]) {
+        let offset = offset * std::mem::size_of::<T>();
+        let slice = self.data.as_mut_slice()[offset..].as_mut();
+        slice.copy_from_slice(bytemuck::cast_slice(indices));
     }
-}
 
-impl<'de, I: Index> serde::Deserialize<'de> for Indices<I> {
-    fn deserialize<D>(deserializer: D) -> Result<Indices<I>, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let indices = Vec::<I>::deserialize(deserializer)?;
-        Ok(Indices { indices })
+    pub fn extend(&mut self, other: &Self) {
+        assert!(self.format == other.format);
+        self.data.extend_from_slice(&other.data);
+    }
+
+    pub fn clear(&mut self) {
+        self.data.clear();
     }
 }
 
-impl<I: Index> std::ops::Deref for Indices<I> {
-    type Target = [I];
-
-    fn deref(&self) -> &Self::Target {
-        self.indices.as_slice()
-    }
+pub struct IndexBuffer {
+    inner: Option<Buffer>,
+    format: IndexFormat,
+    usage: BufferUsages,
+    len: usize,
 }
 
-pub struct IndexBuffer<I: Index> {
-    inner: Buffer,
-    len: u64,
-    _marker: PhantomData<I>,
-}
-
-impl<I: Index> IndexBuffer<I> {
-    pub fn new(
-        device: &RenderDevice,
-        indices: Indices<I>,
-        usage: BufferUsages,
-        label: Label,
-    ) -> Self {
-        let data = bytemuck::cast_slice(&indices);
-        let buffer = Buffer::with_data(device, data, usage, label);
+impl IndexBuffer {
+    pub fn new(device: &RenderDevice, data: &Indices, usage: Option<BufferUsages>) -> Self {
+        let usage = match usage {
+            Some(usage) => usage | BufferUsages::INDEX,
+            None => BufferUsages::INDEX,
+        };
 
         Self {
-            inner: buffer,
-            len: indices.len() as u64,
-            _marker: Default::default(),
+            inner: if data.len() > 0 {
+                Some(Buffer::with_data(device, data.data(), usage, None))
+            } else {
+                None
+            },
+            usage,
+            format: data.format(),
+            len: data.len(),
         }
     }
 
-    pub fn inner(&self) -> &Buffer {
-        &self.inner
+    pub fn buffer(&self) -> Option<&Buffer> {
+        self.inner.as_ref()
     }
 
-    pub fn slice<S: RangeBounds<u64>>(&self, bounds: S) -> IndexSlice {
-        IndexSlice {
-            format: I::format(),
-            slice: self.inner.slice(bounds),
-        }
+    pub fn format(&self) -> IndexFormat {
+        self.format
     }
 
-    pub fn len(&self) -> u64 {
+    pub fn len(&self) -> usize {
         self.len
     }
 
-    pub fn resize(&mut self, device: &RenderDevice, size: u64) {
-        self.inner.resize(device, size);
+    pub fn size(&self) -> u64 {
+        self.inner.as_ref().map_or(0, |buffer| buffer.size())
     }
 
-    pub fn update(&mut self, device: &RenderDevice, offset: u64, indices: &Indices<I>) {
-        let data = bytemuck::cast_slice(indices);
-        self.inner.update(device, offset, data);
+    pub fn update(&mut self, device: &RenderDevice, indices: &Indices) {
+        if indices.len() > 0 {
+            if let Some(buffer) = &mut self.inner {
+                let size = indices.size() as usize;
+                if size > buffer.size() as usize {
+                    *buffer = Buffer::with_data(device, indices.data(), self.usage, None);
+                    self.len = indices.len();
+                } else {
+                    device
+                        .queue
+                        .write_buffer(buffer.as_ref(), 0, indices.data());
+                }
+            } else {
+                self.inner = Some(Buffer::with_data(device, indices.data(), self.usage, None));
+                self.len = indices.len();
+            }
+
+            self.format = indices.format();
+        } else {
+            self.inner = None;
+            self.len = 0;
+        }
     }
 }
 

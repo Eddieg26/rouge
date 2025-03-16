@@ -1,6 +1,7 @@
 use super::{Buffer, BufferId, BufferSlice, BufferSliceId};
 use crate::RenderDevice;
 use bytemuck::{Pod, Zeroable};
+use std::ops::RangeBounds;
 use wgpu::{BufferUsages, IndexFormat};
 
 pub trait Index: Copy + Clone + Pod + Zeroable {
@@ -87,9 +88,8 @@ impl Indices {
 }
 
 pub struct IndexBuffer {
-    inner: Option<Buffer>,
+    inner: Buffer,
     format: IndexFormat,
-    usage: BufferUsages,
     len: usize,
 }
 
@@ -101,19 +101,14 @@ impl IndexBuffer {
         };
 
         Self {
-            inner: if data.len() > 0 {
-                Some(Buffer::with_data(device, data.data(), usage, None))
-            } else {
-                None
-            },
-            usage,
+            inner: Buffer::with_data(device, data.data(), usage, None),
             format: data.format(),
             len: data.len(),
         }
     }
 
-    pub fn buffer(&self) -> Option<&Buffer> {
-        self.inner.as_ref()
+    pub fn buffer(&self) -> &Buffer {
+        &self.inner
     }
 
     pub fn format(&self) -> IndexFormat {
@@ -125,30 +120,27 @@ impl IndexBuffer {
     }
 
     pub fn size(&self) -> u64 {
-        self.inner.as_ref().map_or(0, |buffer| buffer.size())
+        self.inner.size()
+    }
+
+    pub fn slice<S: RangeBounds<u64>>(&self, range: S) -> IndexSlice {
+        IndexSlice {
+            format: self.format,
+            slice: self.inner.slice(range),
+        }
     }
 
     pub fn update(&mut self, device: &RenderDevice, indices: &Indices) {
-        if indices.len() > 0 {
-            if let Some(buffer) = &mut self.inner {
-                let size = indices.size() as usize;
-                if size > buffer.size() as usize {
-                    *buffer = Buffer::with_data(device, indices.data(), self.usage, None);
-                    self.len = indices.len();
-                } else {
-                    device
-                        .queue
-                        .write_buffer(buffer.as_ref(), 0, indices.data());
-                }
-            } else {
-                self.inner = Some(Buffer::with_data(device, indices.data(), self.usage, None));
-                self.len = indices.len();
-            }
-
+        let size = indices.size() as usize;
+        if size > self.inner.size() as usize {
+            let usage = self.inner.as_ref().usage();
+            self.inner = Buffer::with_data(device, indices.data(), usage, None);
+            self.len = indices.len();
             self.format = indices.format();
         } else {
-            self.inner = None;
-            self.len = 0;
+            device
+                .queue
+                .write_buffer(self.inner.as_ref(), 0, indices.data());
         }
     }
 }

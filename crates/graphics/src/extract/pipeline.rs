@@ -1,7 +1,4 @@
-use super::{
-    asset::RenderAssets,
-    resource::{RenderResourceExtractor, RenderResourceExtractors},
-};
+use super::{asset::RenderAssets, resource::RenderResource, ResourceExtractors};
 use crate::{core::RenderApp, resource::Shader, RenderDevice};
 use asset::{database::AssetDatabase, io::cache::LoadPath};
 use ecs::{
@@ -46,7 +43,7 @@ impl PipelineShaders {
     }
 }
 
-pub trait PipelineExtractor: Resource + Send {
+pub trait PipelineExtractor: Resource + Send + Sync {
     type Arg: SystemArg;
 
     fn shaders() -> PipelineShaders;
@@ -57,8 +54,8 @@ pub trait PipelineExtractor: Resource + Send {
     ) -> Self;
 }
 
-impl<P: PipelineExtractor> RenderResourceExtractor for P {
-    type Arg = (<P as PipelineExtractor>::Arg, ReadRes<RenderAssets<Shader>>);
+impl<P: PipelineExtractor> RenderResource for P {
+    type Extract = (<P as PipelineExtractor>::Arg, ReadRes<RenderAssets<Shader>>);
 
     fn can_extract(world: &World) -> bool {
         let shaders = world.resource::<RenderAssets<Shader>>();
@@ -90,7 +87,7 @@ impl<P: PipelineExtractor> RenderResourceExtractor for P {
         }
     }
 
-    fn extract(device: &RenderDevice, arg: ArgItem<Self::Arg>) -> Self {
+    fn extract(device: &RenderDevice, arg: ArgItem<Self::Extract>) -> Self {
         let (arg, mut shaders) = arg;
         Self::extract(device, &mut shaders, arg)
     }
@@ -116,7 +113,7 @@ impl<P: PipelineExtractor> WorldAction for ExtractPipeline<P> {
                 actions.add(ExtractPipeline::<P>::new());
             }
             WorldKind::Sub => {
-                let extractors = world.resource_mut::<RenderResourceExtractors>();
+                let extractors = world.resource_mut::<ResourceExtractors>();
                 extractors.add::<P>();
             }
         }

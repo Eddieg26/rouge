@@ -56,10 +56,6 @@ impl std::error::Error for ExtractError {}
 
 impl Event for ExtractError {}
 
-pub trait RenderPipelineExtractor {}
-
-pub trait ComputePipelineExtractor {}
-
 pub trait RenderViewExtractor {}
 
 pub trait DrawExtractor {}

@@ -1,8 +1,7 @@
 use crate::{
     extract::{
         RenderAsset, RenderAssetAction, RenderAssetActions, RenderAssetExtractor,
-        RenderAssetExtractors, RenderAssetWorld, RenderAssets, RenderResourceExtractor,
-        RenderResourceExtractors,
+        RenderAssetExtractors, RenderAssetWorld, RenderAssets, RenderResource, ResourceExtractors,
     },
     renderer::graph::{RenderGraph, RenderGraphBuilder},
     resource::{
@@ -17,7 +16,6 @@ use asset::{
 use ecs::{
     core::resource::{Res, ResMut},
     event::Events,
-    world::World,
 };
 use frameworks::{ExtractFramework, RenderFramework, ResizeFramework};
 use game::{Extract, GameBuilder, Plugin};
@@ -43,18 +41,16 @@ impl Plugin for RenderPlugin {
             .add_render_asset_extractor::<Texture2dArray>()
             .add_render_asset_extractor::<RenderTexture>()
             .add_render_asset_extractor::<ShaderSource>()
-            .add_render_resource_extractor::<Fallbacks>()
-            .add_render_resource_extractor::<RenderGraph>();
+            .add_render_resource::<Fallbacks>()
+            .add_render_resource::<RenderGraph>();
     }
 
     fn finish(&mut self, game: &mut game::GameBuilder) {
         let extractors = game
-            .remove_resource::<RenderResourceExtractors>()
-            .unwrap_or_default();
+            .remove_resource::<ResourceExtractors>()
+            .unwrap_or(ResourceExtractors::new());
 
-        game.sub_app_mut::<RenderApp>()
-            .add_systems(Extract, extract_resources)
-            .add_resource(extractors);
+        game.sub_app_mut::<RenderApp>().add_resource(extractors);
 
         if let Some(extractors) = game.remove_resource::<RenderAssetExtractors>() {
             game.sub_app_mut::<RenderApp>()
@@ -78,21 +74,17 @@ impl Plugin for RenderPlugin {
     }
 }
 
-fn extract_resources(world: &World, mut extractors: ResMut<RenderResourceExtractors>) {
-    extractors.extract(world);
-}
-
 pub trait RenderAppExt {
-    fn register_render_asset<R: RenderAsset>(&mut self) -> &mut Self;
+    fn add_render_resource<R: RenderResource>(&mut self) -> &mut Self;
+    fn add_render_asset<R: RenderAsset>(&mut self) -> &mut Self;
     fn add_render_asset_extractor<R: RenderAssetExtractor>(&mut self) -> &mut Self;
     fn add_render_asset_dependency<R: RenderAssetExtractor, D: RenderAssetExtractor>(
         &mut self,
     ) -> &mut Self;
-    fn add_render_resource_extractor<R: RenderResourceExtractor>(&mut self) -> &mut Self;
 }
 
 impl RenderAppExt for GameBuilder {
-    fn register_render_asset<R: RenderAsset>(&mut self) -> &mut Self {
+    fn add_render_asset<R: RenderAsset>(&mut self) -> &mut Self {
         match R::world() {
             RenderAssetWorld::Main => {
                 if !self.has_resource::<RenderAssets<R>>() {
@@ -113,7 +105,7 @@ impl RenderAppExt for GameBuilder {
 
     fn add_render_asset_extractor<R: RenderAssetExtractor>(&mut self) -> &mut Self {
         self.register_asset::<R>();
-        self.register_render_asset::<R::Target>();
+        self.add_render_asset::<R::Target>();
         self.resource_mut::<RenderAssetExtractors>().add::<R>();
         if !self.has_resource::<RenderAssetActions<R>>() {
             self.add_resource(RenderAssetActions::<R>::new());
@@ -153,8 +145,8 @@ impl RenderAppExt for GameBuilder {
         self
     }
 
-    fn add_render_resource_extractor<R: RenderResourceExtractor>(&mut self) -> &mut Self {
-        let extractors = self.resource_mut::<RenderResourceExtractors>();
+    fn add_render_resource<R: RenderResource>(&mut self) -> &mut Self {
+        let extractors = self.resource_mut::<ResourceExtractors>();
         extractors.add::<R>();
         self
     }

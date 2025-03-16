@@ -2,7 +2,7 @@ use super::{
     GpuTexture, Sampler, SamplerDesc, Texture1d, Texture2d, Texture2dArray, Texture3d, TextureCube,
     TextureCubeArray, TextureDimension,
 };
-use crate::{extract::RenderResourceExtractor, RenderDevice};
+use crate::{extract::RenderResource, RenderDevice};
 use ecs::{core::resource::Resource, system::ArgItem};
 
 pub struct Fallbacks {
@@ -50,10 +50,10 @@ impl Fallbacks {
 
 impl Resource for Fallbacks {}
 
-impl RenderResourceExtractor for Fallbacks {
-    type Arg = ();
+impl RenderResource for Fallbacks {
+    type Extract = ();
 
-    fn extract(device: &RenderDevice, _: ArgItem<Self::Arg>) -> Self {
+    fn extract(device: &RenderDevice, _: ArgItem<Self::Extract>) -> Self {
         Self::new(&device)
     }
 }

@@ -59,20 +59,20 @@ impl<'a> RenderState<'a> {
         &mut self,
         group: u32,
         bind_group: &BindGroup<D>,
-        offset: &[u32],
+        offsets: &[u32],
     ) {
         match self.bind_groups.get(&group) {
-            Some((id, bindings)) if id != &bind_group.id() || bindings.as_slice() == offset => {
+            Some((id, bindings)) if id != &bind_group.id() || bindings.as_slice() == offsets => {
                 self.pass
-                    .set_bind_group(group, Some(bind_group.inner()), offset);
+                    .set_bind_group(group, Some(bind_group.inner()), offsets);
                 self.bind_groups
-                    .insert(group, (bind_group.id(), offset.to_vec()));
+                    .insert(group, (bind_group.id(), offsets.to_vec()));
             }
             None => {
                 self.pass
-                    .set_bind_group(group, Some(bind_group.inner()), offset);
+                    .set_bind_group(group, Some(bind_group.inner()), offsets);
                 self.bind_groups
-                    .insert(group, (bind_group.id(), offset.to_vec()));
+                    .insert(group, (bind_group.id(), offsets.to_vec()));
             }
             _ => (),
         }

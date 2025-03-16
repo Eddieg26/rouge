@@ -77,6 +77,41 @@ impl Buffer {
     pub fn as_entire_buffer_binding(&self) -> wgpu::BufferBinding<'_> {
         self.inner.as_entire_buffer_binding()
     }
+
+    pub fn resize(&mut self, device: &RenderDevice, size: u64) {
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size,
+            usage: self.inner.usage(),
+            mapped_at_creation: false,
+        });
+
+        self.inner = buffer;
+    }
+
+    pub fn resize_with_data(&mut self, device: &RenderDevice, data: &[u8]) {
+        let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: None,
+            contents: data,
+            usage: self.inner.usage(),
+        });
+
+        self.inner = buffer;
+    }
+
+    pub fn update(&mut self, device: &RenderDevice, data: &[u8]) {
+        if data.len() as u64 > self.size() {
+            let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: None,
+                contents: data,
+                usage: self.inner.usage(),
+            });
+
+            self.inner = buffer;
+        } else {
+            device.queue.write_buffer(&self.inner, 0, data);
+        }
+    }
 }
 
 impl From<wgpu::Buffer> for Buffer {

@@ -1,5 +1,5 @@
 use crate::{
-    extract::{ExtractError, RenderAssetExtractors, RenderAssets, RenderResourceExtractors},
+    extract::{ExtractError, RenderAssetExtractors, RenderAssets, ResourceExtractors},
     plugin::phases::{PostExtract, PostRender, PreRender, Present, Render},
     renderer::{RenderGraph, RenderGraphBuilder},
     resource::{AddRenderTarget, GpuTexture, RenderTarget, RenderTargetEvent, UpdateRenderTarget},
@@ -228,7 +228,7 @@ impl Framework for ExtractFramework {
     fn apply(&self, context: &mut game::FrameworkContext) {
         context
             .add_resource(RenderAssetExtractors::new())
-            .add_resource(RenderResourceExtractors::default())
+            .add_resource(ResourceExtractors::new())
             .register_event::<ExtractError>()
             .sub_app_mut::<RenderApp>()
             .add_sub_phase::<Extract, PostExtract>()

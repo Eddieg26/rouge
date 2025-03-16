@@ -1,59 +1,54 @@
-use crate::RenderDevice;
 use ecs::{
     core::{resource::Resource, IndexMap},
     system::{ArgItem, SystemArg},
-    world::{cell::WorldCell, World},
+    world::{
+        action::{WorldAction, WorldActionFn},
+        World,
+    },
 };
 use std::any::TypeId;
 
-pub trait RenderResourceExtractor: Resource + Sized + Send {
-    type Arg: SystemArg;
+use crate::RenderDevice;
 
-    fn can_extract(world: &World) -> bool {
-        world.has_resource::<RenderDevice>() && Self::Arg::validate(&unsafe { world.cell() })
+pub trait RenderResource: Resource + Send + Sync {
+    type Extract: SystemArg;
+
+    fn can_extract(_: &World) -> bool {
+        true
     }
 
-    fn extract(device: &RenderDevice, arg: ArgItem<Self::Arg>) -> Self;
+    fn extract(device: &RenderDevice, arg: ArgItem<Self::Extract>) -> Self;
 }
 
-pub struct ErasedResourceExtractor {
-    extract: fn(&RenderDevice, WorldCell) -> bool,
-}
-
-impl ErasedResourceExtractor {
-    pub fn new<R: RenderResourceExtractor>() -> Self {
-        Self {
-            extract: |device, world| {
-                if R::can_extract(world.get()) {
-                    let resource = R::extract(device, R::Arg::get(world));
-                    world.get_mut().add_resource(resource);
-                    false
-                } else {
-                    true
-                }
-            },
-        }
+pub struct ExtractResource<R: RenderResource>(std::marker::PhantomData<R>);
+impl<R: RenderResource> ExtractResource<R> {
+    pub fn new() -> Self {
+        Self(std::marker::PhantomData)
     }
 }
 
-#[derive(Default)]
-pub struct RenderResourceExtractors {
-    extractors: IndexMap<TypeId, ErasedResourceExtractor>,
-}
-
-impl RenderResourceExtractors {
-    pub fn add<R: RenderResourceExtractor>(&mut self) {
-        self.extractors
-            .insert(TypeId::of::<R>(), ErasedResourceExtractor::new::<R>());
-    }
-
-    pub(crate) fn extract(&mut self, world: &World) {
+impl<R: RenderResource> WorldAction for ExtractResource<R> {
+    fn execute(self, world: &mut World) -> Option<()> {
+        let arg = R::Extract::get(unsafe { world.cell() });
         let device = world.resource::<RenderDevice>();
-        let world = unsafe { world.cell() };
-
-        self.extractors
-            .retain(|_, extractor| (extractor.extract)(device, world));
+        let resource = R::extract(device, arg);
+        world.add_resource(resource);
+        Some(())
     }
 }
 
-impl Resource for RenderResourceExtractors {}
+pub struct ResourceExtractors(IndexMap<TypeId, WorldActionFn>);
+impl ResourceExtractors {
+    pub fn new() -> Self {
+        Self(IndexMap::new())
+    }
+
+    pub fn add<R: RenderResource>(&mut self) {
+        self.0.insert(
+            TypeId::of::<R>(),
+            WorldActionFn::from(ExtractResource::<R>::new()),
+        );
+    }
+}
+
+impl Resource for ResourceExtractors {}

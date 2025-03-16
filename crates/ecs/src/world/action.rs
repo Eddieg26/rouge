@@ -1,5 +1,3 @@
-use hashbrown::HashMap;
-
 use super::{cell::WorldCell, World};
 use crate::{
     event::{Event, Events},
@@ -8,6 +6,7 @@ use crate::{
         SystemArg,
     },
 };
+use hashbrown::HashMap;
 use std::sync::{Arc, Mutex};
 
 pub trait WorldAction: Send + 'static {

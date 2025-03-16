@@ -4,7 +4,7 @@ use super::{
 };
 use crate::{
     core::RenderDevice,
-    extract::{RenderAssets, RenderResourceExtractor},
+    extract::{RenderAssets, RenderResource},
     resource::{texture::RenderTarget, Id},
     surface::RenderSurface,
 };
@@ -290,13 +290,13 @@ impl Default for RenderGraph {
 
 impl Resource for RenderGraph {}
 
-impl RenderResourceExtractor for RenderGraph {
-    type Arg = (
+impl RenderResource for RenderGraph {
+    type Extract = (
         ReadRes<RenderAssets<RenderTarget>>,
         Removed<RenderGraphBuilder>,
     );
 
-    fn extract(device: &RenderDevice, arg: ArgItem<Self::Arg>) -> Self {
+    fn extract(device: &RenderDevice, arg: ArgItem<Self::Extract>) -> Self {
         let (targets, builder) = arg;
         if let Some(builder) = builder.into_inner() {
             let (width, height) = targets.max_size();

@@ -157,9 +157,9 @@ impl<T: ShaderType + WriteInto> UniformBufferArray<T> {
         self.data.as_ref().len() / self.alignment as usize
     }
 
-    pub fn push(&mut self, value: T) -> u64 {
+    pub fn push(&mut self, value: &T) -> u64 {
         self.is_dirty = true;
-        self.data.write(&value).unwrap()
+        self.data.write(value).unwrap()
     }
 
     pub fn set(&mut self, index: usize, values: impl IntoIterator<Item = T>) -> Vec<u64> {
@@ -177,13 +177,37 @@ impl<T: ShaderType + WriteInto> UniformBufferArray<T> {
         offsets
     }
 
-    pub fn update(&mut self, device: &RenderDevice) {
+    pub fn reserve(&mut self, count: usize) {
+        self.data
+            .as_mut()
+            .extend(std::iter::repeat(0).take(count * self.alignment as usize));
+        self.is_dirty = true;
+    }
+
+    pub fn clear(&mut self) {
+        self.data.as_mut().clear();
+        self.data.set_offset(0);
+        self.is_dirty = true;
+    }
+
+    pub fn reset(&mut self, len: usize) {
+        self.data.set_offset(0);
+        self.data.as_mut().resize(len * self.alignment as usize, 0);
+        self.is_dirty = true;
+    }
+
+    pub fn update(&mut self, device: &RenderDevice) -> bool {
         match &mut self.buffer {
             Some(buffer) if self.is_dirty => {
-                device
-                    .queue
-                    .write_buffer(buffer.as_ref(), 0, self.data.as_ref());
+                if self.data.as_ref().is_empty() {
+                    self.buffer = None;
+                } else {
+                    device
+                        .queue
+                        .write_buffer(buffer.as_ref(), 0, self.data.as_ref());
+                }
                 self.is_dirty = false;
+                false
             }
             None if !self.data.as_ref().is_empty() => {
                 self.buffer = Some(Buffer::with_data(
@@ -194,8 +218,9 @@ impl<T: ShaderType + WriteInto> UniformBufferArray<T> {
                 ));
 
                 self.is_dirty = false;
+                true
             }
-            _ => (),
+            _ => false,
         }
     }
 }

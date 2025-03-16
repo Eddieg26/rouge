@@ -5,8 +5,7 @@ use std::ops::RangeBounds;
 use wgpu::{BufferAddress, BufferUsages};
 
 pub struct VertexBuffer {
-    inner: Option<Buffer>,
-    usage: BufferUsages,
+    inner: Buffer,
     len: usize,
 }
 
@@ -22,27 +21,34 @@ impl VertexBuffer {
         };
 
         Self {
-            inner: if vertices.len() > 0 {
-                Some(Buffer::with_data(
-                    device,
-                    bytemuck::cast_slice(vertices),
-                    usage,
-                    None,
-                ))
-            } else {
-                None
-            },
-            usage,
+            inner: Buffer::with_data(device, bytemuck::cast_slice(vertices), usage, None),
             len: vertices.len(),
         }
     }
 
-    pub fn buffer(&self) -> Option<&Buffer> {
-        self.inner.as_ref()
+    pub fn new_from_data(
+        device: &RenderDevice,
+        data: &[u8],
+        stride: usize,
+        usage: Option<BufferUsages>,
+    ) -> Self {
+        let usage = match usage {
+            Some(usage) => usage | BufferUsages::INDEX,
+            None => BufferUsages::INDEX,
+        };
+
+        Self {
+            inner: Buffer::with_data(device, data, usage, None),
+            len: data.len() / stride,
+        }
     }
 
-    pub fn slice<S: RangeBounds<BufferAddress>>(&self, bounds: S) -> Option<BufferSlice> {
-        self.buffer().map(|buffer| buffer.slice(bounds))
+    pub fn buffer(&self) -> &Buffer {
+        &self.inner
+    }
+
+    pub fn slice<S: RangeBounds<BufferAddress>>(&self, bounds: S) -> BufferSlice {
+        self.inner.slice(bounds)
     }
 
     pub fn len(&self) -> usize {
@@ -50,34 +56,15 @@ impl VertexBuffer {
     }
 
     pub fn update<T: Pod + Zeroable>(&mut self, device: &RenderDevice, vertices: &[T]) {
-        if vertices.len() > 0 {
-            if let Some(buffer) = &mut self.inner {
-                let size = vertices.len() * std::mem::size_of::<T>();
-                if size > buffer.size() as usize {
-                    *buffer = Buffer::with_data(
-                        device,
-                        bytemuck::cast_slice(vertices),
-                        buffer.as_ref().usage(),
-                        None,
-                    );
-                    self.len = vertices.len();
-                } else {
-                    device
-                        .queue
-                        .write_buffer(buffer.as_ref(), 0, bytemuck::cast_slice(vertices));
-                }
-            } else {
-                self.inner = Some(Buffer::with_data(
-                    device,
-                    bytemuck::cast_slice(vertices),
-                    self.usage,
-                    None,
-                ));
-                self.len = vertices.len();
-            }
+        let size = vertices.len() * std::mem::size_of::<T>();
+        if size > self.inner.size() as usize {
+            let usage = self.inner.as_ref().usage();
+            self.inner = Buffer::with_data(device, bytemuck::cast_slice(vertices), usage, None);
+            self.len = vertices.len();
         } else {
-            self.inner = None;
-            self.len = 0;
+            device
+                .queue
+                .write_buffer(self.inner.as_ref(), 0, bytemuck::cast_slice(vertices));
         }
     }
 }

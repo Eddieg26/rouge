@@ -54,7 +54,7 @@ impl<'a> RenderContext<'a> {
         self.target
     }
 
-    pub fn override_target(&self, id: impl Into<Id<RenderTarget>>) -> Option<&RenderTarget> {
+    pub fn get_render_target(&self, id: impl Into<Id<RenderTarget>>) -> Option<&RenderTarget> {
         self.targets.get(&id.into())
     }
 

@@ -4,11 +4,13 @@ use std::{
     hash::{Hash, Hasher},
 };
 
-pub mod extract;
 pub mod binding;
 pub mod buffer;
+pub mod extract;
+pub mod mesh;
 pub mod pipeline;
 pub mod shader;
+pub mod texture;
 
 pub type Label = Option<Cow<'static, str>>;
 

@@ -3,7 +3,12 @@ use std::{
     borrow::Cow,
     hash::{Hash, Hasher},
 };
+
+pub mod extract;
+pub mod binding;
 pub mod buffer;
+pub mod pipeline;
+pub mod shader;
 
 pub type Label = Option<Cow<'static, str>>;
 

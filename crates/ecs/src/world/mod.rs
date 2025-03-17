@@ -248,6 +248,11 @@ impl World {
         self.add_non_send_resource(resource);
     }
 
+    pub fn send_event<E: Event>(&mut self, event: E) -> &mut Self {
+        self.resource_mut::<Events<E>>().add(event);
+        self
+    }
+
     pub fn invoke_event<E: Event>(&mut self, event: E) -> &mut Self {
         self.events.invoke::<E>();
         self.resource_mut::<Events<E>>().add(event);

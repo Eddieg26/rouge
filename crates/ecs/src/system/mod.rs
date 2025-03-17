@@ -227,26 +227,26 @@ impl From<&WorldAccess> for WorldAccessMeta {
 }
 
 impl WorldAccess {
-    pub fn resource<R: crate::core::resource::Resource + Send>() -> Self {
+    pub fn resource<R: crate::core::resource::Resource + Send>(access: AccessType) -> Self {
         Self::Resource {
             ty: ResourceId::of::<R>(),
-            access: AccessType::Read,
+            access,
             send: true,
         }
     }
 
-    pub fn non_send_resource<R: crate::core::resource::Resource>() -> Self {
+    pub fn non_send_resource<R: crate::core::resource::Resource>(access: AccessType) -> Self {
         Self::Resource {
             ty: ResourceId::of::<R>(),
-            access: AccessType::Read,
+            access,
             send: false,
         }
     }
 
-    pub fn component<C: crate::core::component::Component>() -> Self {
+    pub fn component<C: crate::core::component::Component>(access: AccessType) -> Self {
         Self::Component {
             ty: ComponentId::of::<C>(),
-            access: AccessType::Read,
+            access,
         }
     }
 

@@ -1,3 +1,4 @@
+use super::{FilterMode, GpuTexture, Sampler, Texture, WrapMode};
 use crate::{
     device::RenderDevice,
     resources::{
@@ -5,8 +6,6 @@ use crate::{
         extract::{ExtractError, RenderAsset, RenderAssetExtractor, RenderAssets},
     },
 };
-
-use super::{FilterMode, GpuTexture, Sampler, Texture, WrapMode};
 use asset::Asset;
 use ecs::{
     event::{Event, Events},

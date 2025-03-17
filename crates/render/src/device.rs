@@ -1,4 +1,4 @@
-use ecs::Resource;
+use ecs::{Resource, world::action::WorldAction};
 use std::sync::Arc;
 use wgpu::{Adapter, Device, Queue, RequestDeviceError};
 
@@ -29,3 +29,11 @@ impl std::ops::Deref for RenderDevice {
 }
 
 impl Resource for RenderDevice {}
+
+pub struct DeviceCreated;
+
+impl WorldAction for DeviceCreated {
+    fn execute(self, world: &mut ecs::world::World) -> Option<()> {
+        todo!()
+    }
+}

@@ -8,6 +8,8 @@ use ecs::{
 use game::Main;
 use std::{any::TypeId, collections::HashMap, hash::Hash, sync::Arc};
 
+use super::Id;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AssetUsage {
     Keep,
@@ -28,12 +30,10 @@ impl RenderAssetType {
     }
 }
 
-pub trait RenderAsset: Send + Sync + 'static {
-    type Id: Copy + Clone + Eq + Hash + From<AssetId> + Send + Sync;
-}
+pub trait RenderAsset: Send + Sync + 'static {}
 
 pub struct RenderAssets<R: RenderAsset> {
-    assets: HashMap<R::Id, R>,
+    assets: HashMap<Id<R>, R>,
 }
 
 impl<R: RenderAsset> RenderAssets<R> {
@@ -43,33 +43,31 @@ impl<R: RenderAsset> RenderAssets<R> {
         }
     }
 
-    pub fn add(&mut self, id: R::Id, asset: R) {
+    pub fn add(&mut self, id: Id<R>, asset: R) {
         self.assets.insert(id, asset);
     }
 
-    pub fn get(&self, id: &R::Id) -> Option<&R> {
+    pub fn get(&self, id: &Id<R>) -> Option<&R> {
         self.assets.get(id)
     }
 
-    pub fn get_mut(&mut self, id: &R::Id) -> Option<&mut R> {
+    pub fn get_mut(&mut self, id: &Id<R>) -> Option<&mut R> {
         self.assets.get_mut(id)
     }
 
-    pub fn remove(&mut self, id: &R::Id) -> Option<R> {
+    pub fn remove(&mut self, id: &Id<R>) -> Option<R> {
         self.assets.remove(id)
     }
 
-    pub fn contains(&self, id: &R::Id) -> bool {
+    pub fn contains(&self, id: &Id<R>) -> bool {
         self.assets.contains_key(id)
     }
 
-    pub fn iter(&self) -> std::collections::hash_map::Iter<'_, <R as RenderAsset>::Id, R> {
+    pub fn iter(&self) -> std::collections::hash_map::Iter<'_, Id<R>, R> {
         self.assets.iter()
     }
 
-    pub fn iter_mut(
-        &mut self,
-    ) -> std::collections::hash_map::IterMut<'_, <R as RenderAsset>::Id, R> {
+    pub fn iter_mut(&mut self) -> std::collections::hash_map::IterMut<'_, Id<R>, R> {
         self.assets.iter_mut()
     }
 
@@ -87,19 +85,19 @@ impl<R: RenderAsset> RenderAssets<R> {
 
     pub fn retain<F>(&mut self, f: F)
     where
-        F: FnMut(&R::Id, &mut R) -> bool,
+        F: FnMut(&Id<R>, &mut R) -> bool,
     {
         self.assets.retain(f);
     }
 
-    pub fn drain(&mut self) -> std::collections::hash_map::Drain<'_, R::Id, R> {
+    pub fn drain(&mut self) -> std::collections::hash_map::Drain<'_, Id<R>, R> {
         self.assets.drain()
     }
 }
 
 impl<'a, R: RenderAsset> IntoIterator for &'a RenderAssets<R> {
-    type Item = (&'a R::Id, &'a R);
-    type IntoIter = std::collections::hash_map::Iter<'a, R::Id, R>;
+    type Item = (&'a Id<R>, &'a R);
+    type IntoIter = std::collections::hash_map::Iter<'a, Id<R>, R>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.assets.iter()
@@ -107,8 +105,8 @@ impl<'a, R: RenderAsset> IntoIterator for &'a RenderAssets<R> {
 }
 
 impl<'a, R: RenderAsset> IntoIterator for &'a mut RenderAssets<R> {
-    type Item = (&'a R::Id, &'a mut R);
-    type IntoIter = std::collections::hash_map::IterMut<'a, R::Id, R>;
+    type Item = (&'a Id<R>, &'a mut R);
+    type IntoIter = std::collections::hash_map::IterMut<'a, Id<R>, R>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.assets.iter_mut()
@@ -216,8 +214,7 @@ impl AssetExtractors {
                                 assets.remove(id);
                             }
 
-                            let id = <R::RenderAsset as RenderAsset>::Id::from(*id);
-                            render_assets.add(id, extracted);
+                            render_assets.add(id.into(), extracted);
                         }
                         Err(error) => {
                             errors.add(error);
@@ -231,8 +228,7 @@ impl AssetExtractors {
                         None => continue,
                     };
 
-                    let extract_id = <R::RenderAsset as RenderAsset>::Id::from(*id);
-                    let render_asset = match render_assets.get_mut(&extract_id) {
+                    let render_asset = match render_assets.get_mut(&id.into()) {
                         Some(render_asset) => render_asset,
                         None => continue,
                     };
@@ -242,12 +238,11 @@ impl AssetExtractors {
                         re_extract.push(RenderAssetEvent::Modified(*id));
                     } else if R::usage(id, asset) == AssetUsage::Discard {
                         assets.remove(id);
-                        render_assets.remove(&extract_id);
+                        render_assets.remove(&id.into());
                     }
                 }
                 RenderAssetEvent::Removed(id) => {
-                    let id = <R::RenderAsset as RenderAsset>::Id::from(id);
-                    render_assets.remove(&id);
+                    render_assets.remove(&id.into());
                 }
             }
         }

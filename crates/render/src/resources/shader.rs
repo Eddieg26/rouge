@@ -1,6 +1,8 @@
 use crate::device::RenderDevice;
-use asset::Asset;
+use asset::{Asset, AssetId, AssetRef};
 use std::{borrow::Cow, sync::Arc};
+
+use super::extract::RenderAsset;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum ShaderStage {
@@ -33,7 +35,11 @@ pub enum ShaderSource {
     },
 }
 
-pub struct Shader(Arc<wgpu::ShaderModule>);
+#[derive(Asset, serde::Serialize)]
+pub struct Shader {
+    #[serde(skip)]
+    module: Arc<wgpu::ShaderModule>,
+}
 impl Shader {
     pub fn new(device: &RenderDevice, source: ShaderSource) -> Self {
         let module = match source {
@@ -60,25 +66,64 @@ impl Shader {
                 })
             }
         };
-        Self(Arc::new(module))
+        Self {
+            module: Arc::new(module),
+        }
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Shader {
+    fn deserialize<D>(_: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Err(serde::de::Error::custom("Deserialization not supported"))
     }
 }
 
 impl From<wgpu::ShaderModule> for Shader {
     fn from(shader: wgpu::ShaderModule) -> Self {
-        Self(Arc::new(shader))
+        Self {
+            module: Arc::new(shader),
+        }
     }
 }
 
 impl std::ops::Deref for Shader {
     type Target = wgpu::ShaderModule;
     fn deref(&self) -> &Self::Target {
-        &self.0
+        &self.module
     }
 }
 
 impl AsRef<wgpu::ShaderModule> for Shader {
     fn as_ref(&self) -> &wgpu::ShaderModule {
-        &self.0
+        &self.module
+    }
+}
+
+impl RenderAsset for Shader {}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum ShaderPath {
+    Id(AssetRef<Shader>),
+    Path(&'static str),
+}
+
+impl From<&'static str> for ShaderPath {
+    fn from(path: &'static str) -> Self {
+        Self::Path(path)
+    }
+}
+
+impl From<AssetRef<Shader>> for ShaderPath {
+    fn from(id: AssetRef<Shader>) -> Self {
+        Self::Id(id)
+    }
+}
+
+impl From<AssetId> for ShaderPath {
+    fn from(id: AssetId) -> Self {
+        Self::Id(id.into())
     }
 }

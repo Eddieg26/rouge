@@ -3,6 +3,7 @@ use crate::device::RenderDevice;
 use std::{num::NonZero, sync::Arc};
 use wgpu::SamplerBindingType;
 
+#[derive(Clone, Debug, PartialEq)]
 pub struct BindGroupLayout(Arc<wgpu::BindGroupLayout>);
 impl From<wgpu::BindGroupLayout> for BindGroupLayout {
     fn from(layout: wgpu::BindGroupLayout) -> Self {
@@ -25,6 +26,7 @@ impl AsRef<wgpu::BindGroupLayout> for BindGroupLayout {
 
 pub type BindGroupId = AtomicId<BindGroup>;
 
+#[derive(Clone, Debug, PartialEq)]
 pub struct BindGroup {
     pub id: BindGroupId,
     bind_group: Arc<wgpu::BindGroup>,

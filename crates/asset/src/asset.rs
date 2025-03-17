@@ -1,7 +1,7 @@
 use ecs::core::{internal::blob::BlobCell, resource::Resource, Type};
 use hashbrown::HashMap;
 use serde::ser::SerializeStruct;
-use std::{hash::Hash, marker::PhantomData};
+use std::{fmt::Debug, hash::Hash, marker::PhantomData};
 use uuid::Uuid;
 
 pub trait Asset: Send + Sync + serde::Serialize + for<'a> serde::Deserialize<'a> + 'static {}
@@ -133,6 +133,12 @@ impl<A: Asset> From<&AssetId> for AssetRef<A> {
             id: *id,
             _marker: PhantomData::default(),
         }
+    }
+}
+
+impl<A: Asset> Debug for AssetRef<A> {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "AssetRef({})", self.id.0)
     }
 }
 

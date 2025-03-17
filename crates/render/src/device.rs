@@ -33,7 +33,7 @@ impl Resource for RenderDevice {}
 pub struct DeviceCreated;
 
 impl WorldAction for DeviceCreated {
-    fn execute(self, world: &mut ecs::world::World) -> Option<()> {
+    fn execute(self, _: &mut ecs::world::World) -> Option<()> {
         todo!()
     }
 }

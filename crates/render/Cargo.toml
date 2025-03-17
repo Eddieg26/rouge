@@ -18,6 +18,7 @@ uuid = { workspace = true }
 bitflags = { workspace = true }
 pollster = { workspace = true }
 crc32fast = { workspace = true }
+downcast-rs = { workspace = true }
 wgpu = { version = "23.0.0", features = ["spirv", "glsl", "serde"] }
 encase = { version = "0.10.0", features = ["glam"] }
 naga_oil = "0.16.0"

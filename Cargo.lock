@@ -2055,6 +2055,7 @@ dependencies = [
  "bitflags 2.6.0",
  "bytemuck",
  "crc32fast",
+ "downcast-rs",
  "ecs",
  "encase",
  "encase-macros",

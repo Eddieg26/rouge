@@ -1,18 +1,15 @@
 use super::RenderGraphResources;
 use crate::{
     device::RenderDevice,
-    resources::{
-        extract::RenderAssets,
-        texture::{GpuTexture, RenderTarget},
-    },
+    resources::{extract::RenderAssets, texture::GpuTexture},
 };
 use ecs::world::World;
 
 pub struct RenderContext<'a> {
     world: &'a World,
     device: &'a RenderDevice,
-    surface: &'a RenderTarget,
-    targets: &'a RenderAssets<RenderTarget>,
+    target: &'a wgpu::TextureView,
+    depth: &'a wgpu::TextureView,
     resources: &'a RenderGraphResources,
     textures: &'a RenderAssets<GpuTexture>,
     buffers: Vec<wgpu::CommandBuffer>,
@@ -22,15 +19,15 @@ impl<'a> RenderContext<'a> {
     pub fn new(
         world: &'a World,
         device: &'a RenderDevice,
-        surface: &'a RenderTarget,
-        targets: &'a RenderAssets<RenderTarget>,
+        target: &'a wgpu::TextureView,
+        depth: &'a wgpu::TextureView,
         resources: &'a RenderGraphResources,
     ) -> Self {
         Self {
             world,
             device,
-            surface,
-            targets,
+            target,
+            depth,
             resources,
             textures: world.resource::<RenderAssets<GpuTexture>>(),
             buffers: Vec::new(),
@@ -45,8 +42,12 @@ impl<'a> RenderContext<'a> {
         self.device
     }
 
-    pub fn surface(&self) -> &'a RenderTarget {
-        self.surface
+    pub fn target(&self) -> &'a wgpu::TextureView {
+        self.target
+    }
+
+    pub fn depth(&self) -> &'a wgpu::TextureView {
+        self.depth
     }
 
     pub fn resources(&self) -> &'a RenderGraphResources {
@@ -55,10 +56,6 @@ impl<'a> RenderContext<'a> {
 
     pub fn textures(&self) -> &'a RenderAssets<GpuTexture> {
         self.textures
-    }
-
-    pub fn targets(&self) -> &'a RenderAssets<RenderTarget> {
-        self.targets
     }
 
     pub fn encoder(&self) -> wgpu::CommandEncoder {

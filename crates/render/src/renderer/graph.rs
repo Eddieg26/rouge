@@ -4,10 +4,17 @@ use super::{
 };
 use crate::{
     device::RenderDevice,
-    resources::{Id, extract::RenderAssets, texture::RenderTarget},
-    surface::RenderSurface,
+    resources::{
+        GpuTexture, Id, RenderAssetExtractor, RenderTexture, Sampler, Texture,
+        extract::{ExtractError, RenderResource},
+    },
+    surface::{DepthTexture, RenderSurface, RenderSurfaceTexture},
 };
-use ecs::{IndexMap, Resource, world::World};
+use ecs::{
+    IndexMap, Resource,
+    system::unlifetime::{ReadRes, WriteRes},
+    world::{World, access::Removed},
+};
 use std::{any::TypeId, collections::HashMap};
 use wgpu::{BufferDescriptor, TextureDescriptor};
 
@@ -127,8 +134,7 @@ impl RenderGraphBuilder {
         buffer: wgpu::Buffer,
     ) -> Id<RenderGraphBuffer> {
         let id = id.into();
-        self.buffers
-            .insert(id, RenderGraphBuffer { buffer, desc: None });
+        self.buffers.insert(id, RenderGraphBuffer { buffer });
 
         id
     }
@@ -173,13 +179,7 @@ impl RenderGraphBuilder {
                         usage: desc.usage,
                         mapped_at_creation: false,
                     });
-                    self.buffers.insert(
-                        id,
-                        RenderGraphBuffer {
-                            buffer,
-                            desc: Some(desc),
-                        },
-                    );
+                    self.buffers.insert(id, RenderGraphBuffer { buffer });
                 }
             }
         }
@@ -278,23 +278,29 @@ impl RenderGraph {
         &self.resources
     }
 
+    pub fn resources_mut(&mut self) -> &mut RenderGraphResources {
+        &mut self.resources
+    }
+
     pub fn nodes(&self) -> &[Box<dyn RenderGraphNode>] {
         &self.nodes
     }
 
     pub fn run(&self, world: &World) {
-        let device = world.resource::<RenderDevice>();
-        let targets = world.resource::<RenderAssets<RenderTarget>>();
-        let Some(target) = targets.get(&RenderSurface::ID) else {
+        let Some(surface) = world.resource::<RenderSurfaceTexture>().get() else {
             return;
         };
+
+        let target = surface.texture.create_view(&Default::default());
+        let depth = world.resource::<DepthTexture>();
+        let device = world.resource::<RenderDevice>();
 
         for group in &self.order {
             let mut buffers = vec![];
 
             for &index in group {
                 let mut context =
-                    RenderContext::new(world, device, target, targets, &self.resources);
+                    RenderContext::new(world, device, &target, &depth, &self.resources);
                 self.nodes[index].run(&mut context);
 
                 buffers.extend(context.finish());
@@ -309,3 +315,63 @@ impl RenderGraph {
 }
 
 impl Resource for RenderGraph {}
+
+impl RenderResource for RenderGraph {
+    type Arg = (
+        ReadRes<RenderDevice>,
+        ReadRes<RenderSurface>,
+        Removed<RenderGraphBuilder>,
+    );
+
+    fn extract(
+        arg: ecs::system::ArgItem<Self::Arg>,
+    ) -> Result<Self, crate::resources::extract::ExtractError> {
+        let (device, surface, builder) = arg;
+
+        let builder = builder
+            .into_inner()
+            .ok_or(ExtractError::MissingDependency)?;
+
+        builder
+            .build(&device, surface.width(), surface.height())
+            .map_err(|e| ExtractError::from_error(e))
+    }
+}
+
+impl RenderAssetExtractor for RenderTexture {
+    type RenderAsset = GpuTexture;
+    type Arg = (
+        ReadRes<RenderDevice>,
+        ReadRes<RenderSurface>,
+        WriteRes<RenderGraph>,
+    );
+
+    fn extract(
+        id: &asset::AssetId,
+        asset: &mut Self,
+        arg: &mut ecs::system::ArgItem<Self::Arg>,
+    ) -> Result<Self::RenderAsset, ExtractError> {
+        let (device, surface, graph) = arg;
+
+        asset.set_format(surface.format());
+        let texture = GpuTexture::create(&device, asset, Sampler::from_texture(device, asset));
+        let view = texture.texture().create_view(&Default::default());
+        let desc = TextureDesc {
+            format: asset.format(),
+            usage: asset.usage(),
+        };
+
+        graph.resources_mut().import_texture(id, view, Some(desc));
+
+        Ok(texture)
+    }
+
+    fn removed(
+        id: &asset::AssetId,
+        _: &Self::RenderAsset,
+        arg: &mut ecs::system::ArgItem<Self::Arg>,
+    ) {
+        let (_, _, graph) = arg;
+        graph.resources_mut().remove_texture(&id.into());
+    }
+}

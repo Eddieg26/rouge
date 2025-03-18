@@ -160,7 +160,7 @@ impl GpuTexture {
             1
         };
 
-        let format = texture.format().into();
+        let format = texture.format();
 
         let created = device.create_texture(&wgpu::TextureDescriptor {
             label: None,

@@ -135,6 +135,8 @@ pub trait RenderAssetExtractor: Asset {
         Ok(())
     }
 
+    fn removed(id: &AssetId, asset: &Self::RenderAsset, arg: &mut ArgItem<Self::Arg>) {}
+
     fn usage(id: &AssetId, asset: &Self) -> AssetUsage {
         AssetUsage::Discard
     }
@@ -242,7 +244,9 @@ impl AssetExtractors {
                     }
                 }
                 RenderAssetEvent::Removed(id) => {
-                    render_assets.remove(&id.into());
+                    if let Some(asset)  = render_assets.remove(&id.into()) {
+                        R::removed(&id, &asset, &mut arg);
+                    }
                 }
             }
         }

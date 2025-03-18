@@ -178,3 +178,9 @@ impl<T: ShaderType + WriteInto> UniformBufferArray<T> {
         None
     }
 }
+
+impl<T: ShaderType + WriteInto> AsRef<Buffer> for UniformBufferArray<T> {
+    fn as_ref(&self) -> &Buffer {
+        &self.buffer
+    }
+}

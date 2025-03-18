@@ -1,9 +1,6 @@
 use crate::{
     device::{DeviceCreated, RenderDevice},
-    resources::{
-        Id,
-        texture::{AddRenderTarget, RenderTarget},
-    },
+    resources::RenderTexture,
 };
 use ecs::{Resource, world::action::WorldAction};
 use game::ExitGame;
@@ -48,16 +45,6 @@ pub struct RenderSurface {
 }
 
 impl RenderSurface {
-    pub const ID: Id<RenderTarget> = Id::new(0);
-
-    pub const fn default_format() -> wgpu::TextureFormat {
-        wgpu::TextureFormat::Rgba8UnormSrgb
-    }
-
-    pub const fn default_depth_format() -> wgpu::TextureFormat {
-        wgpu::TextureFormat::Depth32Float
-    }
-
     pub async fn new(window: &Window) -> Result<(Self, wgpu::Adapter), RenderSurfaceError> {
         let instance = wgpu::Instance::default();
 
@@ -86,10 +73,10 @@ impl RenderSurface {
         let format = *capabilities
             .formats
             .iter()
-            .find(|format| **format == Self::default_format())
+            .find(|format| **format == RenderTexture::default_format())
             .unwrap_or(capabilities.formats.get(0).expect("No supported formats"));
 
-        let depth_format = Self::default_depth_format();
+        let depth_format = DepthTexture::FORMAT;
 
         let present_mode = capabilities
             .present_modes
@@ -188,6 +175,37 @@ impl RenderSurfaceTexture {
 
 impl Resource for RenderSurfaceTexture {}
 
+pub struct DepthTexture(wgpu::TextureView);
+impl DepthTexture {
+    pub const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+
+    pub fn inner(&self) -> &wgpu::TextureView {
+        &self.0
+    }
+}
+
+impl From<wgpu::TextureView> for DepthTexture {
+    fn from(view: wgpu::TextureView) -> Self {
+        Self(view)
+    }
+}
+
+impl std::ops::Deref for DepthTexture {
+    type Target = wgpu::TextureView;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl AsRef<wgpu::TextureView> for DepthTexture {
+    fn as_ref(&self) -> &wgpu::TextureView {
+        &self.0
+    }
+}
+
+impl Resource for DepthTexture {}
+
 pub struct CreateRenderSurface;
 
 impl WorldAction for CreateRenderSurface {
@@ -217,17 +235,6 @@ impl WorldAction for CreateRenderSurface {
             depth_or_array_layers: 1,
         };
 
-        let color = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("Surface Color"),
-            size,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: surface.format(),
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[surface.format()],
-        });
-
         let depth = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("Surface Depth"),
             size,
@@ -239,20 +246,13 @@ impl WorldAction for CreateRenderSurface {
             view_formats: &[surface.depth_format()],
         });
 
-        let target = RenderTarget {
-            width: surface.width(),
-            height: surface.height(),
-            color: color.create_view(&Default::default()),
-            depth: Some(depth.create_view(&Default::default())),
-        };
+        let depth = DepthTexture::from(depth.create_view(&wgpu::TextureViewDescriptor::default()));
 
+        world.add_resource(depth);
         world.add_resource(surface);
         world.add_resource(device);
 
         world.actions().add(DeviceCreated);
-        world
-            .actions()
-            .add(AddRenderTarget::new(RenderSurface::ID, target));
 
         None
     }

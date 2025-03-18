@@ -1,9 +1,12 @@
+use crate::types::Color;
 use crate::{device::RenderDevice, resources::Id};
 use std::collections::HashMap;
+use std::hash::Hash;
 use wgpu::TextureDescriptor;
 
 pub mod context;
 pub mod graph;
+pub mod state;
 
 pub struct TextureDesc {
     pub format: wgpu::TextureFormat,
@@ -47,7 +50,6 @@ impl AsRef<wgpu::TextureView> for RenderGraphTexture {
 
 pub struct RenderGraphBuffer {
     pub buffer: wgpu::Buffer,
-    pub desc: Option<BufferDesc>,
 }
 
 impl std::ops::Deref for RenderGraphBuffer {
@@ -77,17 +79,26 @@ impl RenderGraphResources {
         Self { textures, buffers }
     }
 
+    pub fn texture(&self, id: &Id<RenderGraphTexture>) -> Option<&RenderGraphTexture> {
+        self.textures.get(id)
+    }
+
+    pub fn buffer(&self, id: &Id<RenderGraphBuffer>) -> Option<&RenderGraphBuffer> {
+        self.buffers.get(id)
+    }
+
     pub fn import_texture(
         &mut self,
         id: impl Into<Id<RenderGraphTexture>>,
         texture: wgpu::TextureView,
+        desc: Option<TextureDesc>,
     ) -> Id<RenderGraphTexture> {
         let id = id.into();
         self.textures.insert(
             id,
             RenderGraphTexture {
                 view: texture,
-                desc: None,
+                desc,
             },
         );
 
@@ -101,7 +112,7 @@ impl RenderGraphResources {
     ) -> Id<RenderGraphBuffer> {
         let id = id.into();
         self.buffers
-            .insert(id, RenderGraphBuffer { buffer, desc: None });
+            .insert(id, RenderGraphBuffer { buffer});
 
         id
     }
@@ -139,5 +150,192 @@ impl RenderGraphResources {
                 texture.create_view(&Default::default())
             };
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Attachment {
+    Surface,
+    Texture(Id<RenderGraphTexture>),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum StoreOp {
+    Store,
+    Clear,
+}
+
+impl Into<wgpu::StoreOp> for StoreOp {
+    fn into(self) -> wgpu::StoreOp {
+        match self {
+            StoreOp::Store => wgpu::StoreOp::Store,
+            StoreOp::Clear => wgpu::StoreOp::Discard,
+        }
+    }
+}
+
+pub enum LoadOp<T> {
+    Clear(T),
+    Load,
+}
+
+impl<T> Into<wgpu::LoadOp<T>> for LoadOp<T> {
+    fn into(self) -> wgpu::LoadOp<T> {
+        match self {
+            LoadOp::Clear(value) => wgpu::LoadOp::Clear(value),
+            LoadOp::Load => wgpu::LoadOp::Load,
+        }
+    }
+}
+
+pub struct Operations<T> {
+    pub load: LoadOp<T>,
+    pub store: StoreOp,
+}
+
+impl<T> Into<wgpu::Operations<T>> for Operations<T> {
+    fn into(self) -> wgpu::Operations<T> {
+        wgpu::Operations {
+            load: self.load.into(),
+            store: self.store.into(),
+        }
+    }
+}
+
+pub struct ColorAttachment {
+    pub attachment: Attachment,
+    pub resolve_target: Option<Attachment>,
+    pub store_op: StoreOp,
+    pub clear: Option<Color>,
+}
+
+pub struct DepthAttachment {
+    pub attachment: Attachment,
+    pub depth_store_op: Operations<f32>,
+    pub stencil_store_op: Option<Operations<u32>>,
+}
+
+pub struct RenderPass {
+    colors: Vec<ColorAttachment>,
+    depth: Option<DepthAttachment>,
+}
+
+impl RenderPass {
+    pub fn new() -> Self {
+        Self {
+            colors: Vec::new(),
+            depth: None,
+        }
+    }
+
+    pub fn with_color(
+        mut self,
+        attachment: Attachment,
+        resolve_target: Option<Attachment>,
+        store_op: StoreOp,
+        clear: Option<Color>,
+    ) -> Self {
+        self.colors.push(ColorAttachment {
+            attachment,
+            resolve_target,
+            store_op,
+            clear,
+        });
+
+        self
+    }
+
+    pub fn with_depth(
+        mut self,
+        attachment: Attachment,
+        depth_store_op: Operations<f32>,
+        stencil_store_op: Option<Operations<u32>>,
+    ) -> Self {
+        self.depth = Some(DepthAttachment {
+            attachment,
+            depth_store_op,
+            stencil_store_op,
+        });
+
+        self
+    }
+
+    pub fn begin<'a>(
+        &self,
+        encoder: &'a mut wgpu::CommandEncoder,
+        resources: &'a RenderGraphResources,
+        target: &'a wgpu::TextureView,
+        depth: &'a wgpu::TextureView,
+        clear: Option<Color>,
+    ) -> Option<wgpu::RenderPass<'a>> {
+        let mut color_attachments = vec![];
+        for color in self.colors.iter() {
+            let view = match color.attachment {
+                Attachment::Surface => target,
+                Attachment::Texture(ref id) => &resources.texture(id)?.view,
+            };
+
+            let resolve_target = match color.resolve_target {
+                Some(attachment) => match attachment {
+                    Attachment::Surface => Some(target),
+                    Attachment::Texture(ref id) => Some(resources.texture(id)?).map(|v| &v.view),
+                },
+                None => None,
+            };
+
+            let load = match clear {
+                Some(color) => wgpu::LoadOp::Clear(color.into()),
+                None => match color.clear {
+                    Some(color) => wgpu::LoadOp::Clear(color.into()),
+                    None => wgpu::LoadOp::Load,
+                },
+            };
+
+            let attachement = wgpu::RenderPassColorAttachment {
+                view,
+                resolve_target,
+                ops: wgpu::Operations {
+                    load,
+                    store: color.store_op.into(),
+                },
+            };
+
+            color_attachments.push(Some(attachement));
+        }
+
+        let depth_stencil_attachment = match &self.depth {
+            Some(attachment) => Some(wgpu::RenderPassDepthStencilAttachment {
+                view: match attachment.attachment {
+                    Attachment::Surface => depth,
+                    Attachment::Texture(ref id) => resources.texture(id)?,
+                },
+                depth_ops: Some(wgpu::Operations {
+                    load: match attachment.depth_store_op.load {
+                        LoadOp::Clear(value) => wgpu::LoadOp::Clear(value),
+                        LoadOp::Load => wgpu::LoadOp::Load,
+                    },
+                    store: attachment.depth_store_op.store.into(),
+                }),
+                stencil_ops: attachment
+                    .stencil_store_op
+                    .as_ref()
+                    .map(|op| wgpu::Operations {
+                        load: match op.load {
+                            LoadOp::Clear(value) => wgpu::LoadOp::Clear(value),
+                            LoadOp::Load => wgpu::LoadOp::Load,
+                        },
+                        store: op.store.into(),
+                    }),
+            }),
+            None => None,
+        };
+
+        let pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            color_attachments: &color_attachments,
+            depth_stencil_attachment,
+            ..Default::default()
+        });
+
+        Some(pass)
     }
 }

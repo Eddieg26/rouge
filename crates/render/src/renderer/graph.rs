@@ -1,377 +1,401 @@
-use super::{
-    BufferDesc, RenderGraphBuffer, RenderGraphResource, RenderGraphResources, RenderGraphTexture,
-    TextureDesc, context::RenderContext,
-};
-use crate::{
-    device::RenderDevice,
-    resources::{
-        GpuTexture, Id, RenderAssetExtractor, RenderTexture, Sampler, Texture,
-        extract::{ExtractError, RenderResource},
-    },
-    surface::{DepthTexture, RenderSurface, RenderSurfaceTexture},
-};
-use ecs::{
-    IndexMap, Resource,
-    system::unlifetime::{ReadRes, WriteRes},
-    world::{World, access::Removed},
-};
-use std::{any::TypeId, collections::HashMap};
-use wgpu::{BufferDescriptor, TextureDescriptor};
+use crate::{device::RenderDevice, surface::RenderSurface};
+use std::{any::Any, sync::Arc};
+
+pub trait GraphResource: Sized + Any + Send + Sync + 'static {
+    type Desc: Any + Send + Sync + 'static;
+
+    fn create(device: &RenderDevice, surface: &RenderSurface, desc: &Self::Desc) -> Self;
+}
+
+pub type Name = &'static str;
+pub type NodeId = u32;
+pub type ResourceId = u32;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct NodeId(TypeId);
-
-impl NodeId {
-    pub fn new<T: RenderGraphNode>() -> Self {
-        Self(TypeId::of::<T>())
-    }
+pub enum ResourceKind {
+    Transient,
+    Imported,
 }
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct NodeEdge {
-    pub from: NodeId,
-    pub to: NodeId,
-}
-
-impl From<(NodeId, NodeId)> for NodeEdge {
-    fn from((from, to): (NodeId, NodeId)) -> Self {
-        Self { from, to }
-    }
-}
-
-pub trait RenderGraphNode: downcast_rs::Downcast + Send + Sync + 'static {
-    fn name(&self) -> &str;
-
-    fn run(&self, ctx: &mut RenderContext);
-}
-downcast_rs::impl_downcast!(RenderGraphNode);
-
-pub struct RenderGraphBuilder {
-    resources: Vec<RenderGraphResource>,
-    textures: HashMap<Id<RenderGraphTexture>, RenderGraphTexture>,
-    buffers: HashMap<Id<RenderGraphBuffer>, RenderGraphBuffer>,
-    nodes: IndexMap<NodeId, Box<dyn RenderGraphNode>>,
-    edges: Vec<NodeEdge>,
-}
-
-impl RenderGraphBuilder {
-    pub fn new() -> Self {
-        Self {
-            resources: Vec::new(),
-            textures: HashMap::new(),
-            buffers: HashMap::new(),
-            nodes: IndexMap::new(),
-            edges: Vec::new(),
-        }
-    }
-
-    pub fn node<T: RenderGraphNode>(&self) -> Option<&T> {
-        self.nodes
-            .get(&NodeId::new::<T>())
-            .and_then(|node| node.downcast_ref::<T>())
-    }
-
-    pub fn node_mut<T: RenderGraphNode>(&mut self) -> Option<&mut T> {
-        self.nodes
-            .get_mut(&NodeId::new::<T>())
-            .and_then(|node| node.downcast_mut::<T>())
-    }
-
-    pub fn nodes(&self) -> impl Iterator<Item = &dyn RenderGraphNode> {
-        self.nodes.values().map(|node| &**node)
-    }
-
-    pub fn node_count(&self) -> usize {
-        self.nodes.len()
-    }
-
-    pub fn add_node<T: RenderGraphNode>(&mut self, node: T) {
-        self.nodes.insert(NodeId::new::<T>(), Box::new(node));
-    }
-
-    pub fn add_edge<From: RenderGraphNode, To: RenderGraphNode>(&mut self) {
-        let from = NodeId::new::<From>();
-        let to = NodeId::new::<To>();
-        self.edges.push(NodeEdge { from, to });
-    }
-
-    pub fn add_texture(&mut self, name: &str, desc: TextureDesc) -> Id<RenderGraphTexture> {
-        let id = name.into();
-        self.resources
-            .push(RenderGraphResource::Texture { id, desc });
-
-        id
-    }
-
-    pub fn add_buffer(&mut self, name: &str, desc: BufferDesc) -> Id<RenderGraphBuffer> {
-        let id = name.into();
-        self.resources
-            .push(RenderGraphResource::Buffer { id, desc });
-
-        id
-    }
-
-    pub fn import_texture(
-        &mut self,
-        id: impl Into<Id<RenderGraphTexture>>,
-        texture: wgpu::TextureView,
-    ) -> Id<RenderGraphTexture> {
-        let id = id.into();
-        self.textures.insert(
-            id,
-            RenderGraphTexture {
-                view: texture,
-                desc: None,
-            },
-        );
-
-        id
-    }
-
-    pub fn import_buffer(
-        &mut self,
-        id: impl Into<Id<RenderGraphBuffer>>,
-        buffer: wgpu::Buffer,
-    ) -> Id<RenderGraphBuffer> {
-        let id = id.into();
-        self.buffers.insert(id, RenderGraphBuffer { buffer });
-
-        id
-    }
-
-    pub fn build(
-        mut self,
-        device: &RenderDevice,
-        width: u32,
-        height: u32,
-    ) -> Result<RenderGraph, RenderGraphBuildError> {
-        let order = self.build_order()?;
-
-        for resource in self.resources {
-            match resource {
-                RenderGraphResource::Texture { id, desc } => {
-                    let texture = device.create_texture(&TextureDescriptor {
-                        label: None,
-                        size: wgpu::Extent3d {
-                            width,
-                            height,
-                            depth_or_array_layers: 1,
-                        },
-                        mip_level_count: 1,
-                        sample_count: 0,
-                        dimension: wgpu::TextureDimension::D2,
-                        format: desc.format,
-                        usage: desc.usage,
-                        view_formats: &[desc.format],
-                    });
-                    self.textures.insert(
-                        id,
-                        RenderGraphTexture {
-                            view: texture.create_view(&Default::default()),
-                            desc: Some(desc),
-                        },
-                    );
-                }
-                RenderGraphResource::Buffer { id, desc } => {
-                    let buffer = device.create_buffer(&BufferDescriptor {
-                        label: None,
-                        size: desc.size,
-                        usage: desc.usage,
-                        mapped_at_creation: false,
-                    });
-                    self.buffers.insert(id, RenderGraphBuffer { buffer });
-                }
-            }
-        }
-
-        let resources = RenderGraphResources::new(self.textures, self.buffers);
-
-        Ok(RenderGraph::new(
-            resources,
-            self.nodes.into_values().collect(),
-            order,
-        ))
-    }
-
-    fn build_order(&self) -> Result<Vec<Vec<usize>>, RenderGraphBuildError> {
-        let mut order = Vec::new();
-        let mut dependencies = self
-            .nodes
-            .keys()
-            .map(|id| (id, Vec::new()))
-            .collect::<HashMap<_, _>>();
-
-        for edge in &self.edges {
-            dependencies
-                .entry(&edge.to)
-                .or_insert_with(Vec::new)
-                .push(&edge.from);
-        }
-
-        while !dependencies.is_empty() {
-            let mut group = Vec::new();
-            for (&node, deps) in dependencies.iter() {
-                if deps.iter().all(|dep| !dependencies.contains_key(dep)) {
-                    group.push(node);
-                }
-            }
-
-            if group.is_empty() {
-                return Err(RenderGraphBuildError::CyclicDependency);
-            }
-
-            dependencies.retain(|&node, _| !group.contains(&node));
-            order.push(group);
-        }
-
-        Ok(order
-            .iter()
-            .map(|group| {
-                group
-                    .iter()
-                    .map(|id| self.nodes.get_index_of(*id).unwrap())
-                    .collect::<Vec<_>>()
-            })
-            .collect())
-    }
-}
-
-impl Resource for RenderGraphBuilder {}
 
 #[derive(Debug, Clone)]
-pub enum RenderGraphBuildError {
-    CyclicDependency,
+pub struct ResourceNode {
+    id: ResourceId,
+    name: Name,
+    version: u32,
+    ref_count: u32,
+    kind: ResourceKind,
+    desc: Arc<dyn Any>,
+    create: fn(&RenderDevice, &RenderSurface, &dyn Any) -> Box<dyn Any>,
+    creator: Option<NodeId>,
+    last_user: Option<NodeId>,
 }
 
-impl std::fmt::Display for RenderGraphBuildError {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        match self {
-            Self::CyclicDependency => {
-                write!(f, "RenderGraphError: Cyclic dependency detected")
-            }
-        }
+impl ResourceNode {
+    pub fn create(&self, device: &RenderDevice, surface: &RenderSurface) -> Box<dyn Any> {
+        (self.create)(device, surface, self.desc.as_ref())
     }
 }
 
-impl std::error::Error for RenderGraphBuildError {}
+pub struct ResourceEntry {
+    id: ResourceId,
+    version: u32,
+    resource: Option<Box<dyn Any>>,
+}
+
+pub trait GraphPass {
+    type Data: Any + Send + Sync + 'static;
+    const NAME: Name;
+
+    fn setup(builder: &mut PassBuilder) -> Self::Data;
+    fn execute(data: &Self::Data, ctx: &RenderContext);
+}
+
+pub type PassData = Box<dyn Any>;
+
+pub type Executor = Box<dyn Fn(&PassData, &RenderContext)>;
+
+pub struct PassNode {
+    id: NodeId,
+    name: Name,
+    creates: Vec<ResourceId>,
+    reads: Vec<ResourceId>,
+    writes: Vec<ResourceId>,
+    has_side_effect: bool,
+    ref_count: u32,
+    data: Box<dyn Any>,
+    executor: Executor,
+}
+
+impl PassNode {
+    pub fn execute(&self, data: &PassData, ctx: &RenderContext) {
+        (self.executor)(data, ctx);
+    }
+}
 
 pub struct RenderGraph {
-    resources: RenderGraphResources,
-    nodes: Vec<Box<dyn RenderGraphNode>>,
-    order: Vec<Vec<usize>>,
+    passes: Vec<PassNode>,
+    resources: Vec<ResourceNode>,
+    entries: Vec<ResourceEntry>,
 }
 
 impl RenderGraph {
-    fn new(
-        resources: RenderGraphResources,
-        nodes: Vec<Box<dyn RenderGraphNode>>,
-        order: Vec<Vec<usize>>,
-    ) -> Self {
+    pub fn add_pass<G: GraphPass>(&mut self) -> NodeId {
+        let id = self.passes.len() as NodeId;
+        let pass = PassBuilder::new(self, id).build::<G>();
+
+        self.passes.push(pass);
+
+        id
+    }
+
+    pub fn import<R: GraphResource>(&mut self, name: Name, resource: Option<R>) -> ResourceId {
+        // TODO Update resource if it already exists
+        if let Some(id) = self.resources.iter().find(|r| r.name == name).map(|r| r.id) {
+            return id;
+        }
+
+        let id = self.resources.len() as ResourceId;
+
+        self.resources.push(ResourceNode {
+            id,
+            name,
+            version: 0,
+            ref_count: 0,
+            kind: ResourceKind::Imported,
+            desc: Arc::new(()),
+            create: |_, _, _| unreachable!("Imported resources cannot be created"),
+            creator: None,
+            last_user: None,
+        });
+
+        self.entries.push(ResourceEntry {
+            id,
+            version: 0,
+            resource: resource.map(|r| Box::new(r) as Box<dyn Any>),
+        });
+
+        id
+    }
+
+    pub fn remove(&mut self, id: ResourceId) {
+        self.resource_mut(id).creator = None;
+        self.entry_mut(id).resource = None;
+    }
+
+    pub fn compile(&mut self) -> Vec<NodeId> {
+        for index in 0..self.passes.len() {
+            self.pass_mut(index).ref_count = self.pass(index).writes.len() as u32;
+            for read in 0..self.pass(index).reads.len() {
+                let id = self.pass(index).reads[read];
+                self.resource_mut(id).ref_count += 1;
+            }
+
+            for write in 0..self.passes[index].writes.len() {
+                let id = self.passes[index].writes[write];
+                self.resource_mut(id).creator = Some(index as NodeId);
+            }
+        }
+
+        let mut unreferenced = self
+            .resources
+            .iter()
+            .filter_map(|r| (r.ref_count == 0).then_some(r.id))
+            .collect::<Vec<_>>();
+
+        while let Some(resource) = unreferenced.pop() {
+            let Some(node) = self.resource(resource).creator.map(|n| n as usize) else {
+                continue;
+            };
+
+            if self.pass(node).has_side_effect {
+                continue;
+            }
+
+            assert!(self.pass(node).ref_count >= 1);
+            self.pass_mut(node).ref_count -= 1;
+
+            if self.pass(node).ref_count == 0 {
+                for index in 0..self.pass(node).reads.len() {
+                    let id = self.pass(node).reads[index];
+                    self.resource_mut(id).ref_count -= 1;
+                    if self.resource(id).ref_count == 0 {
+                        unreferenced.push(id);
+                    }
+                }
+            }
+        }
+
+        let mut passes = vec![];
+        for node in 0..self.passes.len() {
+            if self.pass(node).ref_count == 0 {
+                continue;
+            }
+
+            for create in 0..self.pass(node).creates.len() {
+                let id = self.pass(node).creates[create];
+                self.resource_mut(id).creator = Some(node as NodeId);
+            }
+
+            for write in 0..self.pass(node).writes.len() {
+                let id = self.pass(node).writes[write];
+                self.resource_mut(id).creator = Some(node as NodeId);
+            }
+
+            for read in 0..self.pass(node).reads.len() {
+                let id = self.pass(node).reads[read];
+                self.resource_mut(id).creator = Some(node as NodeId);
+            }
+
+            passes.push(node as u32);
+        }
+
+        passes
+    }
+
+    pub fn run(&mut self, device: &RenderDevice, surface: &RenderSurface, nodes: Vec<NodeId>) {
+        for node in nodes {
+            for index in 0..self.passes[node as usize].creates.len() {
+                let id = self.passes[node as usize].creates[index];
+                let resource = self.resource(id).create(device, surface);
+
+                self.entry_mut(id).resource = Some(resource);
+            }
+
+            self.execute_node(device, node);
+
+            for entry in 0..self.entries.len() {
+                if {
+                    let resource = &self.resources[self.entries[entry].id as usize];
+                    resource.last_user == Some(node) && resource.kind == ResourceKind::Transient
+                } {
+                    self.entries[entry].resource = None;
+                }
+            }
+        }
+    }
+
+    fn execute_node(&self, device: &RenderDevice, node: NodeId) {
+        let context = RenderContext {
+            graph: self,
+            device,
+        };
+
+        let data = &self.pass(node as usize).data;
+        self.pass(node as usize).execute(data, &context);
+    }
+
+    fn resource(&self, id: ResourceId) -> &ResourceNode {
+        assert!(id < self.resources.len() as ResourceId);
+        &self.resources[id as usize]
+    }
+
+    fn resource_mut(&mut self, id: ResourceId) -> &mut ResourceNode {
+        assert!(id < self.resources.len() as ResourceId);
+        &mut self.resources[id as usize]
+    }
+
+    fn entry(&self, id: ResourceId) -> &ResourceEntry {
+        let id = self.resource(id).id;
+        assert!(id < self.entries.len() as ResourceId);
+        &self.entries[id as usize]
+    }
+
+    fn entry_mut(&mut self, id: ResourceId) -> &mut ResourceEntry {
+        let id = self.resource(id).id;
+        assert!(id < self.entries.len() as ResourceId);
+        &mut self.entries[id as usize]
+    }
+
+    fn pass(&self, index: usize) -> &PassNode {
+        assert!(index < self.passes.len());
+        &self.passes[index]
+    }
+
+    fn pass_mut(&mut self, index: usize) -> &mut PassNode {
+        assert!(index < self.passes.len());
+        &mut self.passes[index]
+    }
+}
+
+pub struct RenderContext<'a> {
+    graph: &'a RenderGraph,
+    device: &'a RenderDevice,
+}
+
+impl<'a> RenderContext<'a> {
+    pub fn device(&self) -> &RenderDevice {
+        self.device
+    }
+
+    pub fn get<R: GraphResource>(&self, id: ResourceId) -> &R {
+        let entry = &self.graph.entries[id as usize];
+        let resource = entry.resource.as_ref().unwrap();
+        resource.downcast_ref::<R>().unwrap()
+    }
+
+    pub fn encoder(&self) -> wgpu::CommandEncoder {
+        self.device.create_command_encoder(&Default::default())
+    }
+}
+
+pub struct PassBuilder<'a> {
+    graph: &'a mut RenderGraph,
+    id: NodeId,
+    creates: Vec<ResourceId>,
+    reads: Vec<ResourceId>,
+    writes: Vec<ResourceId>,
+    has_side_effect: bool,
+}
+
+impl<'a> PassBuilder<'a> {
+    pub fn new(graph: &'a mut RenderGraph, id: NodeId) -> Self {
         Self {
-            resources,
-            nodes,
-            order,
+            graph,
+            id,
+            creates: vec![],
+            reads: vec![],
+            writes: vec![],
+            has_side_effect: false,
         }
     }
 
-    pub fn resources(&self) -> &RenderGraphResources {
-        &self.resources
-    }
-
-    pub fn resources_mut(&mut self) -> &mut RenderGraphResources {
-        &mut self.resources
-    }
-
-    pub fn nodes(&self) -> &[Box<dyn RenderGraphNode>] {
-        &self.nodes
-    }
-
-    pub fn run(&self, world: &World) {
-        let Some(surface) = world.resource::<RenderSurfaceTexture>().get() else {
-            return;
-        };
-
-        let target = surface.texture.create_view(&Default::default());
-        let depth = world.resource::<DepthTexture>();
-        let device = world.resource::<RenderDevice>();
-
-        for group in &self.order {
-            let mut buffers = vec![];
-
-            for &index in group {
-                let mut context =
-                    RenderContext::new(world, device, &target, &depth, &self.resources);
-                self.nodes[index].run(&mut context);
-
-                buffers.extend(context.finish());
-            }
-
-            if !buffers.is_empty() {
-                device.queue.submit(buffers.drain(..));
-                device.queue.on_submitted_work_done(|| {});
-            }
+    fn build<G: GraphPass>(mut self) -> PassNode {
+        let data = G::setup(&mut self);
+        PassNode {
+            id: self.id,
+            name: G::NAME,
+            creates: self.creates,
+            reads: self.reads,
+            writes: self.writes,
+            has_side_effect: self.has_side_effect,
+            ref_count: 0,
+            data: Box::new(data),
+            executor: Box::new(move |data, ctx| {
+                let data = data.downcast_ref::<G::Data>().unwrap();
+                G::execute(data, ctx);
+            }),
         }
     }
-}
 
-impl Resource for RenderGraph {}
+    pub fn is_valid(&self, id: ResourceId) -> bool {
+        assert!(id < self.graph.resources.len() as ResourceId);
+        assert!(id < self.graph.entries.len() as ResourceId);
 
-impl RenderResource for RenderGraph {
-    type Arg = (
-        ReadRes<RenderDevice>,
-        ReadRes<RenderSurface>,
-        Removed<RenderGraphBuilder>,
-    );
+        let node = &self.graph.resources[id as usize];
+        let entry = &self.graph.entries[id as usize];
 
-    fn extract(
-        arg: ecs::system::ArgItem<Self::Arg>,
-    ) -> Result<Self, crate::resources::extract::ExtractError> {
-        let (device, surface, builder) = arg;
-
-        let builder = builder
-            .into_inner()
-            .ok_or(ExtractError::MissingDependency)?;
-
-        builder
-            .build(&device, surface.width(), surface.height())
-            .map_err(|e| ExtractError::from_error(e))
-    }
-}
-
-impl RenderAssetExtractor for RenderTexture {
-    type RenderAsset = GpuTexture;
-    type Arg = (
-        ReadRes<RenderDevice>,
-        ReadRes<RenderSurface>,
-        WriteRes<RenderGraph>,
-    );
-
-    fn extract(
-        id: &asset::AssetId,
-        asset: &mut Self,
-        arg: &mut ecs::system::ArgItem<Self::Arg>,
-    ) -> Result<Self::RenderAsset, ExtractError> {
-        let (device, surface, graph) = arg;
-
-        asset.set_format(surface.format());
-        let texture = GpuTexture::create(&device, asset, Sampler::from_texture(device, asset));
-        let view = texture.texture().create_view(&Default::default());
-        let desc = TextureDesc {
-            format: asset.format(),
-            usage: asset.usage(),
-        };
-
-        graph.resources_mut().import_texture(id, view, Some(desc));
-
-        Ok(texture)
+        node.version == entry.version
     }
 
-    fn removed(
-        id: &asset::AssetId,
-        _: &Self::RenderAsset,
-        arg: &mut ecs::system::ArgItem<Self::Arg>,
-    ) {
-        let (_, _, graph) = arg;
-        graph.resources_mut().remove_texture(&id.into());
+    pub fn create<R: GraphResource>(&mut self, name: Name, resource: R::Desc) -> ResourceId {
+        let id = self.graph.resources.len() as ResourceId;
+
+        self.graph.resources.push(ResourceNode {
+            id,
+            name,
+            version: 0,
+            ref_count: 0,
+            kind: ResourceKind::Transient,
+            desc: Arc::new(resource),
+            create: |device, surface, desc| {
+                let desc = desc.downcast_ref::<R::Desc>().unwrap();
+                let resource = R::create(device, surface, desc);
+                Box::new(resource) as Box<dyn Any>
+            },
+            creator: Some(self.id),
+            last_user: None,
+        });
+
+        self.pass_mut().creates.push(id);
+        self.pass_mut().writes.push(id);
+
+        id
+    }
+
+    pub fn read(&mut self, resource: ResourceId) -> ResourceId {
+        assert!(self.is_valid(resource));
+        self.pass_mut().reads.push(resource);
+        resource
+    }
+
+    pub fn write(&mut self, resource: ResourceId) -> ResourceId {
+        assert!(self.is_valid(resource));
+
+        if self.graph.resource(resource).kind == ResourceKind::Imported {
+            self.has_side_effect = true;
+        }
+
+        if self.pass().creates.contains(&resource) {
+            resource
+        } else {
+            self.pass_mut().reads.push(resource);
+
+            let resource = self.write_resource(resource);
+            self.pass_mut().writes.push(resource);
+            resource
+        }
+    }
+
+    fn write_resource(&mut self, id: ResourceId) -> ResourceId {
+        let mut node = self.graph.resource(id).clone();
+        self.graph.entry_mut(id).version += 1;
+
+        node.id = self.graph.resources.len() as ResourceId;
+        node.version = self.graph.entry(id).version;
+
+        let id = node.id;
+        self.graph.resources.push(node);
+
+        id
+    }
+
+    fn pass(&self) -> &PassNode {
+        assert!(self.id < self.graph.passes.len() as NodeId);
+        &self.graph.passes[self.id as usize]
+    }
+
+    fn pass_mut(&mut self) -> &mut PassNode {
+        assert!(self.id < self.graph.passes.len() as NodeId);
+        &mut self.graph.passes[self.id as usize]
     }
 }

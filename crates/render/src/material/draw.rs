@@ -1,6 +1,6 @@
 use crate::{
     device::RenderDevice,
-    renderer::{RenderPass, context::RenderContext, graph::RenderGraphNode, state::RenderState},
+    renderer::{RenderPass, context::RenderContext, state::RenderState},
     resources::{
         Mesh, MeshAttributeKind, RenderAssets, RenderMesh, RenderTexture, ShaderPath, SubMesh,
         binding::{BindGroup, BindGroupBuilder, BindGroupLayout, BindGroupLayoutBuilder},
@@ -345,58 +345,6 @@ pub trait MaterialPass: Send + Sync + 'static {
     type View: View;
 
     fn pass() -> RenderPass;
-}
-
-pub struct MaterialPassNode<M: MaterialPass> {
-    pass: RenderPass,
-    opaque: Vec<DrawPass<M::View>>,
-    transparent: Vec<DrawPass<M::View>>,
-    _marker: std::marker::PhantomData<M>,
-}
-
-impl<M: MaterialPass> MaterialPassNode<M> {}
-
-impl<M: MaterialPass> RenderGraphNode for MaterialPassNode<M> {
-    fn name(&self) -> &str {
-        std::any::type_name::<M>()
-    }
-
-    fn run(&self, ctx: &mut RenderContext) {
-        // let mut encoder = ctx.encoder();
-        // let views = ctx.world().resource::<ViewBuffer<M::View>>();
-        // let meshes = ctx.world().resource::<RenderAssets<RenderMesh>>();
-
-        // for view in views.views() {
-        //     let (target, depth) = match view.target() {
-        //         Some(target) => match ctx.resources().target(&target) {
-        //             Some(target) => (&target.color, &target.depth),
-        //             None => continue,
-        //         },
-        //         None => (ctx.target(), ctx.depth()),
-        //     };
-
-        //     let clear = view.clear_color();
-
-        //     let Some(mut pass) =
-        //         self.pass
-        //             .begin(&mut encoder, ctx.resources(), target, depth, clear)
-        //     else {
-        //         continue;
-        //     };
-
-        //     let mut state = RenderState::new(&mut pass);
-
-        //     for pass in &self.opaque {
-        //         pass(ctx, view, views, meshes, &mut state)
-        //     }
-
-        //     for pass in &self.transparent {
-        //         pass(ctx, view, views, meshes, &mut state)
-        //     }
-        // }
-
-        todo!()
-    }
 }
 
 pub trait Draw: Send + Sync + 'static {

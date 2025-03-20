@@ -2,11 +2,19 @@ use asset::{AssetId, Assets, asset::Asset};
 use ecs::{
     ResMut, Resource, ResourceId,
     event::{Event, Events},
-    system::{AccessType, ArgItem, StaticArg, SystemArg, SystemConfig, SystemFunc, WorldAccess},
-    world::action::{WorldAction, WorldActionFn},
+    system::{
+        AccessType, ArgItem, IntoSystemConfigs, StaticArg, SystemArg, SystemConfig, SystemFunc,
+        WorldAccess,
+    },
+    world::action::{WorldAction, WorldActionFn, WorldActions},
 };
 use game::Main;
-use std::{any::TypeId, collections::HashMap, hash::Hash, sync::Arc};
+use std::{
+    any::TypeId,
+    collections::{HashMap, HashSet},
+    hash::Hash,
+    sync::Arc,
+};
 
 use super::Id;
 
@@ -115,29 +123,27 @@ impl<'a, R: RenderAsset> IntoIterator for &'a mut RenderAssets<R> {
 
 impl<R: RenderAsset> Resource for RenderAssets<R> {}
 
+pub struct ExtractInfo<R: RenderAssetExtractor> {
+    pub extracted: Vec<(AssetId, R)>,
+    pub removed: HashSet<Id<R::RenderAsset>>,
+    pub re_extract: Vec<(AssetId, R)>,
+}
+
+impl<R: RenderAssetExtractor> Resource for ExtractInfo<R> {}
+
 #[allow(unused_variables)]
-pub trait RenderAssetExtractor: Asset {
+pub trait RenderAssetExtractor: Asset + Clone {
     type RenderAsset: RenderAsset;
     type Arg: SystemArg;
 
     fn extract(
-        id: &AssetId,
-        asset: &mut Self,
+        asset: Self,
         arg: &mut ArgItem<Self::Arg>,
-    ) -> Result<Self::RenderAsset, ExtractError>;
-
-    fn update(
-        id: &AssetId,
-        asset: &mut Self,
-        render_asset: &mut Self::RenderAsset,
-        arg: &mut ArgItem<Self::Arg>,
-    ) -> Result<(), ExtractError> {
-        Ok(())
-    }
+    ) -> Result<Self::RenderAsset, ExtractError<Self>>;
 
     fn removed(id: &AssetId, asset: &Self::RenderAsset, arg: &mut ArgItem<Self::Arg>) {}
 
-    fn usage(id: &AssetId, asset: &Self) -> AssetUsage {
+    fn usage(asset: &Self) -> AssetUsage {
         AssetUsage::Discard
     }
 
@@ -146,14 +152,27 @@ pub trait RenderAssetExtractor: Asset {
     }
 }
 
-pub struct AssetExtractors(HashMap<TypeId, SystemConfig>);
+pub struct AssetExtractors {
+    pub(crate) registry: HashSet<TypeId>,
+    pub(crate) extract: Vec<SystemConfig>,
+    pub(crate) process: Vec<SystemConfig>,
+}
 
 impl AssetExtractors {
     pub fn new() -> Self {
-        Self(HashMap::new())
+        Self {
+            registry: HashSet::new(),
+            extract: Vec::new(),
+            process: Vec::new(),
+        }
     }
 
     pub fn add<R: RenderAssetExtractor>(&mut self) {
+        let ty = TypeId::of::<R>();
+        if self.registry.contains(&ty) {
+            return;
+        }
+
         let access = || {
             let mut access = R::Arg::access();
             access.push(WorldAccess::resource::<Assets<R>>(AccessType::Write));
@@ -163,7 +182,7 @@ impl AssetExtractors {
             access.push(WorldAccess::resource::<RenderAssetEvents<R>>(
                 AccessType::Write,
             ));
-            access.push(WorldAccess::resource::<Events<ExtractError>>(
+            access.push(WorldAccess::resource::<Events<ExtractError<R>>>(
                 AccessType::Write,
             ));
 
@@ -180,82 +199,75 @@ impl AssetExtractors {
 
         let run: SystemFunc = Arc::new(|world| {
             let assets = Main::<ResMut<Assets<R>>>::get(world);
-            let render_assets = ResMut::<RenderAssets<R::RenderAsset>>::get(world);
+            let extract_info = ResMut::<ExtractInfo<R>>::get(world);
             let events = Main::<ResMut<RenderAssetEvents<R>>>::get(world);
-            let errors = Main::<ResMut<Events<ExtractError>>>::get(world);
-            let arg = StaticArg::<R::Arg>::get(world);
 
-            Self::extractor(assets, render_assets, events, errors, arg);
+            Self::extractor(assets, extract_info, events);
         });
 
-        let config = SystemConfig::new(None, run, access, true);
-        self.0.insert(TypeId::of::<R>(), config);
+        let extract = SystemConfig::new(None, run, access, true);
+        let prepare = Self::prepare::<R>.configs().remove(0);
+
+        self.extract.push(extract);
+        self.process.push(prepare);
+        self.registry.insert(ty);
     }
 
     fn extractor<R: RenderAssetExtractor>(
         mut assets: Main<ResMut<Assets<R>>>,
-        mut render_assets: ResMut<RenderAssets<R::RenderAsset>>,
+        mut extract_info: ResMut<ExtractInfo<R>>,
         mut events: Main<ResMut<RenderAssetEvents<R>>>,
-        mut errors: Main<ResMut<Events<ExtractError>>>,
-        arg: StaticArg<R::Arg>,
     ) {
-        let mut arg = arg.into_inner();
-        let mut re_extract = vec![];
+        assets.extend(extract_info.re_extract.drain(..));
+        extract_info.removed.clear();
 
         for event in events.drain(..) {
             match event {
-                RenderAssetEvent::Added(ref id) => {
-                    let asset = match assets.get_mut(id) {
+                RenderAssetEvent::Added(ref id) | RenderAssetEvent::Modified(ref id) => {
+                    let asset = match assets.get_mut(id).cloned() {
                         Some(source) => source,
                         None => continue,
                     };
 
-                    match R::extract(id, asset, &mut arg) {
-                        Ok(extracted) => {
-                            if R::usage(id, asset) == AssetUsage::Discard {
-                                assets.remove(id);
-                            }
-
-                            render_assets.add(id.into(), extracted);
-                        }
-                        Err(error) => {
-                            errors.add(error);
-                            re_extract.push(RenderAssetEvent::Added(*id));
-                        }
-                    }
-                }
-                RenderAssetEvent::Modified(ref id) => {
-                    let asset = match assets.get_mut(id) {
-                        Some(source) => source,
-                        None => continue,
-                    };
-
-                    let render_asset = match render_assets.get_mut(&id.into()) {
-                        Some(render_asset) => render_asset,
-                        None => continue,
-                    };
-
-                    if let Err(error) = R::update(id, asset, render_asset, &mut arg) {
-                        errors.add(error);
-                        re_extract.push(RenderAssetEvent::Modified(*id));
-                    } else if R::usage(id, asset) == AssetUsage::Discard {
+                    if R::usage(&asset) == AssetUsage::Discard {
                         assets.remove(id);
-                        render_assets.remove(&id.into());
                     }
+
+                    extract_info.extracted.push((*id, asset));
                 }
                 RenderAssetEvent::Removed(id) => {
-                    if let Some(asset)  = render_assets.remove(&id.into()) {
-                        R::removed(&id, &asset, &mut arg);
-                    }
+                    extract_info.removed.insert(id.into());
+                }
+            }
+        }
+    }
+
+    pub fn prepare<R: RenderAssetExtractor>(
+        mut extract_info: ResMut<ExtractInfo<R>>,
+        mut assets: ResMut<RenderAssets<R::RenderAsset>>,
+        mut errors: ResMut<Events<ExtractError<R>>>,
+        arg: StaticArg<R::Arg>,
+    ) {
+        let mut arg = arg.into_inner();
+        let mut extract = vec![];
+
+        for (id, asset) in extract_info.extracted.drain(..) {
+            match R::extract(asset, &mut arg) {
+                Ok(render_asset) => {
+                    assets.add(id.into(), render_asset);
+                }
+                Err(ExtractError::Retry(asset)) => {
+                    extract.push((id, asset));
+                }
+                Err(ExtractError::Error(error)) => {
+                    errors.send(ExtractError::Error(error));
                 }
             }
         }
 
-        events.extend(re_extract);
-    }
+        assets.retain(|id, _| extract_info.removed.contains(&id));
 
-    pub fn take(self) -> HashMap<TypeId, SystemConfig> {
-        self.0
+        extract_info.re_extract = extract;
     }
 }
 
@@ -270,6 +282,35 @@ pub enum RenderAssetEvent {
 pub struct RenderAssetEvents<A: Asset> {
     events: Vec<RenderAssetEvent>,
     _phantom: std::marker::PhantomData<A>,
+}
+
+impl<A: Asset> RenderAssetEvents<A> {
+    pub fn new() -> Self {
+        Self {
+            events: Vec::new(),
+            _phantom: std::marker::PhantomData,
+        }
+    }
+
+    pub fn add(&mut self, event: RenderAssetEvent) {
+        self.events.push(event);
+    }
+
+    pub fn iter(&self) -> std::slice::Iter<'_, RenderAssetEvent> {
+        self.events.iter()
+    }
+
+    pub fn len(&self) -> usize {
+        self.events.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.events.is_empty()
+    }
+
+    pub fn clear(&mut self) {
+        self.events.clear();
+    }
 }
 
 impl<A: Asset> std::ops::Deref for RenderAssetEvents<A> {
@@ -291,7 +332,7 @@ impl<A: Asset> Resource for RenderAssetEvents<A> {}
 pub trait RenderResource: Resource + Send + Sync + Sized {
     type Arg: SystemArg;
 
-    fn extract(arg: ArgItem<Self::Arg>) -> Result<Self, ExtractError>;
+    fn extract(arg: ArgItem<Self::Arg>) -> Result<Self, ExtractError<()>>;
 }
 
 pub struct ExtractResource<R: RenderResource>(std::marker::PhantomData<R>);
@@ -307,11 +348,12 @@ impl<R: RenderResource> WorldAction for ExtractResource<R> {
         match R::extract(arg) {
             Ok(resource) => {
                 world.add_resource(resource);
-                Some(())
+                None
             }
             Err(error) => {
                 world.send_event(error);
-                Some(())
+                world.resource_mut::<ResourceExtractors>().add::<R>();
+                None
             }
         }
     }
@@ -327,6 +369,14 @@ impl ResourceExtractors {
     pub fn add<R: RenderResource>(&mut self) {
         self.0
             .insert(TypeId::of::<R>(), ExtractResource::<R>::new().into());
+    }
+
+    pub fn take(&mut self) -> Vec<WorldActionFn> {
+        self.0.drain().map(|(_, action)| action).collect()
+    }
+
+    pub(crate) fn process(mut extractors: ResMut<ResourceExtractors>, actions: WorldActions) {
+        actions.extend(extractors.take());
     }
 }
 
@@ -345,28 +395,15 @@ impl WorldAction for ExtractResources {
 }
 
 #[derive(Debug, Clone)]
-pub enum ExtractError {
-    MissingAsset,
-    MissingDependency,
+pub enum ExtractError<T: Send + Sync + 'static = ()> {
+    Retry(T),
     Error(Arc<dyn std::error::Error + Send + Sync + 'static>),
 }
 
-impl ExtractError {
+impl<T: Send + Sync + 'static> ExtractError<T> {
     pub fn from_error<E: std::error::Error + Send + Sync + 'static>(error: E) -> Self {
         Self::Error(Arc::new(error))
     }
 }
 
-impl std::fmt::Display for ExtractError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::MissingAsset => write!(f, "Missing asset"),
-            Self::MissingDependency => write!(f, "Missing dependency"),
-            Self::Error(error) => write!(f, "{}", error),
-        }
-    }
-}
-
-impl std::error::Error for ExtractError {}
-
-impl Event for ExtractError {}
+impl<T: Send + Sync + 'static> Event for ExtractError<T> {}

@@ -1,7 +1,6 @@
 use super::{
     AtomicId, Id,
     buffer::Buffer,
-    extract::ExtractError,
     texture::{GpuTexture, Sampler},
 };
 use crate::device::RenderDevice;
@@ -267,20 +266,6 @@ impl std::fmt::Display for CreateBindGroupError {
 }
 
 impl Error for CreateBindGroupError {}
-
-impl Into<ExtractError> for CreateBindGroupError {
-    fn into(self) -> ExtractError {
-        match self {
-            CreateBindGroupError::Error(error) => ExtractError::Error(error),
-            CreateBindGroupError::InvalidLayout => {
-                ExtractError::from_error(CreateBindGroupError::InvalidLayout)
-            }
-            CreateBindGroupError::MissingTexture { .. } => ExtractError::MissingDependency,
-            CreateBindGroupError::MissingSampler { .. } => ExtractError::MissingDependency,
-            CreateBindGroupError::MissingBuffer => ExtractError::MissingDependency,
-        }
-    }
-}
 
 pub trait CreateBindGroup {
     type Arg: SystemArg + 'static;

@@ -286,3 +286,9 @@ impl<'a, R: Resource> std::ops::Deref for NonSendMut<'a, R> {
         &self.ptr
     }
 }
+
+impl<'a, R: Resource> std::ops::DerefMut for NonSendMut<'a, R> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.ptr
+    }
+}

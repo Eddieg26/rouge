@@ -1,9 +1,9 @@
 use super::{ComputePipeline, ComputePipelineDesc, PipelineId, RenderPipeline, RenderPipelineDesc};
 use crate::{
     device::RenderDevice,
-    resources::{Id, extract::RenderAssets, shader::Shader},
+    resources::{ExtractInfo, Id, ShaderSource, extract::RenderAssets, shader::Shader},
 };
-use ecs::{IndexMap, IndexSet, Resource};
+use ecs::{IndexMap, IndexSet, Res, ResMut, Resource};
 use std::collections::HashMap;
 
 #[derive(Default, Clone, Debug, PartialEq)]
@@ -120,6 +120,18 @@ impl PipelineCache {
             .or_default()
             .pipelines
             .insert(id);
+    }
+
+    pub(crate) fn process(
+        mut pipelines: ResMut<PipelineCache>,
+        info: Res<ExtractInfo<ShaderSource>>,
+        device: Res<RenderDevice>,
+        shaders: Res<RenderAssets<Shader>>,
+    ) {
+        pipelines.process_queue(&device, &shaders);
+        for id in &info.removed {
+            pipelines.remove_shader(id);
+        }
     }
 }
 

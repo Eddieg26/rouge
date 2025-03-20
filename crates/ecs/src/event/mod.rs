@@ -51,6 +51,10 @@ impl<E: Event> Events<E> {
             .insert(EventId::of::<E>());
     }
 
+    pub fn send(&mut self, event: E) {
+        self.add(event);
+    }
+
     pub fn extend(&mut self, events: impl IntoIterator<Item = E>) {
         self.events.extend(events);
         self.invoked

@@ -3,7 +3,7 @@ use crate::{
     resources::Buffer,
     surface::{RenderSurface, RenderSurfaceTexture},
 };
-use ecs::{Res, ResMut, Resource, world::World};
+use ecs::{world::World, NonSendMut, Res, ResMut, Resource};
 use std::{any::Any, sync::Arc};
 use wgpu::{BufferSize, BufferUsages, TextureFormat, TextureUsages};
 
@@ -480,7 +480,7 @@ impl RenderGraph {
         world: &World,
         device: Res<RenderDevice>,
         surface: Res<RenderSurface>,
-        mut graph: ResMut<RenderGraph>,
+        mut graph: NonSendMut<RenderGraph>,
         mut surface_texture: ResMut<RenderSurfaceTexture>,
     ) {
         let Ok(texture) = surface.texture() else {

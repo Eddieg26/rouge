@@ -1,9 +1,9 @@
 use super::{
     buffer::{IndexBuffer, Indices, VertexBuffer},
-    extract::{AssetUsage, ExtractError, ReadWrite, RenderAsset, RenderAssetExtractor},
+    extract::{ExtractError, ReadWrite, RenderAsset, RenderAssetExtractor},
 };
 use crate::{device::RenderDevice, types::Color};
-use asset::{AssetId, AssetRef, asset::Asset};
+use asset::asset::Asset;
 use ecs::system::{ArgItem, unlifetime::ReadRes};
 use spatial::bounds::BoundingBox;
 use std::{hash::Hash, ops::Range};
@@ -230,19 +230,7 @@ impl From<&Mesh> for SubMesh {
 
 impl Asset for SubMesh {}
 
-#[derive(Clone, Copy)]
-pub struct MeshId {
-    pub id: AssetRef<Mesh>,
-    pub sub: Option<SubMesh>,
-}
-
-impl From<AssetRef<Mesh>> for MeshId {
-    fn from(id: AssetRef<Mesh>) -> Self {
-        Self { id, sub: None }
-    }
-}
-
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct Mesh {
     topology: MeshTopology,
     attributes: Vec<MeshAttribute>,
@@ -615,30 +603,14 @@ impl RenderAsset for RenderMesh {}
 
 impl RenderAssetExtractor for Mesh {
     type RenderAsset = RenderMesh;
+
     type Arg = ReadRes<RenderDevice>;
 
     fn extract(
-        _: &AssetId,
-        mesh: &mut Self,
-        device: &mut ArgItem<Self::Arg>,
-    ) -> Result<Self::RenderAsset, ExtractError> {
-        let buffers = mesh.create_render_mesh(device);
-        Ok(buffers)
-    }
-
-    fn update(
-        _: &AssetId,
-        mesh: &mut Self,
-        asset: &mut Self::RenderAsset,
-        device: &mut ArgItem<Self::Arg>,
-    ) -> Result<(), ExtractError> {
-        Ok(mesh.update(&device, asset))
-    }
-
-    fn usage(_: &AssetId, source: &Self) -> AssetUsage {
-        match source.read_write {
-            ReadWrite::Enabled => AssetUsage::Keep,
-            ReadWrite::Disabled => AssetUsage::Discard,
-        }
+        mut asset: Self,
+        arg: &mut ArgItem<Self::Arg>,
+    ) -> Result<Self::RenderAsset, ExtractError<Self>> {
+        let mesh = asset.create_render_mesh(arg);
+        Ok(mesh)
     }
 }

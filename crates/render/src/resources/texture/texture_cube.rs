@@ -106,6 +106,7 @@ impl Texture for TextureCube {
     }
 }
 
+#[derive(Clone, serde::Serialize, serde::Deserialize, Asset)]
 pub struct TextureCubeArray {
     width: u32,
     height: u32,

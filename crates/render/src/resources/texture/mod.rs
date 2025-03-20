@@ -1,9 +1,11 @@
-use super::extract::RenderAsset;
+use super::{RenderAssetExtractor, extract::RenderAsset};
 use crate::device::RenderDevice;
+use asset::asset::Asset;
+use ecs::system::unlifetime::ReadRes;
 use std::{ops::Range, sync::Arc};
+use wgpu::{TextureAspect, TextureFormat};
 
 pub mod fallbacks;
-pub mod render;
 pub mod sampler;
 pub mod texture1d;
 pub mod texture2d;
@@ -11,13 +13,11 @@ pub mod texture3d;
 pub mod texture_cube;
 
 pub use fallbacks::*;
-pub use render::*;
 pub use sampler::*;
 pub use texture_cube::*;
 pub use texture1d::*;
 pub use texture2d::*;
 pub use texture3d::*;
-use wgpu::{TextureAspect, TextureFormat};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum TextureDimension {
@@ -101,7 +101,7 @@ impl TextureFace {
     }
 }
 
-pub trait Texture: 'static {
+pub trait Texture: Asset + 'static {
     fn width(&self) -> u32;
     fn height(&self) -> u32;
     fn depth(&self) -> u32;
@@ -255,3 +255,17 @@ impl std::ops::Deref for GpuTexture {
 }
 
 impl RenderAsset for GpuTexture {}
+
+impl<T: Texture + Clone> RenderAssetExtractor for T {
+    type RenderAsset = GpuTexture;
+
+    type Arg = ReadRes<RenderDevice>;
+
+    fn extract(
+        texture: Self,
+        device: &mut ecs::system::ArgItem<Self::Arg>,
+    ) -> Result<Self::RenderAsset, super::ExtractError<Self>> {
+        let sampler = Sampler::from_texture(device, &texture);
+        Ok(GpuTexture::create(device, &texture, sampler))
+    }
+}

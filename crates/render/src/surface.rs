@@ -1,11 +1,17 @@
 use crate::{
+    app::RenderApp,
     device::{DeviceCreated, RenderDevice},
-    resources::RenderTexture,
 };
-use ecs::{Resource, world::action::WorldAction};
-use game::ExitGame;
-use wgpu::{PresentMode, SurfaceConfiguration, SurfaceTargetUnsafe, rwh::HandleError};
-use window::Window;
+use ecs::{
+    Res, ResMut, Resource,
+    event::Events,
+    world::action::{BatchEvents, WorldAction},
+};
+use game::{ExitGame, Extract, MainWorld, SubActions};
+use wgpu::{
+    PresentMode, SurfaceConfiguration, SurfaceTargetUnsafe, TextureFormat, rwh::HandleError,
+};
+use window::{Window, events::WindowResized};
 
 #[derive(Debug)]
 pub enum RenderSurfaceError {
@@ -45,6 +51,10 @@ pub struct RenderSurface {
 }
 
 impl RenderSurface {
+    pub const fn default_format() -> TextureFormat {
+        TextureFormat::Rgba8UnormSrgb
+    }
+
     pub async fn new(window: &Window) -> Result<(Self, wgpu::Adapter), RenderSurfaceError> {
         let instance = wgpu::Instance::default();
 
@@ -73,7 +83,7 @@ impl RenderSurface {
         let format = *capabilities
             .formats
             .iter()
-            .find(|format| **format == RenderTexture::default_format())
+            .find(|format| **format == Self::default_format())
             .unwrap_or(capabilities.formats.get(0).expect("No supported formats"));
 
         let depth_format = DepthTexture::FORMAT;
@@ -133,14 +143,35 @@ impl RenderSurface {
         self.surface.configure(device, &self.config);
     }
 
+    pub fn texture(&self) -> Result<wgpu::SurfaceTexture, wgpu::SurfaceError> {
+        self.surface.get_current_texture()
+    }
+
     pub fn resize(&mut self, device: &RenderDevice, width: u32, height: u32) {
         self.config.width = width;
         self.config.height = height;
         self.surface.configure(device, &self.config);
     }
 
-    pub fn texture(&self) -> Result<wgpu::SurfaceTexture, wgpu::SurfaceError> {
-        self.surface.get_current_texture()
+    pub(crate) fn extract_surface(actions: Res<SubActions<RenderApp>>) {
+        actions.defer::<Extract>(ExtractSurface);
+    }
+
+    pub(crate) fn extract_resize_events(
+        events: Res<Events<WindowResized>>,
+        actions: SubActions<RenderApp>,
+    ) {
+        actions.defer::<Extract>(BatchEvents::new(events.iter().cloned()));
+    }
+
+    pub(crate) fn resize_surface(
+        events: Res<Events<WindowResized>>,
+        device: Res<RenderDevice>,
+        mut surface: ResMut<RenderSurface>,
+    ) {
+        if let Some(event) = events.last() {
+            surface.resize(&device, event.width(), event.height());
+        }
     }
 }
 
@@ -206,18 +237,21 @@ impl AsRef<wgpu::TextureView> for DepthTexture {
 
 impl Resource for DepthTexture {}
 
-pub struct CreateRenderSurface;
+pub struct ExtractSurface;
 
-impl WorldAction for CreateRenderSurface {
+impl WorldAction for ExtractSurface {
     fn execute(self, world: &mut ecs::world::World) -> Option<()> {
-        let (surface, adapter) =
-            match pollster::block_on(RenderSurface::new(world.resource::<Window>())) {
-                Ok(surface) => surface,
-                Err(error) => {
-                    world.actions().add(ExitGame::failure(error));
-                    return None;
-                }
-            };
+        let window = world
+            .try_resource::<MainWorld>()?
+            .try_non_send_resource::<Window>()?;
+
+        let (surface, adapter) = match pollster::block_on(RenderSurface::new(window)) {
+            Ok(surface) => surface,
+            Err(error) => {
+                world.actions().add(ExitGame::failure(error));
+                return None;
+            }
+        };
 
         let device = match pollster::block_on(RenderDevice::new(&adapter)) {
             Ok(device) => device,

@@ -34,7 +34,7 @@ impl Default for SamplerDesc<'_> {
 pub struct Sampler(Arc<wgpu::Sampler>);
 
 impl Sampler {
-    pub fn create(device: &RenderDevice, desc: &SamplerDesc) -> Self {
+    pub fn new(device: &RenderDevice, desc: &SamplerDesc) -> Self {
         let address_mode = desc.wrap_mode.into();
         let filter_mode = desc.filter_mode.into();
 
@@ -57,7 +57,7 @@ impl Sampler {
     }
 
     pub fn from_texture<T: Texture>(device: &RenderDevice, texture: &T) -> Self {
-        Self::create(
+        Self::new(
             device,
             &SamplerDesc {
                 label: None,

@@ -1,7 +1,9 @@
 use super::{FilterMode, Texture, TextureDimension, WrapMode};
 use std::ops::Range;
+use asset::Asset;
 use wgpu::TextureFormat;
 
+#[derive(Clone, serde::Serialize, serde::Deserialize, Asset)]
 pub struct Texture3d {
     width: u32,
     height: u32,

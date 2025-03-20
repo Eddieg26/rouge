@@ -20,7 +20,7 @@ pub struct Fallbacks {
 
 impl Fallbacks {
     pub fn new(device: &RenderDevice) -> Self {
-        let sampler = Sampler::create(device, &SamplerDesc::default());
+        let sampler = Sampler::new(device, &SamplerDesc::default());
         let d1 = GpuTexture::create(device, &Texture1d::default(), sampler.clone());
         let d2 = GpuTexture::create(device, &Texture2d::default(), sampler.clone());
         let d2_array = GpuTexture::create(device, &Texture2dArray::default(), sampler.clone());

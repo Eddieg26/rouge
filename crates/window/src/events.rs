@@ -89,6 +89,14 @@ impl WindowResized {
     pub fn new(size: PhysicalSize<u32>) -> Self {
         Self { size }
     }
+
+    pub fn width(&self) -> u32 {
+        self.size.width
+    }
+
+    pub fn height(&self) -> u32 {
+        self.size.height
+    }
 }
 
 impl Event for WindowResized {}

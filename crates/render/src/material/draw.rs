@@ -2,7 +2,7 @@ use crate::{
     device::RenderDevice,
     renderer::{graph::RenderContext, pass::RenderPass, state::RenderState},
     resources::{
-        Mesh, MeshAttributeKind, RenderAssets, RenderMesh, RenderTexture, ShaderPath, SubMesh,
+        Mesh, MeshAttributeKind, RenderAssets, RenderMesh, ShaderPath, SubMesh,
         binding::{BindGroup, BindGroupBuilder, BindGroupLayout, BindGroupLayoutBuilder},
         buffer::{Buffer, UniformBufferArray},
     },
@@ -42,7 +42,6 @@ pub struct RenderView<V: View> {
     depth: i32,
     viewport: Option<Viewport>,
     clear_color: Option<Color>,
-    target: Option<AssetRef<RenderTexture>>,
     dynamic_offset: u32,
 }
 
@@ -53,7 +52,6 @@ impl<V: View> RenderView<V> {
         depth: i32,
         viewport: Option<Viewport>,
         clear_color: Option<Color>,
-        target: Option<AssetRef<RenderTexture>>,
         dynamic_offset: u32,
     ) -> Self {
         Self {
@@ -62,7 +60,6 @@ impl<V: View> RenderView<V> {
             depth,
             viewport,
             clear_color,
-            target,
             dynamic_offset,
         }
     }
@@ -85,10 +82,6 @@ impl<V: View> RenderView<V> {
 
     pub fn clear_color(&self) -> Option<Color> {
         self.clear_color
-    }
-
-    pub fn target(&self) -> Option<AssetRef<RenderTexture>> {
-        self.target
     }
 
     pub fn dynamic_offset(&self) -> u32 {
@@ -145,7 +138,6 @@ impl<V: View> ViewBuffer<V> {
         view: V,
         depth: i32,
         clear_color: Option<Color>,
-        target: Option<AssetRef<RenderTexture>>,
         viewport: Option<Viewport>,
     ) {
         let dynamic_offset = self.buffer.push(&view) as u32;
@@ -155,7 +147,6 @@ impl<V: View> ViewBuffer<V> {
             depth,
             viewport,
             clear_color,
-            target,
             dynamic_offset,
         ));
     }

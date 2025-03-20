@@ -1,8 +1,9 @@
 use crate::device::RenderDevice;
 use asset::{Asset, AssetId, AssetRef};
+use ecs::system::{ArgItem, unlifetime::ReadRes};
 use std::{borrow::Cow, sync::Arc};
 
-use super::extract::RenderAsset;
+use super::{RenderAssetExtractor, extract::RenderAsset};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum ShaderStage {
@@ -17,6 +18,16 @@ impl Into<wgpu::naga::ShaderStage> for ShaderStage {
             Self::Vertex => wgpu::naga::ShaderStage::Vertex,
             Self::Fragment => wgpu::naga::ShaderStage::Fragment,
             Self::Compute => wgpu::naga::ShaderStage::Compute,
+        }
+    }
+}
+
+impl Into<wgpu::naga::ShaderStage> for &ShaderStage {
+    fn into(self) -> wgpu::naga::ShaderStage {
+        match self {
+            ShaderStage::Vertex => wgpu::naga::ShaderStage::Vertex,
+            ShaderStage::Fragment => wgpu::naga::ShaderStage::Fragment,
+            ShaderStage::Compute => wgpu::naga::ShaderStage::Compute,
         }
     }
 }
@@ -125,5 +136,18 @@ impl From<AssetRef<Shader>> for ShaderPath {
 impl From<AssetId> for ShaderPath {
     fn from(id: AssetId) -> Self {
         Self::Id(id.into())
+    }
+}
+
+impl RenderAssetExtractor for ShaderSource {
+    type RenderAsset = Shader;
+
+    type Arg = ReadRes<RenderDevice>;
+
+    fn extract(
+        asset: Self,
+        device: &mut ArgItem<Self::Arg>,
+    ) -> Result<Self::RenderAsset, super::ExtractError<Self>> {
+        Ok(Shader::new(device, asset))
     }
 }

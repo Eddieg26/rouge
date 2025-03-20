@@ -1,6 +1,6 @@
 use crate::{
     device::RenderDevice,
-    renderer::{RenderPass, context::RenderContext, state::RenderState},
+    renderer::{graph::RenderContext, pass::RenderPass, state::RenderState},
     resources::{
         Mesh, MeshAttributeKind, RenderAssets, RenderMesh, RenderTexture, ShaderPath, SubMesh,
         binding::{BindGroup, BindGroupBuilder, BindGroupLayout, BindGroupLayoutBuilder},

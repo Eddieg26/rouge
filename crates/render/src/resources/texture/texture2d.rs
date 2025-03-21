@@ -150,7 +150,7 @@ impl Default for Texture2dSettings {
 
 impl Settings for Texture2dSettings {}
 
-#[derive(serde::Serialize, serde::Deserialize, Asset)]
+#[derive(Clone, serde::Serialize, serde::Deserialize, Asset)]
 pub struct Texture2dArray {
     width: u32,
     height: u32,

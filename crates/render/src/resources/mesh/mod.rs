@@ -1,4 +1,5 @@
 use super::{
+    VertexBufferLayout,
     buffer::{IndexBuffer, Indices, VertexBuffer},
     extract::{ExtractError, ReadWrite, RenderAsset, RenderAssetExtractor},
 };
@@ -7,7 +8,7 @@ use asset::asset::Asset;
 use ecs::system::{ArgItem, unlifetime::ReadRes};
 use spatial::bounds::BoundingBox;
 use std::{hash::Hash, ops::Range};
-use wgpu::BufferUsages;
+use wgpu::{BufferUsages, VertexStepMode};
 
 #[derive(
     Copy, Clone, Debug, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize,
@@ -520,6 +521,32 @@ impl Asset for Mesh {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MeshLayout(Box<[MeshAttributeKind]>);
+
+impl MeshLayout {
+    pub fn into_vertex_buffer_layout(
+        formats: impl IntoIterator<Item = wgpu::VertexFormat>,
+        mode: VertexStepMode,
+    ) -> VertexBufferLayout {
+        let mut stride = 0;
+        let mut attributes = vec![];
+
+        for (i, format) in formats.into_iter().enumerate() {
+            attributes.push(wgpu::VertexAttribute {
+                format,
+                offset: stride,
+                shader_location: i as u32,
+            });
+
+            stride += format.size() as u64;
+        }
+
+        VertexBufferLayout {
+            array_stride: stride as u64,
+            step_mode: mode,
+            attributes,
+        }
+    }
+}
 
 impl From<Vec<MeshAttributeKind>> for MeshLayout {
     fn from(attributes: Vec<MeshAttributeKind>) -> Self {

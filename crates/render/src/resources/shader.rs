@@ -1,5 +1,9 @@
 use crate::device::RenderDevice;
-use asset::{Asset, AssetId, AssetRef};
+use asset::{
+    Asset, AssetId, AssetRef, AsyncReadExt,
+    importer::{DefaultProcessor, ImportContext, Importer},
+    io::{AssetIoError, AssetReader},
+};
 use ecs::system::{ArgItem, unlifetime::ReadRes};
 use std::{borrow::Cow, sync::Arc};
 
@@ -115,10 +119,164 @@ impl AsRef<wgpu::ShaderModule> for Shader {
 
 impl RenderAsset for Shader {}
 
+#[derive(Debug)]
+pub enum ShaderLoadError {
+    Io(AssetIoError),
+    InvalidExt(String),
+    Parse(String),
+}
+
+impl From<wgpu::naga::front::wgsl::ParseError> for ShaderLoadError {
+    fn from(err: wgpu::naga::front::wgsl::ParseError) -> Self {
+        Self::Parse(err.to_string())
+    }
+}
+
+impl From<wgpu::naga::front::spv::Error> for ShaderLoadError {
+    fn from(err: wgpu::naga::front::spv::Error) -> Self {
+        Self::Parse(err.to_string())
+    }
+}
+
+impl From<wgpu::naga::front::glsl::Error> for ShaderLoadError {
+    fn from(err: wgpu::naga::front::glsl::Error) -> Self {
+        Self::Parse(err.to_string())
+    }
+}
+
+impl From<AssetIoError> for ShaderLoadError {
+    fn from(err: AssetIoError) -> Self {
+        Self::Io(err)
+    }
+}
+
+impl std::fmt::Display for ShaderLoadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Io(err) => write!(f, "IO error: {}", err),
+            Self::InvalidExt(err) => write!(f, "Parse error: {}", err),
+            Self::Parse(err) => write!(f, "WGSL parse error: {}", err),
+        }
+    }
+}
+
+impl From<std::io::Error> for ShaderLoadError {
+    fn from(err: std::io::Error) -> Self {
+        Self::Io(AssetIoError::from(err))
+    }
+}
+
+impl std::error::Error for ShaderLoadError {}
+
+impl Importer for ShaderSource {
+    type Asset = ShaderSource;
+
+    type Settings = ();
+
+    type Processor = DefaultProcessor<Self::Asset, Self::Settings>;
+
+    type Error = ShaderLoadError;
+
+    async fn import(
+        ctx: &mut ImportContext<'_, Self::Asset, Self::Settings>,
+        reader: &mut dyn AssetReader,
+    ) -> Result<Self::Asset, Self::Error> {
+        use wgpu::naga::{front::*, valid::*};
+
+        let ext = ctx.path().ext();
+
+        match ext {
+            Some("spv") => {
+                let mut buffer = Vec::new();
+                reader
+                    .read_to_end(&mut buffer)
+                    .await
+                    .map_err(ShaderLoadError::from)?;
+
+                let module =
+                    spv::parse_u8_slice(&buffer, &wgpu::naga::front::spv::Options::default())
+                        .map_err(ShaderLoadError::from)?;
+                let mut validator = Validator::new(ValidationFlags::all(), Capabilities::all());
+                validator
+                    .validate(&module)
+                    .map_err(|e| ShaderLoadError::Parse(e.to_string()))?;
+
+                let data = Cow::Owned(buffer.iter().map(|b| *b as u32).collect());
+
+                Ok(ShaderSource::Spirv { data })
+            }
+            Some("wgsl") => {
+                let mut data = String::new();
+                reader
+                    .read_to_string(&mut data)
+                    .await
+                    .map_err(ShaderLoadError::from)?;
+
+                let module = wgsl::parse_str(&data).map_err(ShaderLoadError::from)?;
+                let mut validator = Validator::new(ValidationFlags::all(), Capabilities::all());
+                validator
+                    .validate(&module)
+                    .map_err(|e| ShaderLoadError::Parse(e.to_string()))?;
+
+                let data = Cow::Owned(data);
+
+                Ok(ShaderSource::Wgsl { data })
+            }
+            Some("vert") => {
+                let mut data = String::new();
+                reader
+                    .read_to_string(&mut data)
+                    .await
+                    .map_err(ShaderLoadError::from)?;
+                Ok(ShaderSource::Glsl {
+                    data: Cow::Owned(data),
+                    stage: ShaderStage::Vertex,
+                })
+            }
+            Some("frag") => {
+                let mut data = String::new();
+                reader
+                    .read_to_string(&mut data)
+                    .await
+                    .map_err(ShaderLoadError::from)?;
+                Ok(ShaderSource::Glsl {
+                    data: Cow::Owned(data),
+                    stage: ShaderStage::Fragment,
+                })
+            }
+            Some("comp") => {
+                let mut data = String::new();
+                reader
+                    .read_to_string(&mut data)
+                    .await
+                    .map_err(ShaderLoadError::from)?;
+                Ok(ShaderSource::Glsl {
+                    data: Cow::Owned(data),
+                    stage: ShaderStage::Compute,
+                })
+            }
+            _ => Err(ShaderLoadError::InvalidExt(format!(
+                "Invalid extension: {:?}",
+                ext
+            ))),
+        }
+    }
+
+    fn extensions() -> &'static [&'static str] {
+        &["spv", "wgsl", "vert", "frag", "comp"]
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ShaderPath {
     Id(AssetRef<Shader>),
     Path(&'static str),
+}
+
+impl ShaderPath {
+    pub fn new(path: impl Into<Self>) -> Self {
+        path.into()
+    }
 }
 
 impl From<&'static str> for ShaderPath {

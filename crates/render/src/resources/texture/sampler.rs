@@ -1,11 +1,15 @@
 use super::{FilterMode, Texture, WrapMode};
-use crate::{device::RenderDevice, resources::extract::RenderAsset};
+use crate::{
+    device::RenderDevice,
+    resources::{Label, RenderResource},
+};
+use ecs::{Resource, system::unlifetime::ReadRes};
 use std::sync::Arc;
 use wgpu::{CompareFunction, SamplerBorderColor};
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct SamplerDesc<'a> {
-    pub label: Option<&'a str>,
+pub struct SamplerDesc {
+    pub label: Label,
     pub wrap_mode: WrapMode,
     pub filter_mode: FilterMode,
     pub lod_min_clamp: f32,
@@ -15,7 +19,7 @@ pub struct SamplerDesc<'a> {
     pub border_color: Option<SamplerBorderColor>,
 }
 
-impl Default for SamplerDesc<'_> {
+impl Default for SamplerDesc {
     fn default() -> Self {
         Self {
             label: None,
@@ -30,7 +34,7 @@ impl Default for SamplerDesc<'_> {
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Sampler(Arc<wgpu::Sampler>);
 
 impl Sampler {
@@ -85,10 +89,51 @@ impl std::ops::Deref for Sampler {
     }
 }
 
+impl AsRef<wgpu::Sampler> for Sampler {
+    fn as_ref(&self) -> &wgpu::Sampler {
+        &self.0
+    }
+}
+
 impl From<wgpu::Sampler> for Sampler {
     fn from(sampler: wgpu::Sampler) -> Self {
         Self(Arc::new(sampler))
     }
 }
 
-impl RenderAsset for Sampler {}
+#[derive(Debug, Clone)]
+pub struct DefaultSampler(pub(crate) Sampler);
+
+impl std::ops::Deref for DefaultSampler {
+    type Target = Sampler;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl AsRef<wgpu::Sampler> for DefaultSampler {
+    fn as_ref(&self) -> &wgpu::Sampler {
+        self.0.as_ref()
+    }
+}
+
+impl Resource for DefaultSampler {}
+
+impl RenderResource for DefaultSampler {
+    type Arg = ReadRes<RenderDevice>;
+
+    fn extract(
+        device: ecs::system::ArgItem<Self::Arg>,
+    ) -> Result<Self, crate::resources::ExtractError<()>> {
+        Ok(Self(Sampler::new(
+            &device,
+            &SamplerDesc {
+                label: None,
+                wrap_mode: WrapMode::ClampToEdge,
+                filter_mode: FilterMode::Linear,
+                ..Default::default()
+            },
+        )))
+    }
+}

@@ -1,6 +1,6 @@
 use asset::{AssetId, Assets, asset::Asset};
 use ecs::{
-    ResMut, Resource, ResourceId,
+    IndexSet, ResMut, Resource, ResourceId,
     event::{Event, Events},
     system::{
         AccessType, ArgItem, IntoSystemConfigs, StaticArg, SystemArg, SystemConfig, SystemFunc,
@@ -129,6 +129,16 @@ pub struct ExtractInfo<R: RenderAssetExtractor> {
     pub re_extract: Vec<(AssetId, R)>,
 }
 
+impl<R: RenderAssetExtractor> ExtractInfo<R> {
+    pub fn new() -> Self {
+        Self {
+            extracted: Vec::new(),
+            removed: HashSet::new(),
+            re_extract: Vec::new(),
+        }
+    }
+}
+
 impl<R: RenderAssetExtractor> Resource for ExtractInfo<R> {}
 
 #[allow(unused_variables)]
@@ -147,26 +157,20 @@ pub trait RenderAssetExtractor: Asset + Clone {
         AssetUsage::Discard
     }
 
-    fn dependencies() -> &'static [RenderAssetType] {
-        &[]
+    fn dependencies() -> Vec<RenderAssetType> {
+        Vec::new()
     }
 }
 
+#[derive(Default)]
 pub struct AssetExtractors {
-    pub(crate) registry: HashSet<TypeId>,
+    pub(crate) registry: IndexSet<TypeId>,
     pub(crate) extract: Vec<SystemConfig>,
     pub(crate) process: Vec<SystemConfig>,
+    pub(crate) dependencies: HashMap<TypeId, Vec<TypeId>>,
 }
 
 impl AssetExtractors {
-    pub fn new() -> Self {
-        Self {
-            registry: HashSet::new(),
-            extract: Vec::new(),
-            process: Vec::new(),
-        }
-    }
-
     pub fn add<R: RenderAssetExtractor>(&mut self) {
         let ty = TypeId::of::<R>();
         if self.registry.contains(&ty) {
@@ -198,19 +202,34 @@ impl AssetExtractors {
         };
 
         let run: SystemFunc = Arc::new(|world| {
-            let assets = Main::<ResMut<Assets<R>>>::get(world);
             let extract_info = ResMut::<ExtractInfo<R>>::get(world);
-            let events = Main::<ResMut<RenderAssetEvents<R>>>::get(world);
+            let assets = ResMut::<RenderAssets<R::RenderAsset>>::get(world);
+            let errors = ResMut::<Events<ExtractError<R>>>::get(world);
+            let arg = StaticArg::<R::Arg>::get(world);
 
-            Self::extractor(assets, extract_info, events);
+            Self::prepare(extract_info, assets, errors, arg);
         });
 
-        let extract = SystemConfig::new(None, run, access, true);
-        let prepare = Self::prepare::<R>.configs().remove(0);
+        let extract = Self::extractor::<R>.configs().remove(0);
 
         self.extract.push(extract);
-        self.process.push(prepare);
-        self.registry.insert(ty);
+        self.process
+            .push(SystemConfig::new(None, run, access, true));
+
+        let dependencies = R::dependencies();
+        let first_dependent_index = self
+            .registry
+            .iter()
+            .position(|ty| dependencies.iter().any(|dep| dep.0 == *ty));
+
+        if let Some(index) = first_dependent_index {
+            self.registry.insert_before(index, ty);
+        } else {
+            self.registry.insert(ty);
+        }
+
+        self.dependencies
+            .insert(ty, dependencies.into_iter().map(|dep| dep.0).collect());
     }
 
     fn extractor<R: RenderAssetExtractor>(
@@ -359,13 +378,10 @@ impl<R: RenderResource> WorldAction for ExtractResource<R> {
     }
 }
 
+#[derive(Default)]
 pub struct ResourceExtractors(HashMap<TypeId, WorldActionFn>);
 
 impl ResourceExtractors {
-    pub fn new() -> Self {
-        Self(HashMap::new())
-    }
-
     pub fn add<R: RenderResource>(&mut self) {
         self.0
             .insert(TypeId::of::<R>(), ExtractResource::<R>::new().into());

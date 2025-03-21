@@ -22,6 +22,7 @@ pub enum QueuedPipeline {
     },
 }
 
+#[derive(Default)]
 pub struct PipelineCache {
     shaders: HashMap<Id<Shader>, ShaderPipelines>,
     render_pipelines: HashMap<PipelineId, RenderPipeline>,
@@ -37,6 +38,14 @@ impl PipelineCache {
             compute_pipelines: HashMap::new(),
             pipeline_queue: IndexMap::new(),
         }
+    }
+
+    pub fn get_render_pipeline(&self, id: &PipelineId) -> Option<&RenderPipeline> {
+        self.render_pipelines.get(id)
+    }
+
+    pub fn get_compute_pipeline(&self, id: &PipelineId) -> Option<&ComputePipeline> {
+        self.compute_pipelines.get(id)
     }
 
     pub fn queue_render_pipeline(&mut self, desc: RenderPipelineDesc) -> PipelineId {

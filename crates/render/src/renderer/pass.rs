@@ -4,12 +4,6 @@ use crate::{
     types::Color,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Attachment {
-    Surface,
-    Texture(ResourceId),
-}
-
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum StoreOp {
     Store,
@@ -54,14 +48,14 @@ impl<T> Into<wgpu::Operations<T>> for Operations<T> {
 }
 
 pub struct ColorAttachment {
-    pub attachment: Attachment,
-    pub resolve_target: Option<Attachment>,
+    pub resource: ResourceId,
+    pub resolve_target: Option<ResourceId>,
     pub store_op: StoreOp,
     pub clear: Option<Color>,
 }
 
 pub struct DepthAttachment {
-    pub attachment: Attachment,
+    pub resource: ResourceId,
     pub depth_store_op: Operations<f32>,
     pub stencil_store_op: Option<Operations<u32>>,
 }
@@ -81,13 +75,13 @@ impl RenderPass {
 
     pub fn with_color(
         mut self,
-        attachment: Attachment,
-        resolve_target: Option<Attachment>,
+        attachment: ResourceId,
+        resolve_target: Option<ResourceId>,
         store_op: StoreOp,
         clear: Option<Color>,
     ) -> Self {
         self.colors.push(ColorAttachment {
-            attachment,
+            resource: attachment,
             resolve_target,
             store_op,
             clear,
@@ -98,12 +92,12 @@ impl RenderPass {
 
     pub fn with_depth(
         mut self,
-        attachment: Attachment,
+        attachment: ResourceId,
         depth_store_op: Operations<f32>,
         stencil_store_op: Option<Operations<u32>>,
     ) -> Self {
         self.depth = Some(DepthAttachment {
-            attachment,
+            resource: attachment,
             depth_store_op,
             stencil_store_op,
         });
@@ -115,24 +109,14 @@ impl RenderPass {
         &self,
         encoder: &'a mut wgpu::CommandEncoder,
         ctx: &'a RenderContext,
-        surface: &'a TextureView,
-        depth: &'a TextureView,
         clear: Option<Color>,
     ) -> Option<wgpu::RenderPass<'a>> {
         let mut color_attachments = vec![];
         for color in self.colors.iter() {
-            let view = match color.attachment {
-                Attachment::Surface => surface,
-                Attachment::Texture(id) => ctx.get::<TextureView>(id),
-            };
-
-            let resolve_target = match color.resolve_target {
-                Some(attachment) => match attachment {
-                    Attachment::Surface => Some(surface.as_ref()),
-                    Attachment::Texture(id) => Some(ctx.get::<TextureView>(id).as_ref()),
-                },
-                None => None,
-            };
+            let view = ctx.get::<TextureView>(color.resource);
+            let resolve_target = color
+                .resolve_target
+                .map(|attachment| &**ctx.get::<TextureView>(attachment));
 
             let load = match clear {
                 Some(color) => wgpu::LoadOp::Clear(color.into()),
@@ -156,10 +140,7 @@ impl RenderPass {
 
         let depth_stencil_attachment = match &self.depth {
             Some(attachment) => Some(wgpu::RenderPassDepthStencilAttachment {
-                view: match attachment.attachment {
-                    Attachment::Surface => depth,
-                    Attachment::Texture(id) => ctx.get::<TextureView>(id),
-                },
+                view: ctx.get::<TextureView>(attachment.resource),
                 depth_ops: Some(wgpu::Operations {
                     load: match attachment.depth_store_op.load {
                         LoadOp::Clear(value) => wgpu::LoadOp::Clear(value),

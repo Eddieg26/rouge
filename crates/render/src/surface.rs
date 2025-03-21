@@ -1,16 +1,11 @@
-use crate::{
-    app::RenderApp,
-    device::{DeviceCreated, RenderDevice},
-};
+use crate::{app::RenderApp, device::RenderDevice};
 use ecs::{
     Res, ResMut, Resource,
     event::Events,
     world::action::{BatchEvents, WorldAction},
 };
 use game::{ExitGame, Extract, MainWorld, SubActions};
-use wgpu::{
-    PresentMode, SurfaceConfiguration, SurfaceTargetUnsafe, TextureFormat, rwh::HandleError,
-};
+use wgpu::{PresentMode, SurfaceConfiguration, SurfaceTargetUnsafe, rwh::HandleError};
 use window::{Window, events::WindowResized};
 
 #[derive(Debug)]
@@ -51,9 +46,8 @@ pub struct RenderSurface {
 }
 
 impl RenderSurface {
-    pub const fn default_format() -> TextureFormat {
-        TextureFormat::Rgba8UnormSrgb
-    }
+    pub const DEFAULT_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
+    pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
     pub async fn new(window: &Window) -> Result<(Self, wgpu::Adapter), RenderSurfaceError> {
         let instance = wgpu::Instance::default();
@@ -83,10 +77,10 @@ impl RenderSurface {
         let format = *capabilities
             .formats
             .iter()
-            .find(|format| **format == Self::default_format())
+            .find(|format| **format == Self::DEFAULT_FORMAT)
             .unwrap_or(capabilities.formats.get(0).expect("No supported formats"));
 
-        let depth_format = DepthTexture::FORMAT;
+        let depth_format = Self::DEPTH_FORMAT;
 
         let present_mode = capabilities
             .present_modes
@@ -206,37 +200,6 @@ impl RenderSurfaceTexture {
 
 impl Resource for RenderSurfaceTexture {}
 
-pub struct DepthTexture(wgpu::TextureView);
-impl DepthTexture {
-    pub const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
-
-    pub fn inner(&self) -> &wgpu::TextureView {
-        &self.0
-    }
-}
-
-impl From<wgpu::TextureView> for DepthTexture {
-    fn from(view: wgpu::TextureView) -> Self {
-        Self(view)
-    }
-}
-
-impl std::ops::Deref for DepthTexture {
-    type Target = wgpu::TextureView;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl AsRef<wgpu::TextureView> for DepthTexture {
-    fn as_ref(&self) -> &wgpu::TextureView {
-        &self.0
-    }
-}
-
-impl Resource for DepthTexture {}
-
 pub struct ExtractSurface;
 
 impl WorldAction for ExtractSurface {
@@ -263,30 +226,8 @@ impl WorldAction for ExtractSurface {
 
         surface.configure(&device);
 
-        let size = wgpu::Extent3d {
-            width: surface.width(),
-            height: surface.height(),
-            depth_or_array_layers: 1,
-        };
-
-        let depth = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("Surface Depth"),
-            size,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: surface.depth_format(),
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[surface.depth_format()],
-        });
-
-        let depth = DepthTexture::from(depth.create_view(&wgpu::TextureViewDescriptor::default()));
-
-        world.add_resource(depth);
         world.add_resource(surface);
         world.add_resource(device);
-
-        world.actions().add(DeviceCreated);
 
         None
     }

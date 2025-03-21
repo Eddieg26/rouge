@@ -1,6 +1,6 @@
 use super::{AtomicId, Id, Label, binding::BindGroupLayout, extract::RenderAssets, shader::Shader};
 use crate::device::RenderDevice;
-use std::{borrow::Cow, num::NonZeroU32, sync::Arc};
+use std::{borrow::Cow, sync::Arc};
 use wgpu::{
     BufferAddress, ColorTargetState, DepthStencilState, MultisampleState, PrimitiveState,
     PushConstantRange, VertexAttribute, VertexStepMode,
@@ -25,7 +25,6 @@ pub struct VertexState {
     pub shader: Id<Shader>,
     pub entry: Cow<'static, str>,
     pub buffers: Vec<VertexBufferLayout>,
-    pub instances: Option<NonZeroU32>,
 }
 
 #[derive(Clone, Debug, PartialEq)]

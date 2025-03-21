@@ -1,9 +1,10 @@
+use super::{RenderView, View, ViewBuffer, ViewEntities};
 use crate::{
     device::RenderDevice,
-    resources::Buffer,
+    resources::{Buffer, ComputePipeline, PipelineCache, PipelineId, RenderPipeline},
     surface::{RenderSurface, RenderSurfaceTexture},
 };
-use ecs::{world::World, NonSendMut, Res, ResMut, Resource};
+use ecs::{Entity, NonSendMut, Res, ResMut, Resource, world::World};
 use std::{any::Any, sync::Arc};
 use wgpu::{BufferSize, BufferUsages, TextureFormat, TextureUsages};
 
@@ -185,8 +186,8 @@ impl ResourceEntry {
 
     fn surface() -> Self {
         Self {
-            id: 0,
-            name: "Surface",
+            id: RenderGraph::SURFACE_ID,
+            name: RenderGraph::SURFACE,
             version: 0,
             ty: ResourceType::Imported,
             desc: Arc::new(()),
@@ -195,6 +196,18 @@ impl ResourceEntry {
             last_pass: None,
             create: |_, _, _, _| Box::new(()),
         }
+    }
+
+    fn depth_texture() -> Self {
+        Self::new::<TextureView>(
+            RenderGraph::DEPTH_TEXTURE_ID,
+            RenderGraph::DEPTH_TEXTURE,
+            ResourceType::Transient,
+            TextureDesc {
+                usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
+                format: RenderSurface::DEFAULT_FORMAT,
+            },
+        )
     }
 
     pub fn create(&mut self, device: &RenderDevice, surface: &RenderSurface) {
@@ -302,9 +315,15 @@ impl RenderGraph {
     pub const SURFACE: Name = "Surface";
     const SURFACE_ID: ResourceId = 0;
 
+    pub const DEPTH_TEXTURE: Name = "DepthTexture";
+    const DEPTH_TEXTURE_ID: ResourceId = 1;
+
     pub fn new() -> Self {
-        let resources = vec![ResourceNode::new(Self::SURFACE_ID, Self::SURFACE_ID)];
-        let entries = vec![ResourceEntry::surface()];
+        let resources = vec![
+            ResourceNode::new(Self::SURFACE_ID, Self::SURFACE_ID),
+            ResourceNode::new(Self::DEPTH_TEXTURE_ID, Self::DEPTH_TEXTURE_ID),
+        ];
+        let entries = vec![ResourceEntry::surface(), ResourceEntry::depth_texture()];
 
         Self {
             passes: vec![],
@@ -314,6 +333,10 @@ impl RenderGraph {
     }
 
     pub fn add_pass<P: GraphPass>(&mut self) -> &mut Self {
+        if self.passes.iter().any(|p| p.name() == P::NAME) {
+            return self;
+        }
+
         let id = self.passes.len() as u32;
 
         let node = PassBuilder::new(id, self).build::<P>();
@@ -357,6 +380,17 @@ impl RenderGraph {
         }
     }
 
+    pub fn get_resource_id(&self, name: Name) -> Option<ResourceId> {
+        self.entries.iter().position(|r| r.name == name).map(|id| {
+            self.resources
+                .iter()
+                .rev()
+                .find(|n| n.resource == id as u32)
+                .unwrap()
+                .id
+        })
+    }
+
     pub fn get_resource<R: GraphResource>(&self, id: ResourceId) -> Option<&R> {
         let resource = self.resources.get(id as usize)?;
         let entry = self.entries.get(resource.resource as usize)?;
@@ -370,6 +404,14 @@ impl RenderGraph {
             .rev()
             .position(|node| node.resource == Self::SURFACE_ID)
             .expect("Surface resource not found") as u32
+    }
+
+    pub fn depth_texture_id(&self) -> ResourceId {
+        self.resources
+            .iter()
+            .rev()
+            .position(|node| node.resource == Self::DEPTH_TEXTURE_ID)
+            .expect("Depth texture resource not found") as u32
     }
 
     fn compile(&self) -> CompiledGraph {
@@ -448,31 +490,36 @@ impl RenderGraph {
         }
     }
 
-    pub fn run(&mut self, world: &World, device: &RenderDevice, surface: &RenderSurface) {
+    pub fn run(
+        &mut self,
+        world: &World,
+        device: &RenderDevice,
+        surface: &RenderSurface,
+        views: &mut ViewEntities,
+    ) {
         let mut compiled = self.compile();
 
-        for pass in compiled.passes {
-            for id in self.passes[pass].creates.iter().copied() {
-                let resource = self.resources[id as usize].resource;
-                self.entries[resource as usize].create(device, surface);
-            }
-
-            {
-                let mut ctx = RenderContext::new(self, world, device);
-                self.passes[pass].execute(&mut ctx);
-                device.queue.submit(ctx.finish());
-            }
-
-            compiled.resources.retain(|info| {
-                let destroy = info.last_pass == Some(self.passes[pass].id)
-                    && self.entries[info.id as usize].ty == ResourceType::Transient;
-                if destroy {
-                    self.entries[info.id as usize].destroy();
-                    false
-                } else {
-                    true
+        for view in views.0.drain(..) {
+            for pass in &compiled.passes {
+                for id in self.passes[*pass].creates.iter().copied() {
+                    let resource = self.resources[id as usize].resource;
+                    self.entries[resource as usize].create(device, surface);
                 }
-            });
+
+                {
+                    let mut ctx = RenderContext::new(view, self, world, device);
+                    self.passes[*pass].execute(&mut ctx);
+                    device.queue.submit(ctx.finish());
+                }
+
+                compiled.resources.iter_mut().for_each(|info| {
+                    let destroy = info.last_pass == Some(self.passes[*pass].id)
+                        && self.entries[info.id as usize].ty == ResourceType::Transient;
+                    if destroy {
+                        self.entries[info.id as usize].destroy();
+                    }
+                });
+            }
         }
     }
 
@@ -482,16 +529,21 @@ impl RenderGraph {
         surface: Res<RenderSurface>,
         mut graph: NonSendMut<RenderGraph>,
         mut surface_texture: ResMut<RenderSurfaceTexture>,
+        mut views: ResMut<ViewEntities>,
     ) {
         let Ok(texture) = surface.texture() else {
             return;
         };
 
+        if views.0.is_empty() {
+            return;
+        }
+
         let view = texture.texture.create_view(&Default::default());
         surface_texture.set(texture);
 
         graph.import::<TextureView>("Surface", Some(view.into()));
-        graph.run(world, &device, &surface);
+        graph.run(world, &device, &surface, &mut views);
         graph.remove("Surface");
 
         surface_texture.present();
@@ -606,20 +658,37 @@ impl<'a> PassBuilder<'a> {
 }
 
 pub struct RenderContext<'a> {
+    view: Entity,
     graph: &'a RenderGraph,
     world: &'a World,
     device: &'a RenderDevice,
+    pipelines: &'a PipelineCache,
     buffers: Vec<wgpu::CommandBuffer>,
 }
 
 impl<'a> RenderContext<'a> {
-    pub fn new(graph: &'a RenderGraph, world: &'a World, device: &'a RenderDevice) -> Self {
+    pub fn new(
+        view: Entity,
+        graph: &'a RenderGraph,
+        world: &'a World,
+        device: &'a RenderDevice,
+    ) -> Self {
         Self {
+            view,
             graph,
             world,
             device,
+            pipelines: world.resource::<PipelineCache>(),
             buffers: Vec::new(),
         }
+    }
+
+    pub fn view(&self) -> Entity {
+        self.view
+    }
+
+    pub fn render_view<V: View>(&self) -> Option<&RenderView<V>> {
+        self.world.resource::<ViewBuffer<V>>().get_view(self.view)
     }
 
     pub fn world(&self) -> &'a World {
@@ -628,6 +697,14 @@ impl<'a> RenderContext<'a> {
 
     pub fn device(&self) -> &'a RenderDevice {
         self.device
+    }
+
+    pub fn get_render_pipeline(&self, id: &PipelineId) -> Option<&RenderPipeline> {
+        self.pipelines.get_render_pipeline(id)
+    }
+
+    pub fn get_compute_pipeline(&self, id: &PipelineId) -> Option<&ComputePipeline> {
+        self.pipelines.get_compute_pipeline(id)
     }
 
     pub fn get<R: GraphResource>(&self, id: ResourceId) -> &R {

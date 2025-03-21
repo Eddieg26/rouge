@@ -1,6 +1,5 @@
 pub mod app;
 pub mod device;
-pub mod material;
 pub mod plugin;
 pub mod renderer;
 pub mod resources;

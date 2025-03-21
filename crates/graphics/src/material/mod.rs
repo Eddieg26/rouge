@@ -22,6 +22,15 @@ pub enum BlendMode {
     Transparent,
 }
 
+impl BlendMode {
+    pub fn blend_state(&self) -> wgpu::BlendState {
+        match self {
+            BlendMode::Opaque => wgpu::BlendState::REPLACE,
+            BlendMode::Transparent => wgpu::BlendState::ALPHA_BLENDING,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DepthWrite {
     On,

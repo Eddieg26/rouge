@@ -114,10 +114,9 @@ fn generate_create_bind_group(input: DeriveInput) -> Result<TokenStream> {
                 device: &#render::RenderDevice,
                 layout: &#render::BindGroupLayout,
                 arg: &#ecs::system::ArgItem<Self::Arg>)  -> Result<#render::BindGroup, #render::CreateBindGroupError> {
-                // use #render::{BindGroupBuilder, AsOptionalId, UniformBuffer, GpuTexture};
-                // let (textures, fallbacks, default_sampler) = arg;
-                // #binding_def
-                todo!()
+                use #render::{BindGroupBuilder, AsOptionalId, UniformBuffer, GpuTexture, TextureDimension, wgpu::TextureViewDimension};
+                let (textures, fallbacks, default_sampler) = arg;
+                #binding_def
             }
 
             fn create_bind_group_layout(device: &#render::RenderDevice)  -> #render::BindGroupLayout {
@@ -205,6 +204,7 @@ impl ToTokens for LayoutDefinition<'_> {
                     sample_ty,
                     visibility,
                 } => {
+                    let dimension = dimension.to_view_tokens();
                     tokens.extend(quote::quote! {
                         builder.with_texture(
                             #index,
@@ -276,7 +276,7 @@ impl ToTokens for BindingDefinition<'_> {
                         let texture = match id.and_then(|id| textures.get(&id)) {
                             Some(texture) => texture,
                             None => fallbacks.texture(#dimension),
-                        }
+                        };
 
                         builder.with_texture(
                             #index,
@@ -290,7 +290,7 @@ impl ToTokens for BindingDefinition<'_> {
                         let sampler = match id.and_then(|id| textures.get(&id)) {
                             Some(texture) => texture.sampler(),
                             None => default_sampler.inner(),
-                        }
+                        };
 
                         builder.with_sampler(
                             #index,
@@ -311,23 +311,23 @@ impl ToTokens for BindingDefinition<'_> {
             let fields = self.uniform.fields();
             let field_names = fields.iter().map(|field| field.name);
             tokens.extend(quote::quote! {
-                #[derive(ShaderType)]
-                struct #struct_name {
-                    #(#fields)*
-                }
+                // #[derive(ShaderType)]
+                // struct #struct_name {
+                //     #(#fields)*
+                // }
 
-                let value = #struct_name {
-                    #(#field_names: self.#field_names,)*
-                };
+                // let value = #struct_name {
+                //     #(#field_names: self.#field_names,)*
+                // };
 
-                let buffer = UniformBuffer::new(device, &value, None, None);
+                // let buffer = UniformBuffer::new(device, &value, None, None);
 
-                builder.with_uniform(
-                    #index,
-                    buffer.as_ref(),
-                    0,
-                    None,
-                );
+                // builder.with_uniform(
+                //     #index,
+                //     buffer.as_ref(),
+                //     0,
+                //     None,
+                // );
             });
         }
 
@@ -410,10 +410,21 @@ enum TextureDimension {
 impl ToTokens for TextureDimension {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
         match self {
-            TextureDimension::D1 => tokens.extend(quote::quote! { TextureViewDimension::D1 }),
-            TextureDimension::D2 => tokens.extend(quote::quote! { TextureViewDimension::D2 }),
-            TextureDimension::D3 => tokens.extend(quote::quote! { TextureViewDimension::D3 }),
-            TextureDimension::Cube => tokens.extend(quote::quote! { TextureViewDimension::Cube }),
+            TextureDimension::D1 => tokens.extend(quote::quote! { TextureDimension::D1 }),
+            TextureDimension::D2 => tokens.extend(quote::quote! { TextureDimension::D2 }),
+            TextureDimension::D3 => tokens.extend(quote::quote! { TextureDimension::D3 }),
+            TextureDimension::Cube => tokens.extend(quote::quote! { TextureDimension::Cube }),
+        }
+    }
+}
+
+impl TextureDimension {
+    fn to_view_tokens(&self) -> proc_macro2::TokenStream {
+        match self {
+            TextureDimension::D1 => quote::quote! { TextureViewDimension::D1 },
+            TextureDimension::D2 => quote::quote! { TextureViewDimension::D2 },
+            TextureDimension::D3 => quote::quote! { TextureViewDimension::D3 },
+            TextureDimension::Cube => quote::quote! { TextureViewDimension::Cube },
         }
     }
 }

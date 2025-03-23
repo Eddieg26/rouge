@@ -254,6 +254,12 @@ impl std::ops::Deref for GpuTexture {
     }
 }
 
+impl AsRef<wgpu::TextureView> for GpuTexture {
+    fn as_ref(&self) -> &wgpu::TextureView {
+        &self.view
+    }
+}
+
 impl RenderAsset for GpuTexture {}
 
 impl<T: Texture + Clone> RenderAssetExtractor for T {

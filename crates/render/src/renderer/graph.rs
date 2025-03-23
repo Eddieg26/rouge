@@ -2,7 +2,7 @@ use super::{RenderView, View, ViewBuffer, ViewEntities};
 use crate::{
     device::RenderDevice,
     resources::{Buffer, ComputePipeline, PipelineCache, PipelineId, RenderPipeline},
-    surface::{RenderSurface, RenderSurfaceTexture},
+    surface::RenderSurface,
 };
 use ecs::{Entity, NonSendMut, Res, ResMut, Resource, world::World};
 use std::{any::Any, sync::Arc};
@@ -117,7 +117,7 @@ pub type ResourceDesc = Arc<dyn Any>;
 pub type ResourceObj = Box<dyn Any>;
 pub type CreateResource = fn(&RenderDevice, &RenderSurface, Name, &ResourceDesc) -> ResourceObj;
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct ResourceNode {
     pub id: NodeId,
     pub resource: ResourceId,
@@ -374,7 +374,7 @@ impl RenderGraph {
                 .rev()
                 .find(|n| n.resource == resource.id)
                 .unwrap()
-                .id;
+                .resource;
 
             self.entries[resource as usize].destroy();
         }
@@ -402,7 +402,7 @@ impl RenderGraph {
         self.resources
             .iter()
             .rev()
-            .position(|node| node.resource == Self::SURFACE_ID)
+            .find_map(|node| (node.resource == Self::SURFACE_ID).then_some(node.resource))
             .expect("Surface resource not found") as u32
     }
 
@@ -410,12 +410,17 @@ impl RenderGraph {
         self.resources
             .iter()
             .rev()
-            .position(|node| node.resource == Self::DEPTH_TEXTURE_ID)
+            .find_map(|node| (node.resource == Self::SURFACE_ID).then_some(node.resource))
             .expect("Depth texture resource not found") as u32
     }
 
     fn compile(&self) -> CompiledGraph {
-        let mut passes = vec![0u32; self.passes.len()];
+        let mut passes = self
+            .passes
+            .iter()
+            .map(|p| p.writes.len())
+            .collect::<Vec<_>>();
+
         let mut resources = self
             .entries
             .iter()
@@ -528,25 +533,19 @@ impl RenderGraph {
         device: Res<RenderDevice>,
         surface: Res<RenderSurface>,
         mut graph: NonSendMut<RenderGraph>,
-        mut surface_texture: ResMut<RenderSurfaceTexture>,
         mut views: ResMut<ViewEntities>,
     ) {
         let Ok(texture) = surface.texture() else {
             return;
         };
 
-        if views.0.is_empty() {
-            return;
-        }
-
         let view = texture.texture.create_view(&Default::default());
-        surface_texture.set(texture);
 
         graph.import::<TextureView>("Surface", Some(view.into()));
         graph.run(world, &device, &surface, &mut views);
         graph.remove("Surface");
 
-        surface_texture.present();
+        texture.present();
     }
 }
 

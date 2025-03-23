@@ -102,7 +102,12 @@ impl From<wgpu::Sampler> for Sampler {
 }
 
 #[derive(Debug, Clone)]
-pub struct DefaultSampler(pub(crate) Sampler);
+pub struct DefaultSampler(Sampler);
+impl DefaultSampler {
+    pub fn inner(&self) -> &Sampler {
+        &self.0
+    }
+}
 
 impl std::ops::Deref for DefaultSampler {
     type Target = Sampler;

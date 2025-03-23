@@ -1,3 +1,10 @@
+use asset::AssetRef;
+use ecs::world::{action::WorldActions, builtin::actions::Spawn};
+use game::{Game, Init};
+use render::{
+    derive::{AsBinding, ShaderType},
+    Color, GraphPass, OriginView, RenderAppExt, RenderPass, RenderPlugin, StoreOp, Texture2d,
+};
 use uuid::Uuid;
 
 const VERTEX_SHADER_ID: Uuid = Uuid::from_u128(0);
@@ -6,36 +13,76 @@ const MATERIAL_ID: Uuid = Uuid::from_u128(0);
 const MESH_ID: Uuid = Uuid::from_u128(1);
 
 fn main() {
-    // let embedded = EmbeddedFs::new("assets");
-    // let vs_id = AssetRef::<ShaderSource>::from(VERTEX_SHADER_ID);
-    // embed_asset!(embedded, vs_id, "assets/vertex.wgsl", ());
-    // let fs_id = AssetRef::<ShaderSource>::from(FRAGMENT_SHADER_ID);
-    // embed_asset!(embedded, fs_id, "assets/fragment.wgsl", ());
-
-    // let triangle =
-    //     Mesh::new(MeshTopology::TriangleList).with_attribute(MeshAttribute::Position(vec![
-    //         Vec3::new(0.0, 0.5, 0.0),
-    //         Vec3::new(-0.5, -0.5, 0.0),
-    //         Vec3::new(0.5, -0.5, 0.0),
-    //     ]));
-    // let mesh_id = AssetId::from::<Mesh>(MESH_ID);
-
-    // Game::new()
-    //     .add_plugin(RenderPlugin)
-    //     .add_asset(mesh_id, triangle, vec![])
-    //     .scoped_resource::<RenderGraphBuilder>(|_, builder| {
-    //         builder.add_node(BasicRenderNode::new());
-    //     })
-    //     .scoped_sub_app::<RenderApp>(|_, app| {
-    //         app.observe::<ExtractError, _>(|errors: Res<Events<ExtractError>>| {
-    //             for error in errors.iter() {
-    //                 println!("Extract Error: {:?}", error);
-    //             }
-    //         });
-    //     })
-    //     .embed_assets("basic", embedded)
-    //     .run();
+    Game::new()
+        .add_plugin(RenderPlugin)
+        .add_pass::<BasicPass>()
+        .add_systems(Init, |actions: WorldActions| {
+            actions.add(Spawn::new().with(OriginView::default()));
+        })
+        .run();
 }
+
+pub struct BasicPass;
+
+impl GraphPass for BasicPass {
+    type Data = RenderPass;
+
+    const NAME: render::Name = "Basic";
+
+    fn setup(builder: &mut render::PassBuilder) -> Self::Data {
+        let surface = builder.write(builder.surface_id());
+        RenderPass::new().with_color(surface, None, StoreOp::Store, Some(Color::blue()))
+    }
+
+    fn execute(ctx: &mut render::RenderContext, data: &Self::Data) {
+        let mut encoder = ctx.encoder();
+        if let Some(_) = data.begin(&mut encoder, ctx, Some(Color::red())) {}
+
+        ctx.submit(encoder.finish());
+    }
+}
+
+#[derive(AsBinding)]
+#[uniform(0)]
+pub struct Test {
+    #[uniform]
+    age: u32,
+
+    #[texture(0)]
+    color: AssetRef<Texture2d>,
+}
+
+// fn main() {
+// let embedded = EmbeddedFs::new("assets");
+// let vs_id = AssetRef::<ShaderSource>::from(VERTEX_SHADER_ID);
+// embed_asset!(embedded, vs_id, "assets/vertex.wgsl", ());
+// let fs_id = AssetRef::<ShaderSource>::from(FRAGMENT_SHADER_ID);
+// embed_asset!(embedded, fs_id, "assets/fragment.wgsl", ());
+
+// let triangle =
+//     Mesh::new(MeshTopology::TriangleList).with_attribute(MeshAttribute::Position(vec![
+//         Vec3::new(0.0, 0.5, 0.0),
+//         Vec3::new(-0.5, -0.5, 0.0),
+//         Vec3::new(0.5, -0.5, 0.0),
+//     ]));
+// let mesh_id = AssetId::from::<Mesh>(MESH_ID);
+
+// Game::new()
+//     .add_plugin(RenderPlugin)
+//     .add_asset(mesh_id, triangle, vec![])
+//     .scoped_resource::<RenderGraphBuilder>(|_, builder| {
+//         builder.add_node(BasicRenderNode::new());
+//     })
+//     .scoped_sub_app::<RenderApp>(|_, app| {
+//         app.observe::<ExtractError, _>(|errors: Res<Events<ExtractError>>| {
+//             for error in errors.iter() {
+//                 println!("Extract Error: {:?}", error);
+//             }
+//         });
+//     })
+//     .embed_assets("basic", embedded)
+//     .run();
+// }
 
 // pub struct BasicRenderNode {
 //     pass: RenderPass,

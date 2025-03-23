@@ -171,35 +171,6 @@ impl RenderSurface {
 
 impl Resource for RenderSurface {}
 
-#[derive(Debug, Default)]
-pub struct RenderSurfaceTexture(Option<wgpu::SurfaceTexture>);
-
-impl RenderSurfaceTexture {
-    pub fn new(texture: wgpu::SurfaceTexture) -> Self {
-        Self(Some(texture))
-    }
-
-    pub fn get(&self) -> Option<&wgpu::SurfaceTexture> {
-        self.0.as_ref()
-    }
-
-    pub fn set(&mut self, texture: wgpu::SurfaceTexture) {
-        assert!(self.0.is_none());
-        self.0 = Some(texture);
-    }
-
-    pub fn present(&mut self) -> Option<()> {
-        let texture = self.0.take()?;
-        Some(texture.present())
-    }
-
-    pub fn destroy(&mut self) {
-        std::mem::drop(self.0.take());
-    }
-}
-
-impl Resource for RenderSurfaceTexture {}
-
 pub struct ExtractSurface;
 
 impl WorldAction for ExtractSurface {

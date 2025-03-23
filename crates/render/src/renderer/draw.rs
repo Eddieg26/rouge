@@ -15,8 +15,8 @@ use crate::{
 use asset::{AssetRef, database::AssetDatabase};
 use bytemuck::{Pod, Zeroable};
 use ecs::{
-    Entity, Res, ResMut, Resource,
-    system::unlifetime::{ReadRes, WriteRes},
+    Component, Entity, Res, ResMut, Resource,
+    system::unlifetime::{Read, ReadRes, WriteRes},
     world::{
         action::WorldActions,
         builtin::actions::AddResource,
@@ -24,6 +24,7 @@ use ecs::{
     },
 };
 use encase::{ShaderType, internal::WriteInto};
+use game::Main;
 use glam::{Mat4, Vec3};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, hash::Hash, ops::Range};
@@ -42,6 +43,8 @@ pub struct ViewEntities(pub(crate) Vec<Entity>);
 impl Resource for ViewEntities {}
 
 pub trait View: ShaderType + WriteInto + Default + Send + Sync + 'static {
+    type Query: BaseQuery;
+
     fn world(&self) -> Mat4;
     fn view(&self) -> Mat4;
     fn projection(&self) -> Mat4;
@@ -49,13 +52,54 @@ pub trait View: ShaderType + WriteInto + Default + Send + Sync + 'static {
         let world = self.world();
         Vec3::new(world.w_axis.x, world.w_axis.y, world.w_axis.z)
     }
+
+    fn extract<'a>(query: <Self::Query as BaseQuery>::Item<'a>) -> ExtractedView<Self>;
 }
 
-pub trait ViewExtractor<V: View>: 'static {
-    type Query: BaseQuery;
-
-    fn extract<'a>(query: <Self::Query as BaseQuery>::Item<'a>) -> ExtractedView<V>;
+#[derive(ShaderType, Clone, Copy)]
+pub struct OriginView {
+    pub world: Mat4,
+    pub view: Mat4,
+    pub projection: Mat4,
 }
+
+impl Default for OriginView {
+    fn default() -> Self {
+        Self {
+            world: Mat4::IDENTITY,
+            view: Mat4::IDENTITY,
+            projection: Mat4::IDENTITY,
+        }
+    }
+}
+
+impl View for OriginView {
+    type Query = (Entity, Read<OriginView>);
+
+    fn world(&self) -> Mat4 {
+        self.world
+    }
+
+    fn view(&self) -> Mat4 {
+        self.view
+    }
+
+    fn projection(&self) -> Mat4 {
+        self.projection
+    }
+
+    fn extract<'a>(item: <Self::Query as BaseQuery>::Item<'a>) -> ExtractedView<OriginView> {
+        ExtractedView {
+            entity: item.0,
+            view: *item.1,
+            depth: 0,
+            viewport: None,
+            clear_color: None,
+        }
+    }
+}
+
+impl Component for OriginView {}
 
 pub struct ExtractedView<V: View> {
     pub entity: Entity,
@@ -67,6 +111,11 @@ pub struct ExtractedView<V: View> {
 
 pub struct ExtractedViews<V: View>(pub(crate) Vec<ExtractedView<V>>);
 impl<V: View> Resource for ExtractedViews<V> {}
+impl<V: View> Default for ExtractedViews<V> {
+    fn default() -> Self {
+        Self(Vec::new())
+    }
+}
 
 pub struct RenderView<V: View> {
     entity: Entity,
@@ -133,11 +182,11 @@ impl<V: View> ViewBuffer<V> {
         let buffer = UniformBufferArray::new(device, None, Some(BufferUsages::COPY_DST));
 
         let bind_group_layout = BindGroupLayoutBuilder::new()
-            .uniform(ShaderStages::all(), true, None, None)
+            .with_uniform(0, ShaderStages::all(), true, None, None)
             .build(device);
 
         let bind_group = BindGroupBuilder::new(&bind_group_layout)
-            .uniform(0, buffer.as_ref(), 0, None)
+            .with_uniform(0, buffer.as_ref(), 0, None)
             .build(device);
 
         Self {
@@ -195,18 +244,18 @@ impl<V: View> ViewBuffer<V> {
     pub fn update(&mut self, device: &RenderDevice) {
         if self.buffer.update(device).is_some() {
             self.bind_group = BindGroupBuilder::new(&self.bind_group_layout)
-                .uniform(0, self.buffer.as_ref(), 0, None)
+                .with_uniform(0, self.buffer.as_ref(), 0, None)
                 .build(device);
         }
     }
 
-    pub(crate) fn extract_views<E: ViewExtractor<V>>(
-        query: Query<E::Query>,
+    pub(crate) fn extract_views(
+        query: Main<Query<V::Query>>,
         mut views: ResMut<ExtractedViews<V>>,
         mut view_entites: ResMut<ViewEntities>,
     ) {
-        for item in query {
-            let extracted = E::extract(item);
+        for item in query.into_inner() {
+            let extracted = V::extract(item);
             views.0.push(extracted);
         }
 
@@ -216,7 +265,7 @@ impl<V: View> ViewBuffer<V> {
             .extend(views.0.iter().map(|view| view.entity));
     }
 
-    pub(crate) fn queue_views<E: ViewExtractor<V>>(
+    pub(crate) fn queue_views(
         mut view_buffer: ResMut<ViewBuffer<V>>,
         mut extracted_views: ResMut<ExtractedViews<V>>,
     ) {

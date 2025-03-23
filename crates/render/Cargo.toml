@@ -9,8 +9,7 @@ game = { path = "../game" }
 asset = { path = "../asset" }
 window = { path = "../window" }
 spatial = { path = "../spatial" }
-graphics-macros = { path = "../macros/graphics" }
-encase-macros = { path = "../macros/encase" }
+render-macros = { path = "../macros/render" }
 glam = { workspace = true, features = ["serde", "bytemuck"] }
 bytemuck = { workspace = true }
 serde = { workspace = true }

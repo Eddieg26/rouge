@@ -1,7 +1,7 @@
 use crate::{
     device::RenderDevice,
     resources::{
-        binding::{BindGroup, BindGroupLayout, CreateBindGroup},
+        binding::{BindGroup, BindGroupLayout, AsBinding},
         extract::RenderAsset,
         shader::ShaderPath,
     },
@@ -28,7 +28,7 @@ impl Into<wgpu::BlendState> for BlendMode {
     }
 }
 
-pub trait Material: Asset + CreateBindGroup + Send + Sync + 'static {
+pub trait Material: Asset + AsBinding + Send + Sync + 'static {
     fn mode() -> BlendMode;
     fn shader() -> impl Into<ShaderPath>;
 }

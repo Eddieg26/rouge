@@ -1,5 +1,5 @@
 use super::{FilterMode, Texture, TextureDimension, WrapMode};
-use asset::Asset;
+use asset::derive::Asset;
 use std::ops::Range;
 use wgpu::TextureFormat;
 

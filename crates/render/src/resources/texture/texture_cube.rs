@@ -1,7 +1,6 @@
-use std::ops::Range;
-
 use super::{FilterMode, Texture, TextureDimension, TextureFace, WrapMode};
-use asset::Asset;
+use asset::derive::Asset;
+use std::ops::Range;
 use wgpu::TextureFormat;
 
 #[derive(Clone, Asset, serde::Serialize, serde::Deserialize)]

@@ -130,25 +130,11 @@ impl InvokedEvents {
         }
     }
 
-    pub fn invoke<E: Event>(&self) {
+    pub(crate) fn invoke<E: Event>(&self) {
         self.invoked.lock().unwrap().insert(EventId::of::<E>());
     }
 
-    pub fn defer<E: Event>(&self, phase: PhaseId) {
-        self.deferred
-            .lock()
-            .unwrap()
-            .entry(phase)
-            .or_default()
-            .insert(EventId::of::<E>());
-    }
-
-    pub fn invoked(&self) -> &Arc<Mutex<IndexSet<EventId>>> {
+    pub(crate) fn invoked(&self) -> &Arc<Mutex<IndexSet<EventId>>> {
         &self.invoked
-    }
-
-    pub fn deferred(&self, phase: PhaseId) -> Option<IndexSet<EventId>> {
-        let mut invoked = self.deferred.lock().unwrap();
-        invoked.shift_remove(&phase)
     }
 }

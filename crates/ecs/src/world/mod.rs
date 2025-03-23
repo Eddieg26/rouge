@@ -304,14 +304,14 @@ impl World {
 
     pub fn flush(&mut self, phase: Option<PhaseId>) {
         let mut actions = self.actions.take(phase);
-        let mut invoked = self.take_invoked(phase);
+        let mut invoked = self.take_invoked();
         while !actions.is_empty() || !invoked.is_empty() {
             actions.drain(..).for_each(|a| a.execute(self));
 
             self.observers.build(self.mode());
             self.observers.run(WorldCell::from(self as &Self), invoked);
 
-            invoked = self.take_invoked(phase);
+            invoked = self.take_invoked();
             actions = self.actions.take(phase);
         }
     }
@@ -329,13 +329,9 @@ impl World {
         WorldCell::from(self)
     }
 
-    fn take_invoked(&self, phase: Option<PhaseId>) -> Vec<EventId> {
-        let invoked = self.events.invoked();
-        let mut invoked = invoked.lock().unwrap();
-        let mut invoked = invoked.drain(..).collect::<Vec<_>>();
-        if let Some(events) = phase.and_then(|p| self.events.deferred(p)) {
-            invoked.extend(events);
-        }
+    fn take_invoked(&self) -> Vec<EventId> {
+        let mut invoked = self.events.invoked().lock().unwrap();
+        let invoked = invoked.drain(..).collect::<Vec<_>>();
 
         invoked
     }

@@ -73,6 +73,12 @@ impl<T: ShaderType + WriteInto> UniformBuffer<T> {
     }
 }
 
+impl<T: ShaderType + WriteInto> AsRef<Buffer> for UniformBuffer<T> {
+    fn as_ref(&self) -> &Buffer {
+        &self.buffer
+    }
+}
+
 pub struct UniformBufferArray<T: ShaderType + WriteInto> {
     data: encase::DynamicUniformBuffer<Vec<u8>>,
     buffer: Buffer,
@@ -83,8 +89,9 @@ pub struct UniformBufferArray<T: ShaderType + WriteInto> {
 
 impl<T: ShaderType + WriteInto> UniformBufferArray<T> {
     pub fn new(device: &RenderDevice, label: Label, usage: Option<BufferUsages>) -> Self {
-        let alignment = AlignmentValue::new(T::min_size().get())
-            .round_up(device.limits().min_uniform_buffer_offset_alignment as u64);
+        let alignment = AlignmentValue::new(T::min_size().get().next_power_of_two())
+            .get()
+            .max(device.limits().min_uniform_buffer_offset_alignment as u64);
 
         let data = encase::DynamicUniformBuffer::new_with_alignment(Vec::new(), alignment);
 

@@ -1,6 +1,7 @@
 use crate::device::RenderDevice;
 use asset::{
-    Asset, AssetId, AssetRef, AsyncReadExt,
+    AssetId, AssetRef, AsyncReadExt,
+    derive::Asset,
     importer::{DefaultProcessor, ImportContext, Importer},
     io::{AssetIoError, AssetReader},
 };

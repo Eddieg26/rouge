@@ -333,7 +333,7 @@ impl SystemArg for &World {
     }
 }
 
-impl SystemArg for Entities {
+impl SystemArg for &Entities {
     type Item<'a> = &'a Entities;
 
     fn get<'a>(world: WorldCell<'a>) -> Self::Item<'a> {

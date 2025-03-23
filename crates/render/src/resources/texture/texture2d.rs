@@ -1,5 +1,5 @@
 use super::{FilterMode, Texture, TextureDimension, TextureFormat, WrapMode};
-use asset::{Asset, Settings};
+use asset::{derive::Asset, Settings};
 use std::ops::Range;
 
 #[derive(Clone, serde::Serialize, serde::Deserialize, Asset)]

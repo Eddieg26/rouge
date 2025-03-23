@@ -119,14 +119,12 @@ impl<'a, E: Event> IntoIterator for &'a Events<E> {
 #[derive(Clone)]
 pub struct InvokedEvents {
     invoked: Arc<Mutex<IndexSet<EventId>>>,
-    deferred: Arc<Mutex<IndexMap<PhaseId, IndexSet<EventId>>>>,
 }
 
 impl InvokedEvents {
     pub fn new() -> Self {
         Self {
             invoked: Arc::default(),
-            deferred: Arc::default(),
         }
     }
 

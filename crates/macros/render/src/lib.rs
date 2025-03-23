@@ -110,10 +110,12 @@ fn generate_create_bind_group(input: DeriveInput) -> Result<TokenStream> {
                 Some(#ty_name)
             }
 
-            fn create_bind_group(&self,
+            fn create_bind_group(
+                &self,
                 device: &#render::RenderDevice,
                 layout: &#render::BindGroupLayout,
-                arg: &#ecs::system::ArgItem<Self::Arg>)  -> Result<#render::BindGroup, #render::CreateBindGroupError> {
+                arg: &#ecs::system::ArgItem<Self::Arg>
+            ) -> Result<#render::BindGroup, #render::CreateBindGroupError> {
                 use #render::{BindGroupBuilder, AsOptionalId, UniformBuffer, GpuTexture, TextureDimension, wgpu::TextureViewDimension};
                 let (textures, fallbacks, default_sampler) = arg;
                 #binding_def
@@ -311,23 +313,23 @@ impl ToTokens for BindingDefinition<'_> {
             let fields = self.uniform.fields();
             let field_names = fields.iter().map(|field| field.name);
             tokens.extend(quote::quote! {
-                // #[derive(ShaderType)]
-                // struct #struct_name {
-                //     #(#fields)*
-                // }
+                #[derive(ShaderType)]
+                struct #struct_name {
+                    #(#fields)*
+                }
 
-                // let value = #struct_name {
-                //     #(#field_names: self.#field_names,)*
-                // };
+                let value = #struct_name {
+                    #(#field_names: self.#field_names,)*
+                };
 
-                // let buffer = UniformBuffer::new(device, &value, None, None);
+                let buffer = UniformBuffer::new(device, &value, None, None);
 
-                // builder.with_uniform(
-                //     #index,
-                //     buffer.as_ref(),
-                //     0,
-                //     None,
-                // );
+                builder.with_uniform(
+                    #index,
+                    buffer.as_ref(),
+                    0,
+                    None,
+                );
             });
         }
 

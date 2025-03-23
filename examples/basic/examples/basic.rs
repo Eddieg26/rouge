@@ -48,7 +48,11 @@ pub struct Test {
     #[uniform]
     age: u32,
 
-    #[texture(0)]
+    #[uniform]
+    height: f32,
+
+    #[texture(1)]
+    #[sampler(2)]
     color: AssetRef<Texture2d>,
 }
 

@@ -691,6 +691,7 @@ version = "0.1.0"
 dependencies = [
  "crc32fast",
  "downcast-rs",
+ "ecs-macros",
  "futures",
  "hashbrown 0.15.0",
  "indexmap",
@@ -698,6 +699,16 @@ dependencies = [
  "serde",
  "threadpool",
  "uuid",
+]
+
+[[package]]
+name = "ecs-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "serde",
+ "syn",
 ]
 
 [[package]]

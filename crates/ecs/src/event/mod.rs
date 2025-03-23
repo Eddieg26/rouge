@@ -1,8 +1,5 @@
-use crate::{
-    core::{resource::Resource, Type},
-    system::schedule::PhaseId,
-};
-use indexmap::{IndexMap, IndexSet};
+use crate::core::{resource::Resource, Type};
+use indexmap::IndexSet;
 use std::{
     hash::Hash,
     sync::{Arc, Mutex},

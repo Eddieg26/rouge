@@ -122,9 +122,9 @@ pub struct AssetAdded<A: Asset> {
 }
 
 impl<A: Asset> AssetAdded<A> {
-    pub fn new(id: AssetId, asset: A) -> Self {
+    pub fn new(id: impl Into<AssetId>, asset: A) -> Self {
         Self {
-            id,
+            id: id.into(),
             asset,
             dependencies: None,
             parent: None,

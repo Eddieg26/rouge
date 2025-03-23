@@ -198,18 +198,6 @@ impl ResourceEntry {
         }
     }
 
-    fn depth_texture() -> Self {
-        Self::new::<TextureView>(
-            RenderGraph::DEPTH_TEXTURE_ID,
-            RenderGraph::DEPTH_TEXTURE,
-            ResourceType::Transient,
-            TextureDesc {
-                usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
-                format: RenderSurface::DEFAULT_FORMAT,
-            },
-        )
-    }
-
     pub fn create(&mut self, device: &RenderDevice, surface: &RenderSurface) {
         let object = (self.create)(device, surface, self.name, &self.desc);
         self.object = Some(object)
@@ -234,7 +222,7 @@ pub trait GraphPass: 'static {
 
     const NAME: Name;
 
-    fn setup(builder: &mut PassBuilder) -> Self::Data;
+    fn setup(self, builder: &mut PassBuilder) -> Self::Data;
     fn execute(ctx: &mut RenderContext, data: &Self::Data);
 }
 
@@ -312,18 +300,12 @@ pub struct RenderGraph {
 }
 
 impl RenderGraph {
-    pub const SURFACE: Name = "Surface";
+    pub const SURFACE: Name = "surface";
     const SURFACE_ID: ResourceId = 0;
 
-    pub const DEPTH_TEXTURE: Name = "DepthTexture";
-    const DEPTH_TEXTURE_ID: ResourceId = 1;
-
     pub fn new() -> Self {
-        let resources = vec![
-            ResourceNode::new(Self::SURFACE_ID, Self::SURFACE_ID),
-            ResourceNode::new(Self::DEPTH_TEXTURE_ID, Self::DEPTH_TEXTURE_ID),
-        ];
-        let entries = vec![ResourceEntry::surface(), ResourceEntry::depth_texture()];
+        let resources = vec![ResourceNode::new(Self::SURFACE_ID, Self::SURFACE_ID)];
+        let entries = vec![ResourceEntry::surface()];
 
         Self {
             passes: vec![],
@@ -332,14 +314,14 @@ impl RenderGraph {
         }
     }
 
-    pub fn add_pass<P: GraphPass>(&mut self) -> &mut Self {
+    pub fn add_pass<P: GraphPass>(&mut self, pass: P) -> &mut Self {
         if self.passes.iter().any(|p| p.name() == P::NAME) {
             return self;
         }
 
         let id = self.passes.len() as u32;
 
-        let node = PassBuilder::new(id, self).build::<P>();
+        let node = PassBuilder::new(id, self).build::<P>(pass);
         self.passes.push(node);
 
         self
@@ -404,14 +386,6 @@ impl RenderGraph {
             .rev()
             .find_map(|node| (node.resource == Self::SURFACE_ID).then_some(node.resource))
             .expect("Surface resource not found") as u32
-    }
-
-    pub fn depth_texture_id(&self) -> ResourceId {
-        self.resources
-            .iter()
-            .rev()
-            .find_map(|node| (node.resource == Self::SURFACE_ID).then_some(node.resource))
-            .expect("Depth texture resource not found") as u32
     }
 
     fn compile(&self) -> CompiledGraph {
@@ -541,9 +515,9 @@ impl RenderGraph {
 
         let view = texture.texture.create_view(&Default::default());
 
-        graph.import::<TextureView>("Surface", Some(view.into()));
+        graph.import::<TextureView>(RenderGraph::SURFACE, Some(view.into()));
         graph.run(world, &device, &surface, &mut views);
-        graph.remove("Surface");
+        graph.remove(RenderGraph::SURFACE);
 
         texture.present();
     }
@@ -622,6 +596,12 @@ impl<'a> PassBuilder<'a> {
         self.graph.surface_id()
     }
 
+    pub fn resource_id(&self, name: Name) -> ResourceId {
+        self.graph
+            .get_resource_id(name)
+            .expect("resource not found")
+    }
+
     fn validate(&self, id: ResourceId) -> bool {
         let index = id as usize;
         let node = &self.graph.resources[index];
@@ -638,8 +618,8 @@ impl<'a> PassBuilder<'a> {
         &mut self.graph.entries[node.resource as usize]
     }
 
-    fn build<P: GraphPass>(mut self) -> PassNode {
-        let data = P::setup(&mut self);
+    fn build<P: GraphPass>(mut self, pass: P) -> PassNode {
+        let data = P::setup(pass, &mut self);
         PassNode {
             id: self.id,
             name: P::NAME,

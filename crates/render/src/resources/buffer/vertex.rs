@@ -16,8 +16,8 @@ impl VertexBuffer {
         usage: Option<BufferUsages>,
     ) -> Self {
         let usage = match usage {
-            Some(usage) => usage | BufferUsages::INDEX,
-            None => BufferUsages::INDEX,
+            Some(usage) => usage | BufferUsages::VERTEX,
+            None => BufferUsages::VERTEX,
         };
 
         Self {
@@ -33,8 +33,8 @@ impl VertexBuffer {
         usage: Option<BufferUsages>,
     ) -> Self {
         let usage = match usage {
-            Some(usage) => usage | BufferUsages::INDEX,
-            None => BufferUsages::INDEX,
+            Some(usage) => usage | BufferUsages::VERTEX,
+            None => BufferUsages::VERTEX,
         };
 
         Self {

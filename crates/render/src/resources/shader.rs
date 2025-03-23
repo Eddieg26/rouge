@@ -1,6 +1,7 @@
 use crate::device::RenderDevice;
 use asset::{
     AssetId, AssetRef, AsyncReadExt,
+    cache::LoadPath,
     derive::Asset,
     importer::{DefaultProcessor, ImportContext, Importer},
     io::{AssetIoError, AssetReader},
@@ -295,6 +296,22 @@ impl From<AssetRef<Shader>> for ShaderPath {
 impl From<AssetId> for ShaderPath {
     fn from(id: AssetId) -> Self {
         Self::Id(id.into())
+    }
+}
+
+impl From<uuid::Uuid> for ShaderPath {
+    fn from(value: uuid::Uuid) -> Self {
+        let id = AssetId::from::<ShaderSource>(value);
+        Self::Id(id.into())
+    }
+}
+
+impl Into<LoadPath> for ShaderPath {
+    fn into(self) -> LoadPath {
+        match self {
+            ShaderPath::Id(id) => LoadPath::Id(id.into()),
+            ShaderPath::Path(path) => LoadPath::Path(path.into()),
+        }
     }
 }
 

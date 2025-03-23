@@ -1,11 +1,11 @@
-use super::GraphPass;
+use super::{GraphPass, TextureDesc, TextureView};
 use crate::{
     device::RenderDevice,
     renderer::{graph::RenderContext, pass::RenderPass, state::RenderState},
     resources::{
-        BlendMode, FragmentState, Id, Material, MaterialBinding, MaterialLayout, Mesh,
-        MeshAttributeKind, MeshLayout, PipelineCache, PipelineId, RenderAssets, RenderMesh,
-        RenderPipelineDesc, RenderResource, Shader, ShaderPath, SubMesh, VertexState,
+        BlendMode, FragmentState, Id, Material, MaterialBinding, MaterialLayout, Mesh, MeshLayout,
+        PipelineCache, PipelineId, RenderAssets, RenderMesh, RenderPipelineDesc, RenderResource,
+        Shader, ShaderPath, SubMesh, VertexState,
         binding::{BindGroup, BindGroupBuilder, BindGroupLayout, BindGroupLayoutBuilder},
         buffer::{Buffer, UniformBufferArray},
     },
@@ -13,9 +13,8 @@ use crate::{
     types::{Color, Viewport},
 };
 use asset::{AssetRef, database::AssetDatabase};
-use bytemuck::{Pod, Zeroable};
 use ecs::{
-    Component, Entity, Res, ResMut, Resource,
+    Component, Entity, IndexMap, Res, ResMut, Resource,
     system::unlifetime::{Read, ReadRes, WriteRes},
     world::{
         action::WorldActions,
@@ -29,7 +28,8 @@ use glam::{Mat4, Vec3};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, hash::Hash, ops::Range};
 use wgpu::{
-    BufferUsages, ColorTargetState, PrimitiveState, ShaderStages, VertexFormat, VertexStepMode,
+    BufferUsages, ColorTargetState, PrimitiveState, ShaderStages, TextureUsages, VertexFormat,
+    VertexStepMode,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -42,7 +42,7 @@ pub enum DepthWrite {
 pub struct ViewEntities(pub(crate) Vec<Entity>);
 impl Resource for ViewEntities {}
 
-pub trait View: ShaderType + WriteInto + Default + Send + Sync + 'static {
+pub trait View: ShaderType + WriteInto + Send + Sync + Sized + 'static {
     type Query: BaseQuery;
 
     fn world(&self) -> Mat4;
@@ -57,13 +57,13 @@ pub trait View: ShaderType + WriteInto + Default + Send + Sync + 'static {
 }
 
 #[derive(ShaderType, Clone, Copy)]
-pub struct OriginView {
+pub struct SimpleView {
     pub world: Mat4,
     pub view: Mat4,
     pub projection: Mat4,
 }
 
-impl Default for OriginView {
+impl Default for SimpleView {
     fn default() -> Self {
         Self {
             world: Mat4::IDENTITY,
@@ -73,8 +73,8 @@ impl Default for OriginView {
     }
 }
 
-impl View for OriginView {
-    type Query = (Entity, Read<OriginView>);
+impl View for SimpleView {
+    type Query = (Entity, Read<SimpleView>);
 
     fn world(&self) -> Mat4 {
         self.world
@@ -88,7 +88,7 @@ impl View for OriginView {
         self.projection
     }
 
-    fn extract<'a>(item: <Self::Query as BaseQuery>::Item<'a>) -> ExtractedView<OriginView> {
+    fn extract<'a>(item: <Self::Query as BaseQuery>::Item<'a>) -> ExtractedView<SimpleView> {
         ExtractedView {
             entity: item.0,
             view: *item.1,
@@ -99,7 +99,7 @@ impl View for OriginView {
     }
 }
 
-impl Component for OriginView {}
+impl Component for SimpleView {}
 
 pub struct ExtractedView<V: View> {
     pub entity: Entity,
@@ -292,7 +292,7 @@ impl<V: View> RenderResource for ViewBuffer<V> {
     }
 }
 
-pub trait MeshData: Pod + Zeroable + Default + Send + Sync + 'static {
+pub trait MeshData: ShaderType + WriteInto + Send + Sync + Sized + 'static {
     fn world(&self) -> Mat4;
     fn position(&self) -> Vec3 {
         let world = self.world();
@@ -302,22 +302,27 @@ pub trait MeshData: Pod + Zeroable + Default + Send + Sync + 'static {
 
 pub struct MeshDataBuffer<T: MeshData> {
     buffer: Buffer,
-    instances: Vec<T>,
+    data: Vec<u8>,
+    offset: usize,
     _marker: std::marker::PhantomData<T>,
 }
 
 impl<T: MeshData> MeshDataBuffer<T> {
+    const SIZE: usize = std::mem::size_of::<T>();
+
     pub fn new(device: &RenderDevice) -> Self {
+        let data = vec![0u8; std::mem::size_of::<T>()];
         let buffer = Buffer::with_data(
             device,
-            &vec![0u8; std::mem::size_of::<T>()],
+            &data,
             BufferUsages::VERTEX | BufferUsages::COPY_DST,
             None,
         );
 
         Self {
             buffer,
-            instances: vec![],
+            data,
+            offset: 0,
             _marker: std::marker::PhantomData,
         }
     }
@@ -327,32 +332,36 @@ impl<T: MeshData> MeshDataBuffer<T> {
     }
 
     pub fn push(&mut self, data: T) -> u32 {
-        let len = self.instances.len() as u32;
-        self.instances.push(data);
-        len
+        let offset = self.offset;
+        let mut writer = encase::internal::Writer::new(&data, &mut self.data, offset).unwrap();
+        data.write_into(&mut writer);
+
+        self.offset += Self::SIZE;
+
+        (offset / Self::SIZE) as u32
     }
 
-    pub fn append(&mut self, data: Vec<T>) -> Range<u32> {
-        let start = self.instances.len() as u32;
-        self.instances.extend(data);
-        start..self.instances.len() as u32
+    pub fn append(&mut self, mut data: Vec<T>) -> Range<u32> {
+        let offset = self.offset;
+        let _ = data.drain(..).map(|data| self.push(data));
+        (offset / Self::SIZE) as u32..(self.offset / Self::SIZE) as u32
     }
 
     pub fn clear(&mut self) {
-        self.instances.clear();
+        self.data.clear();
+        self.offset = 0;
     }
 
     pub fn update(&mut self, device: &RenderDevice) {
-        let size = (self.instances.len() * std::mem::size_of::<T>()) as u64;
-        if size > 0 && size > self.buffer.size() {
-            self.buffer
-                .update(device, bytemuck::cast_slice(&self.instances));
+        let size = self.data.len() as u64;
+        if size > self.buffer.size() {
+            self.buffer.update(device, &self.data);
         } else if size > 0 && size < self.buffer.size() / 2 {
-            self.buffer
-                .resize_with_data(device, bytemuck::cast_slice(&self.instances));
+            self.buffer.resize_with_data(device, &self.data);
         } else if size > 0 {
-            self.buffer
-                .update(device, bytemuck::cast_slice(&self.instances));
+            self.buffer.update(device, &self.data);
+        } else {
+            self.buffer.resize(device, Self::SIZE as u64);
         }
     }
 }
@@ -447,8 +456,9 @@ impl<D: Draw> Default for DrawCalls<D> {
 }
 
 impl<D: Draw> DrawCalls<D> {
-    pub(crate) fn extract_draws(query: Query<D::Query>, mut draws: ResMut<Self>) {
-        for item in query {
+    pub(crate) fn extract_draws(query: Main<Query<D::Query>>, mut draws: ResMut<Self>) {
+        // draws.0.clear();
+        for item in query.into_inner() {
             let draw = D::extract(item);
             draws.0.push(draw);
         }
@@ -510,6 +520,10 @@ impl<D: Draw> DrawCalls<D> {
             }
         }
     }
+
+    pub(crate) fn clear_draws(mut draws: ResMut<Self>) {
+        draws.0.clear();
+    }
 }
 
 impl<D: Draw> std::ops::Deref for DrawCalls<D> {
@@ -528,7 +542,7 @@ impl<D: Draw> std::ops::DerefMut for DrawCalls<D> {
 
 impl<D: Draw> Resource for DrawCalls<D> {}
 
-pub type DrawPass<V> =
+pub type DrawFunction<V> =
     fn(&RenderContext, &RenderView<V>, &ViewBuffer<V>, &RenderAssets<RenderMesh>, &mut RenderState);
 
 pub struct DrawPipline<D: Draw>(PipelineId, std::marker::PhantomData<D>);
@@ -602,13 +616,15 @@ impl<D: Draw> RenderResource for DrawPipline<D> {
         };
 
         let mut vertex_buffer_layouts = vec![MeshLayout::into_vertex_buffer_layout(
-            D::vertex_layout().iter().map(|a| a.format()),
+            0,
+            D::vertex_layout(),
             VertexStepMode::Vertex,
         )];
 
         if D::instance_layout().len() > 0 {
             vertex_buffer_layouts.push(MeshLayout::into_vertex_buffer_layout(
-                D::instance_layout().iter().copied(),
+                vertex_buffer_layouts[0].attributes.len() as u32,
+                D::instance_layout(),
                 VertexStepMode::Instance,
             ));
         }
@@ -646,18 +662,17 @@ impl<D: Draw> RenderResource for DrawPipline<D> {
     }
 }
 
-pub struct DrawPasses<M: MaterialPass>(Vec<DrawPass<M::View>>);
-impl<M: MaterialPass> std::ops::Deref for DrawPasses<M> {
-    type Target = Vec<DrawPass<M::View>>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
+pub struct DrawFunctions<M: DrawPass> {
+    opaque: Vec<DrawFunction<M::View>>,
+    transparent: Vec<DrawFunction<M::View>>,
 }
 
-impl<M: MaterialPass> DrawPasses<M> {
+impl<M: DrawPass> DrawFunctions<M> {
     pub fn new() -> Self {
-        Self(Vec::new())
+        Self {
+            opaque: Vec::new(),
+            transparent: Vec::new(),
+        }
     }
 
     pub fn add<D: Draw<View = M::View>>(&mut self) {
@@ -666,7 +681,7 @@ impl<M: MaterialPass> DrawPasses<M> {
         const VERTEX_BUFFER_SLOT: u32 = 0;
         const INSTANCE_BUFFER_SLOT: u32 = 1;
 
-        let pass: DrawPass<M::View> = |ctx, view, view_buffer, meshes, state| {
+        let pass: DrawFunction<M::View> = |ctx, view, view_buffer, meshes, state| {
             let draw_calls = ctx.world().resource::<ViewDrawCalls<D>>();
             let Some(draw_calls) = draw_calls.get(view.entity()) else {
                 return;
@@ -739,13 +754,39 @@ impl<M: MaterialPass> DrawPasses<M> {
             }
         };
 
-        self.0.push(pass);
+        match D::Material::mode() {
+            BlendMode::Opaque => self.opaque.push(pass),
+            BlendMode::Transparent => self.transparent.push(pass),
+        }
+    }
+
+    pub fn draw(
+        &self,
+        ctx: &RenderContext,
+        view: &RenderView<M::View>,
+        buffer: &ViewBuffer<M::View>,
+        meshes: &RenderAssets<RenderMesh>,
+        state: &mut RenderState,
+        mode: BlendMode,
+    ) {
+        match mode {
+            BlendMode::Opaque => {
+                for pass in &self.opaque {
+                    pass(ctx, view, buffer, meshes, state);
+                }
+            }
+            BlendMode::Transparent => {
+                for pass in &self.transparent {
+                    pass(ctx, view, buffer, meshes, state);
+                }
+            }
+        }
     }
 }
 
-impl<M: MaterialPass> Resource for DrawPasses<M> {}
+impl<M: DrawPass> Resource for DrawFunctions<M> {}
 
-pub trait MaterialPass: Send + Sync + 'static {
+pub trait DrawPass: Send + Sync + 'static {
     type View: View;
 
     const NAME: super::Name;
@@ -753,33 +794,113 @@ pub trait MaterialPass: Send + Sync + 'static {
     fn setup(builder: &mut super::PassBuilder) -> RenderPass;
 }
 
-pub struct MaterialGraphPass<M: MaterialPass>(std::marker::PhantomData<M>);
-impl<M: MaterialPass> GraphPass for MaterialGraphPass<M> {
-    type Data = RenderPass;
+pub type DrawCommand = fn(BlendMode, &mut RenderContext, &RenderAssets<RenderMesh>, &RenderPass);
 
-    const NAME: super::Name = M::NAME;
+pub struct DrawPassBuilder {
+    setup: fn(&mut super::PassBuilder) -> RenderPass,
+    command: DrawCommand,
+}
 
-    fn setup(builder: &mut super::PassBuilder) -> Self::Data {
-        M::setup(builder)
+impl DrawPassBuilder {
+    pub fn new<P: DrawPass>() -> Self {
+        Self {
+            setup: P::setup,
+            command: |mode, ctx, meshes, render_pass| {
+                let view_buffer = ctx.world().resource::<ViewBuffer<P::View>>();
+                let Some(view) = view_buffer.get_view(ctx.view()) else {
+                    return;
+                };
+
+                let mut encoder = ctx.encoder();
+                let passes = ctx.world().resource::<DrawFunctions<P>>();
+
+                if let Some(mut render_pass) =
+                    render_pass.begin(&mut encoder, ctx, view.clear_color())
+                {
+                    let mut state = RenderState::new(&mut render_pass);
+                    passes.draw(ctx, view, view_buffer, meshes, &mut state, mode);
+                }
+
+                ctx.submit(encoder.finish());
+            },
+        }
     }
 
-    fn execute(ctx: &mut RenderContext, render_pass: &Self::Data) {
-        let view_buffer = ctx.world().resource::<ViewBuffer<M::View>>();
-        let Some(view) = view_buffer.get_view(ctx.view()) else {
-            return;
-        };
+    pub fn build(self, builder: &mut super::PassBuilder) -> ErasedDrawPass {
+        let pass = (self.setup)(builder);
+        ErasedDrawPass {
+            pass,
+            command: self.command,
+        }
+    }
+}
 
-        let mut encoder = ctx.encoder();
-        let passes = ctx.world().resource::<DrawPasses<M>>();
+pub struct ErasedDrawPass {
+    pass: RenderPass,
+    command: DrawCommand,
+}
+
+impl ErasedDrawPass {
+    pub fn execute(
+        &self,
+        mode: BlendMode,
+        ctx: &mut RenderContext,
+        meshes: &RenderAssets<RenderMesh>,
+    ) {
+        (self.command)(mode, ctx, meshes, &self.pass);
+    }
+}
+
+pub struct MainDrawPass {
+    builders: IndexMap<super::Name, DrawPassBuilder>,
+}
+
+impl MainDrawPass {
+    pub const DEPTH_TEXTURE: super::Name = "depth";
+
+    pub fn new() -> Self {
+        Self {
+            builders: IndexMap::new(),
+        }
+    }
+
+    pub fn add<P: DrawPass>(&mut self) {
+        self.builders.insert(P::NAME, DrawPassBuilder::new::<P>());
+    }
+}
+
+impl Resource for MainDrawPass {}
+
+impl GraphPass for MainDrawPass {
+    type Data = Vec<ErasedDrawPass>;
+
+    const NAME: super::Name = "MainDrawPass";
+
+    fn setup(self, builder: &mut super::PassBuilder) -> Self::Data {
+        builder.create::<TextureView>(
+            Self::DEPTH_TEXTURE,
+            TextureDesc {
+                usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
+                format: RenderSurface::DEPTH_FORMAT,
+            },
+        );
+
+        let mut commands = Vec::new();
+        for command in self.builders.into_values() {
+            commands.push(command.build(builder));
+        }
+
+        commands
+    }
+
+    fn execute(ctx: &mut RenderContext, data: &Self::Data) {
         let meshes = ctx.world().resource::<RenderAssets<RenderMesh>>();
+        for pass in data {
+            pass.execute(BlendMode::Opaque, ctx, meshes);
+        }
 
-        if let Some(mut render_pass) = render_pass.begin(&mut encoder, ctx, view.clear_color()) {
-            let mut state = RenderState::new(&mut render_pass);
-            for pass in passes.iter() {
-                pass(ctx, view, view_buffer, meshes, &mut state);
-            }
-
-            ctx.submit(encoder.finish());
+        for pass in data {
+            pass.execute(BlendMode::Transparent, ctx, meshes);
         }
     }
 }
@@ -788,7 +909,7 @@ pub trait Draw: Send + Sync + 'static {
     type View: View;
     type Mesh: MeshData;
     type Material: Material;
-    type Pass: MaterialPass<View = Self::View>;
+    type Pass: DrawPass<View = Self::View>;
     type Query: BaseQuery;
 
     const BATCH: bool = true;
@@ -809,7 +930,7 @@ pub trait Draw: Send + Sync + 'static {
 
     fn shader() -> impl Into<ShaderPath>;
 
-    fn vertex_layout() -> &'static [MeshAttributeKind];
+    fn vertex_layout() -> &'static [VertexFormat];
 
     fn instance_layout() -> &'static [VertexFormat] {
         &[]

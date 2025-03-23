@@ -1,4 +1,4 @@
-use glam::{Vec3, Vec3A};
+use glam::{Vec2, Vec3, Vec3A, Vec4, Vec4Swizzles};
 
 #[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
 pub struct BoundingBox {
@@ -83,6 +83,49 @@ impl From<&[Vec3]> for BoundingBox {
         for vertex in vertices {
             min = min.min(*vertex);
             max = max.max(*vertex);
+        }
+
+        Self { min, max }
+    }
+}
+
+impl From<&[Vec2]> for BoundingBox {
+    fn from(vertices: &[Vec2]) -> Self {
+        let mut min = Vec3::splat(f32::INFINITY);
+        let mut max = Vec3::splat(f32::NEG_INFINITY);
+
+        for vertex in vertices {
+            min = min.min(Vec3::new(vertex.x, vertex.y, 0.0));
+            max = max.max(Vec3::new(vertex.x, vertex.y, 0.0));
+        }
+
+        Self { min, max }
+    }
+}
+
+impl From<&[Vec4]> for BoundingBox {
+    fn from(vertices: &[Vec4]) -> Self {
+        let mut min = Vec3::splat(f32::INFINITY);
+        let mut max = Vec3::splat(f32::NEG_INFINITY);
+
+        for vertex in vertices {
+            min = min.min(vertex.xyz());
+            max = max.max(vertex.xyz());
+        }
+
+        Self { min, max }
+    }
+}
+
+impl From<&[f32]> for BoundingBox {
+    fn from(vertices: &[f32]) -> Self {
+        let mut min = Vec3::splat(f32::INFINITY);
+        let mut max = Vec3::splat(f32::NEG_INFINITY);
+
+        for vertex in vertices.chunks(3) {
+            let vertex = Vec3::new(vertex[0], vertex[1], vertex[2]);
+            min = min.min(vertex);
+            max = max.max(vertex);
         }
 
         Self { min, max }

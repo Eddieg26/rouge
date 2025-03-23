@@ -171,10 +171,10 @@ pub struct AssetExtractors {
 }
 
 impl AssetExtractors {
-    pub fn add<R: RenderAssetExtractor>(&mut self) {
+    pub fn add<R: RenderAssetExtractor>(&mut self) -> bool {
         let ty = TypeId::of::<R>();
         if self.registry.contains(&ty) {
-            return;
+            return false;
         }
 
         let access = || {
@@ -230,6 +230,8 @@ impl AssetExtractors {
 
         self.dependencies
             .insert(ty, dependencies.into_iter().map(|dep| dep.0).collect());
+
+        true
     }
 
     fn extractor<R: RenderAssetExtractor>(
@@ -284,7 +286,7 @@ impl AssetExtractors {
             }
         }
 
-        assets.retain(|id, _| extract_info.removed.contains(&id));
+        assets.retain(|id, _| !extract_info.removed.contains(&id));
 
         extract_info.re_extract = extract;
     }
@@ -398,17 +400,6 @@ impl ResourceExtractors {
 
 impl Resource for ResourceExtractors {}
 
-pub struct ExtractResources;
-impl WorldAction for ExtractResources {
-    fn execute(self, world: &mut ecs::world::World) -> Option<()> {
-        let resources = world.remove_resource::<ResourceExtractors>()?;
-        for (_, action) in resources.0 {
-            action.execute(world);
-        }
-
-        Some(())
-    }
-}
 
 #[derive(Debug, Clone)]
 pub enum ExtractError<T: Send + Sync + 'static = ()> {

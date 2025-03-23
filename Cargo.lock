@@ -288,6 +288,7 @@ name = "basic"
 version = "0.1.0"
 dependencies = [
  "asset",
+ "bytemuck",
  "ecs",
  "futures-lite",
  "game",

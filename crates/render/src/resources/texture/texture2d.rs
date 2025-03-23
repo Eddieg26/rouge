@@ -1,5 +1,8 @@
-use super::{FilterMode, Texture, TextureDimension, TextureFormat, WrapMode};
+use crate::{ExtractError, RenderAssetExtractor, RenderDevice};
+
+use super::{FilterMode, GpuTexture, Sampler, Texture, TextureDimension, TextureFormat, WrapMode};
 use asset::{derive::Asset, Settings};
+use ecs::system::unlifetime::ReadRes;
 use std::ops::Range;
 
 #[derive(Clone, serde::Serialize, serde::Deserialize, Asset)]
@@ -128,6 +131,21 @@ impl Texture for Texture2d {
         &self.pixels[range]
     }
 }
+
+impl RenderAssetExtractor for Texture2d {
+    type RenderAsset = GpuTexture;
+
+    type Arg = ReadRes<RenderDevice>;
+
+    fn extract(
+        texture: Self,
+        device: &mut ecs::system::ArgItem<Self::Arg>,
+    ) -> Result<Self::RenderAsset, ExtractError<Self>> {
+        let sampler = Sampler::from_texture(device, &texture);
+        Ok(GpuTexture::create(device, &texture, sampler))
+    }
+}
+
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Texture2dSettings {
@@ -276,5 +294,20 @@ impl Texture for Texture2dArray {
 
     fn pixels(&self, range: Range<usize>) -> &[u8] {
         &self.pixels[range]
+    }
+}
+
+
+impl RenderAssetExtractor for Texture2dArray {
+    type RenderAsset = GpuTexture;
+
+    type Arg = ReadRes<RenderDevice>;
+
+    fn extract(
+        texture: Self,
+        device: &mut ecs::system::ArgItem<Self::Arg>,
+    ) -> Result<Self::RenderAsset, ExtractError<Self>> {
+        let sampler = Sampler::from_texture(device, &texture);
+        Ok(GpuTexture::create(device, &texture, sampler))
     }
 }

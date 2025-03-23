@@ -47,97 +47,83 @@ impl From<wgpu::PrimitiveTopology> for MeshTopology {
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub enum MeshAttribute {
-    Position(Vec<glam::Vec3>),
-    Normal(Vec<glam::Vec3>),
-    TexCoord0(Vec<glam::Vec2>),
-    TexCoord1(Vec<glam::Vec2>),
-    Tangent(Vec<glam::Vec4>),
-    Color(Vec<Color>),
+pub enum MeshAttributeValues {
+    Float(Vec<f32>),
+    Vec2(Vec<glam::Vec2>),
+    Vec3(Vec<glam::Vec3>),
+    Vec4(Vec<glam::Vec4>),
 }
 
-impl MeshAttribute {
-    pub fn kind(&self) -> MeshAttributeKind {
-        match self {
-            MeshAttribute::Position(_) => MeshAttributeKind::Position,
-            MeshAttribute::Normal(_) => MeshAttributeKind::Normal,
-            MeshAttribute::TexCoord0(_) => MeshAttributeKind::TexCoord0,
-            MeshAttribute::TexCoord1(_) => MeshAttributeKind::TexCoord1,
-            MeshAttribute::Tangent(_) => MeshAttributeKind::Tangent,
-            MeshAttribute::Color(_) => MeshAttributeKind::Color,
-        }
-    }
-
+impl MeshAttributeValues {
     pub fn len(&self) -> usize {
         match self {
-            MeshAttribute::Position(v) => v.len(),
-            MeshAttribute::Normal(v) => v.len(),
-            MeshAttribute::TexCoord0(v) => v.len(),
-            MeshAttribute::TexCoord1(v) => v.len(),
-            MeshAttribute::Tangent(v) => v.len(),
-            MeshAttribute::Color(v) => v.len(),
+            MeshAttributeValues::Float(v) => v.len(),
+            MeshAttributeValues::Vec2(v) => v.len(),
+            MeshAttributeValues::Vec3(v) => v.len(),
+            MeshAttributeValues::Vec4(v) => v.len(),
         }
     }
 
     pub fn extend(&mut self, other: &Self) {
         match (self, other) {
-            (MeshAttribute::Position(a), MeshAttribute::Position(b)) => a.extend_from_slice(b),
-            (MeshAttribute::Normal(a), MeshAttribute::Normal(b)) => a.extend_from_slice(b),
-            (MeshAttribute::TexCoord0(a), MeshAttribute::TexCoord0(b)) => a.extend_from_slice(b),
-            (MeshAttribute::TexCoord1(a), MeshAttribute::TexCoord1(b)) => a.extend_from_slice(b),
-            (MeshAttribute::Tangent(a), MeshAttribute::Tangent(b)) => a.extend_from_slice(b),
-            (MeshAttribute::Color(a), MeshAttribute::Color(b)) => a.extend_from_slice(b),
+            (MeshAttributeValues::Float(a), MeshAttributeValues::Float(b)) => a.extend(b),
+            (MeshAttributeValues::Vec2(a), MeshAttributeValues::Vec2(b)) => a.extend(b),
+            (MeshAttributeValues::Vec3(a), MeshAttributeValues::Vec3(b)) => a.extend(b),
+            (MeshAttributeValues::Vec4(a), MeshAttributeValues::Vec4(b)) => a.extend(b),
             _ => (),
         }
     }
 
     pub fn is_empty(&self) -> bool {
         match self {
-            MeshAttribute::Position(v) => v.is_empty(),
-            MeshAttribute::Normal(v) => v.is_empty(),
-            MeshAttribute::TexCoord0(v) => v.is_empty(),
-            MeshAttribute::TexCoord1(v) => v.is_empty(),
-            MeshAttribute::Tangent(v) => v.is_empty(),
-            MeshAttribute::Color(v) => v.is_empty(),
+            MeshAttributeValues::Float(v) => v.is_empty(),
+            MeshAttributeValues::Vec2(v) => v.is_empty(),
+            MeshAttributeValues::Vec3(v) => v.is_empty(),
+            MeshAttributeValues::Vec4(v) => v.is_empty(),
         }
     }
 
     pub fn data(&self, range: Range<usize>) -> &[u8] {
         match self {
-            MeshAttribute::Position(v) => bytemuck::cast_slice(&v[range]),
-            MeshAttribute::Normal(v) => bytemuck::cast_slice(&v[range]),
-            MeshAttribute::TexCoord0(v) => bytemuck::cast_slice(&v[range]),
-            MeshAttribute::TexCoord1(v) => bytemuck::cast_slice(&v[range]),
-            MeshAttribute::Tangent(v) => bytemuck::cast_slice(&v[range]),
-            MeshAttribute::Color(v) => bytemuck::cast_slice(&v[range]),
+            MeshAttributeValues::Float(v) => bytemuck::cast_slice(&v[range]),
+            MeshAttributeValues::Vec2(v) => bytemuck::cast_slice(&v[range]),
+            MeshAttributeValues::Vec3(v) => bytemuck::cast_slice(&v[range]),
+            MeshAttributeValues::Vec4(v) => bytemuck::cast_slice(&v[range]),
+        }
+    }
+
+    pub fn format(&self) -> wgpu::VertexFormat {
+        match self {
+            MeshAttributeValues::Float(_) => wgpu::VertexFormat::Float32,
+            MeshAttributeValues::Vec2(_) => wgpu::VertexFormat::Float32x2,
+            MeshAttributeValues::Vec3(_) => wgpu::VertexFormat::Float32x3,
+            MeshAttributeValues::Vec4(_) => wgpu::VertexFormat::Float32x4,
         }
     }
 
     pub fn size(&self) -> usize {
         match self {
-            MeshAttribute::Position(_) => std::mem::size_of::<glam::Vec3>(),
-            MeshAttribute::Normal(_) => std::mem::size_of::<glam::Vec3>(),
-            MeshAttribute::TexCoord0(_) => std::mem::size_of::<glam::Vec2>(),
-            MeshAttribute::TexCoord1(_) => std::mem::size_of::<glam::Vec2>(),
-            MeshAttribute::Tangent(_) => std::mem::size_of::<glam::Vec4>(),
-            MeshAttribute::Color(_) => std::mem::size_of::<Color>(),
+            MeshAttributeValues::Float(v) => v.len() * std::mem::size_of::<f32>(),
+            MeshAttributeValues::Vec2(v) => v.len() * std::mem::size_of::<glam::Vec2>(),
+            MeshAttributeValues::Vec3(v) => v.len() * std::mem::size_of::<glam::Vec3>(),
+            MeshAttributeValues::Vec4(v) => v.len() * std::mem::size_of::<glam::Vec4>(),
         }
     }
 
     pub fn clear(&mut self) {
         match self {
-            MeshAttribute::Position(v) => v.clear(),
-            MeshAttribute::Normal(v) => v.clear(),
-            MeshAttribute::TexCoord0(v) => v.clear(),
-            MeshAttribute::TexCoord1(v) => v.clear(),
-            MeshAttribute::Tangent(v) => v.clear(),
-            MeshAttribute::Color(v) => v.clear(),
+            MeshAttributeValues::Float(v) => v.clear(),
+            MeshAttributeValues::Vec2(v) => v.clear(),
+            MeshAttributeValues::Vec3(v) => v.clear(),
+            MeshAttributeValues::Vec4(v) => v.clear(),
         }
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum MeshAttributeKind {
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
+pub enum MeshAttributeType {
     Position,
     Normal,
     TexCoord0,
@@ -146,42 +132,43 @@ pub enum MeshAttributeKind {
     Color,
 }
 
-impl MeshAttributeKind {
+impl MeshAttributeType {
     pub fn size(&self) -> usize {
         match self {
-            MeshAttributeKind::Position => std::mem::size_of::<glam::Vec3>(),
-            MeshAttributeKind::Normal => std::mem::size_of::<glam::Vec3>(),
-            MeshAttributeKind::TexCoord0 => std::mem::size_of::<glam::Vec2>(),
-            MeshAttributeKind::TexCoord1 => std::mem::size_of::<glam::Vec2>(),
-            MeshAttributeKind::Tangent => std::mem::size_of::<glam::Vec4>(),
-            MeshAttributeKind::Color => std::mem::size_of::<Color>(),
-        }
-    }
-
-    pub fn format(&self) -> wgpu::VertexFormat {
-        match self {
-            MeshAttributeKind::Position => wgpu::VertexFormat::Float32x3,
-            MeshAttributeKind::Normal => wgpu::VertexFormat::Float32x3,
-            MeshAttributeKind::TexCoord0 => wgpu::VertexFormat::Float32x2,
-            MeshAttributeKind::TexCoord1 => wgpu::VertexFormat::Float32x2,
-            MeshAttributeKind::Tangent => wgpu::VertexFormat::Float32x4,
-            MeshAttributeKind::Color => wgpu::VertexFormat::Float32x4,
+            MeshAttributeType::Position => std::mem::size_of::<glam::Vec3>(),
+            MeshAttributeType::Normal => std::mem::size_of::<glam::Vec3>(),
+            MeshAttributeType::TexCoord0 => std::mem::size_of::<glam::Vec2>(),
+            MeshAttributeType::TexCoord1 => std::mem::size_of::<glam::Vec2>(),
+            MeshAttributeType::Tangent => std::mem::size_of::<glam::Vec4>(),
+            MeshAttributeType::Color => std::mem::size_of::<Color>(),
         }
     }
 }
 
-impl Iterator for MeshAttributeKind {
+impl Iterator for MeshAttributeType {
     type Item = Self;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self {
-            MeshAttributeKind::Position => Some(MeshAttributeKind::Normal),
-            MeshAttributeKind::Normal => Some(MeshAttributeKind::TexCoord0),
-            MeshAttributeKind::TexCoord0 => Some(MeshAttributeKind::TexCoord1),
-            MeshAttributeKind::TexCoord1 => Some(MeshAttributeKind::Tangent),
-            MeshAttributeKind::Tangent => Some(MeshAttributeKind::Color),
-            MeshAttributeKind::Color => None,
+            MeshAttributeType::Position => Some(MeshAttributeType::Normal),
+            MeshAttributeType::Normal => Some(MeshAttributeType::TexCoord0),
+            MeshAttributeType::TexCoord0 => Some(MeshAttributeType::TexCoord1),
+            MeshAttributeType::TexCoord1 => Some(MeshAttributeType::Tangent),
+            MeshAttributeType::Tangent => Some(MeshAttributeType::Color),
+            MeshAttributeType::Color => None,
         }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct MeshAttribute {
+    pub ty: MeshAttributeType,
+    pub values: MeshAttributeValues,
+}
+
+impl MeshAttribute {
+    pub fn new(ty: MeshAttributeType, values: MeshAttributeValues) -> Self {
+        Self { ty, values }
     }
 }
 
@@ -275,11 +262,11 @@ impl Mesh {
         &self.attributes
     }
 
-    pub fn attribute(&self, kind: MeshAttributeKind) -> Option<&MeshAttribute> {
+    pub fn attribute(&self, kind: MeshAttributeType) -> Option<&MeshAttribute> {
         self.attribute_index(kind).map(|i| &self.attributes[i])
     }
 
-    pub fn attribute_mut(&mut self, kind: MeshAttributeKind) -> Option<&mut MeshAttribute> {
+    pub fn attribute_mut(&mut self, kind: MeshAttributeType) -> Option<&mut MeshAttribute> {
         match self.attribute_index(kind) {
             Some(i) => {
                 self.attribute_dirty(kind);
@@ -324,21 +311,19 @@ impl Mesh {
     }
 
     pub fn add_attribute(&mut self, attribute: MeshAttribute) {
-        let kind = attribute.kind();
-        match self.attribute_index(kind) {
+        let ty = attribute.ty;
+        match self.attribute_index(ty) {
             Some(i) => self.attributes[i] = attribute,
             None => self.attributes.push(attribute),
         }
 
-        self.attribute_dirty(kind);
+        self.attribute_dirty(ty);
     }
 
-    pub fn remove_attribute(&mut self, kind: MeshAttributeKind) -> Option<MeshAttribute> {
-        let removed = self
-            .attribute_index(kind)
-            .map(|i| self.attributes.remove(i));
+    pub fn remove_attribute(&mut self, ty: MeshAttributeType) -> Option<MeshAttribute> {
+        let removed = self.attribute_index(ty).map(|i| self.attributes.remove(i));
 
-        self.attribute_dirty(kind);
+        self.attribute_dirty(ty);
 
         removed
     }
@@ -355,8 +340,8 @@ impl Mesh {
         }
     }
 
-    pub fn attribute_index(&self, kind: MeshAttributeKind) -> Option<usize> {
-        self.attributes.iter().position(|a| a.kind() == kind)
+    pub fn attribute_index(&self, ty: MeshAttributeType) -> Option<usize> {
+        self.attributes.iter().position(|a| a.ty == ty)
     }
 
     pub fn add_sub_mesh(&mut self, sub_mesh: SubMesh) {
@@ -369,7 +354,7 @@ impl Mesh {
 
     pub fn clear(&mut self) {
         for attribute in &mut self.attributes {
-            attribute.clear();
+            attribute.values.clear();
         }
 
         self.indices = None;
@@ -383,7 +368,7 @@ impl Mesh {
 
         self.attributes
             .iter()
-            .fold(usize::MAX, |len, curr| len.min(curr.len())) as u64
+            .fold(usize::MAX, |len, curr| len.min(curr.values.len())) as u64
     }
 
     pub fn index_count(&self) -> usize {
@@ -392,9 +377,20 @@ impl Mesh {
 
     pub fn calculate_bounds(&mut self) {
         let bounds_dirty = self.dirty.contains(MeshDirty::BOUNDS);
+        let Some(attribute) = self.attribute(MeshAttributeType::Position) else {
+            return;
+        };
 
-        match (bounds_dirty, self.attribute(MeshAttributeKind::Position)) {
-            (true, Some(MeshAttribute::Position(positions))) => {
+        match (bounds_dirty, &attribute.values) {
+            (true, MeshAttributeValues::Vec3(positions)) => {
+                self.bounds = BoundingBox::from(positions.as_slice());
+                self.dirty.remove(MeshDirty::BOUNDS);
+            }
+            (true, MeshAttributeValues::Vec2(positions)) => {
+                self.bounds = BoundingBox::from(positions.as_slice());
+                self.dirty.remove(MeshDirty::BOUNDS);
+            }
+            (true, MeshAttributeValues::Vec4(positions)) => {
                 self.bounds = BoundingBox::from(positions.as_slice());
                 self.dirty.remove(MeshDirty::BOUNDS);
             }
@@ -402,34 +398,42 @@ impl Mesh {
         }
     }
 
-    pub fn attribute_data(&self, kind: MeshAttributeKind, range: Range<usize>) -> &[u8] {
-        self.attribute(kind).map_or(&[], |a| a.data(range))
+    pub fn attribute_data(&self, kind: MeshAttributeType, range: Range<usize>) -> &[u8] {
+        self.attribute(kind).map_or(&[], |a| a.values.data(range))
     }
 
-    pub fn attribute_dirty(&mut self, attribute: MeshAttributeKind) {
+    pub fn attribute_dirty(&mut self, attribute: MeshAttributeType) {
         match attribute {
-            MeshAttributeKind::Position => self.dirty |= MeshDirty::POSITION | MeshDirty::BOUNDS,
-            MeshAttributeKind::Normal => self.dirty |= MeshDirty::NORMAL,
-            MeshAttributeKind::Tangent => self.dirty |= MeshDirty::TANGENT,
-            MeshAttributeKind::TexCoord0 => self.dirty |= MeshDirty::TEXCOORD0,
-            MeshAttributeKind::TexCoord1 => self.dirty |= MeshDirty::TEXCOORD1,
-            MeshAttributeKind::Color => self.dirty |= MeshDirty::COLOR,
+            MeshAttributeType::Position => self.dirty |= MeshDirty::POSITION | MeshDirty::BOUNDS,
+            MeshAttributeType::Normal => self.dirty |= MeshDirty::NORMAL,
+            MeshAttributeType::Tangent => self.dirty |= MeshDirty::TANGENT,
+            MeshAttributeType::TexCoord0 => self.dirty |= MeshDirty::TEXCOORD0,
+            MeshAttributeType::TexCoord1 => self.dirty |= MeshDirty::TEXCOORD1,
+            MeshAttributeType::Color => self.dirty |= MeshDirty::COLOR,
         }
     }
 
-    pub fn is_attribute_dirty(&self, attribute: MeshAttributeKind) -> bool {
+    pub fn is_attribute_dirty(&self, attribute: MeshAttributeType) -> bool {
         match attribute {
-            MeshAttributeKind::Position => self.dirty.contains(MeshDirty::POSITION),
-            MeshAttributeKind::Normal => self.dirty.contains(MeshDirty::NORMAL),
-            MeshAttributeKind::Tangent => self.dirty.contains(MeshDirty::TANGENT),
-            MeshAttributeKind::TexCoord0 => self.dirty.contains(MeshDirty::TEXCOORD0),
-            MeshAttributeKind::TexCoord1 => self.dirty.contains(MeshDirty::TEXCOORD1),
-            MeshAttributeKind::Color => self.dirty.contains(MeshDirty::COLOR),
+            MeshAttributeType::Position => self.dirty.contains(MeshDirty::POSITION),
+            MeshAttributeType::Normal => self.dirty.contains(MeshDirty::NORMAL),
+            MeshAttributeType::Tangent => self.dirty.contains(MeshDirty::TANGENT),
+            MeshAttributeType::TexCoord0 => self.dirty.contains(MeshDirty::TEXCOORD0),
+            MeshAttributeType::TexCoord1 => self.dirty.contains(MeshDirty::TEXCOORD1),
+            MeshAttributeType::Color => self.dirty.contains(MeshDirty::COLOR),
         }
     }
 
     pub fn layout(&self) -> MeshLayout {
-        MeshLayout::from(self.attributes.iter().map(|a| a.kind()).collect::<Vec<_>>())
+        MeshLayout::from(
+            self.attributes
+                .iter()
+                .map(|a| MeshAttributeLayout {
+                    ty: a.ty,
+                    format: a.values.format(),
+                })
+                .collect::<Vec<_>>(),
+        )
     }
 
     pub fn vertex_data(&self) -> (Vec<u8>, usize) {
@@ -438,23 +442,17 @@ impl Mesh {
 
         for index in 0..count {
             for attribute in &self.attributes {
-                match attribute {
-                    MeshAttribute::Position(v) => {
+                match &attribute.values {
+                    MeshAttributeValues::Float(v) => {
                         data.extend_from_slice(bytemuck::bytes_of(&v[index]))
                     }
-                    MeshAttribute::Normal(v) => {
+                    MeshAttributeValues::Vec2(v) => {
                         data.extend_from_slice(bytemuck::bytes_of(&v[index]))
                     }
-                    MeshAttribute::TexCoord0(v) => {
+                    MeshAttributeValues::Vec3(v) => {
                         data.extend_from_slice(bytemuck::bytes_of(&v[index]))
                     }
-                    MeshAttribute::TexCoord1(v) => {
-                        data.extend_from_slice(bytemuck::bytes_of(&v[index]))
-                    }
-                    MeshAttribute::Tangent(v) => {
-                        data.extend_from_slice(bytemuck::bytes_of(&v[index]))
-                    }
-                    MeshAttribute::Color(v) => {
+                    MeshAttributeValues::Vec4(v) => {
                         data.extend_from_slice(bytemuck::bytes_of(&v[index]))
                     }
                 }
@@ -470,11 +468,16 @@ impl Mesh {
         let mut layout = vec![];
         let mut stride = 0;
         for attribute in &mut self.attributes {
-            layout.push(attribute.kind());
+            stride += attribute.values.size();
+
+            layout.push(MeshAttributeLayout {
+                ty: attribute.ty,
+                format: attribute.values.format(),
+            });
+
             if self.read_write == ReadWrite::Disabled {
-                attribute.clear();
+                attribute.values.clear();
             }
-            stride += attribute.size();
         }
 
         let usage = match self.read_write {
@@ -501,7 +504,10 @@ impl Mesh {
 
     pub fn update(&mut self, device: &RenderDevice, buffers: &mut RenderMesh) {
         let (data, _) = self.vertex_data();
-        let stride = self.attributes.iter().fold(0, |sum, a| sum + a.size());
+        let stride = self
+            .attributes
+            .iter()
+            .fold(0, |sum, a| sum + a.values.size());
 
         buffers.vertex_buffer = VertexBuffer::new_from_data(device, &data, stride, None);
 
@@ -517,14 +523,21 @@ impl Mesh {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct MeshAttributeLayout {
+    pub ty: MeshAttributeType,
+    pub format: wgpu::VertexFormat,
+}
+
 impl Asset for Mesh {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MeshLayout(Box<[MeshAttributeKind]>);
+pub struct MeshLayout(Box<[MeshAttributeLayout]>);
 
 impl MeshLayout {
-    pub fn into_vertex_buffer_layout(
-        formats: impl IntoIterator<Item = wgpu::VertexFormat>,
+    pub fn into_vertex_buffer_layout<'a>(
+        start_location: u32,
+        formats: impl IntoIterator<Item = &'a wgpu::VertexFormat>,
         mode: VertexStepMode,
     ) -> VertexBufferLayout {
         let mut stride = 0;
@@ -532,9 +545,9 @@ impl MeshLayout {
 
         for (i, format) in formats.into_iter().enumerate() {
             attributes.push(wgpu::VertexAttribute {
-                format,
+                format: *format,
                 offset: stride,
-                shader_location: i as u32,
+                shader_location: i as u32 + start_location,
             });
 
             stride += format.size() as u64;
@@ -548,26 +561,26 @@ impl MeshLayout {
     }
 }
 
-impl From<Vec<MeshAttributeKind>> for MeshLayout {
-    fn from(attributes: Vec<MeshAttributeKind>) -> Self {
+impl From<Vec<MeshAttributeLayout>> for MeshLayout {
+    fn from(attributes: Vec<MeshAttributeLayout>) -> Self {
         Self(attributes.into_boxed_slice())
     }
 }
 
-impl From<&[MeshAttributeKind]> for MeshLayout {
-    fn from(attributes: &[MeshAttributeKind]) -> Self {
+impl From<&[MeshAttributeLayout]> for MeshLayout {
+    fn from(attributes: &[MeshAttributeLayout]) -> Self {
         Self(attributes.to_vec().into_boxed_slice())
     }
 }
 
-impl<A: AsRef<[MeshAttributeKind]>> From<&A> for MeshLayout {
+impl<A: AsRef<[MeshAttributeLayout]>> From<&A> for MeshLayout {
     fn from(attributes: &A) -> Self {
         Self(attributes.as_ref().to_vec().into_boxed_slice())
     }
 }
 
 impl std::ops::Deref for MeshLayout {
-    type Target = [MeshAttributeKind];
+    type Target = [MeshAttributeLayout];
 
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -575,8 +588,8 @@ impl std::ops::Deref for MeshLayout {
 }
 
 impl IntoIterator for MeshLayout {
-    type Item = MeshAttributeKind;
-    type IntoIter = std::vec::IntoIter<MeshAttributeKind>;
+    type Item = MeshAttributeLayout;
+    type IntoIter = std::vec::IntoIter<MeshAttributeLayout>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.0.into_vec().into_iter()
@@ -584,8 +597,8 @@ impl IntoIterator for MeshLayout {
 }
 
 impl<'a> IntoIterator for &'a MeshLayout {
-    type Item = &'a MeshAttributeKind;
-    type IntoIter = std::slice::Iter<'a, MeshAttributeKind>;
+    type Item = &'a MeshAttributeLayout;
+    type IntoIter = std::slice::Iter<'a, MeshAttributeLayout>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.0.iter()

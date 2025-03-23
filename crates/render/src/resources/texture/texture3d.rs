@@ -1,6 +1,9 @@
-use super::{FilterMode, Texture, TextureDimension, WrapMode};
-use std::ops::Range;
+use crate::{ExtractError, RenderAssetExtractor, RenderDevice};
+
+use super::{FilterMode, GpuTexture, Sampler, Texture, TextureDimension, WrapMode};
 use asset::derive::Asset;
+use ecs::system::unlifetime::ReadRes;
+use std::ops::Range;
 use wgpu::TextureFormat;
 
 #[derive(Clone, serde::Serialize, serde::Deserialize, Asset)]
@@ -102,5 +105,19 @@ impl Texture for Texture3d {
 
     fn pixels(&self, range: Range<usize>) -> &[u8] {
         &self.pixels[range]
+    }
+}
+
+impl RenderAssetExtractor for Texture3d {
+    type RenderAsset = GpuTexture;
+
+    type Arg = ReadRes<RenderDevice>;
+
+    fn extract(
+        texture: Self,
+        device: &mut ecs::system::ArgItem<Self::Arg>,
+    ) -> Result<Self::RenderAsset, ExtractError<Self>> {
+        let sampler = Sampler::from_texture(device, &texture);
+        Ok(GpuTexture::create(device, &texture, sampler))
     }
 }

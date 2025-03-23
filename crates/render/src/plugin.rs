@@ -1,15 +1,15 @@
 use crate::{
-    ExtractedViews, OriginView, RenderAssets,
+    DrawPipline, ExtractedViews, MainDrawPass, PostRender, ProcessResources, RenderAssets,
     app::{
         Process, ProcessAssets, ProcessPipelines, Queue, QueueDraws, QueueViews, Render, RenderApp,
     },
     renderer::{
-        Draw, DrawCalls, DrawPasses, GraphPass, MaterialGraphPass, MaterialPass, MeshDataBuffer,
-        View, ViewBuffer, ViewDrawCalls, ViewEntities, graph::RenderGraph,
+        Draw, DrawCalls, DrawFunctions, GraphPass, MeshDataBuffer, View, ViewBuffer, ViewDrawCalls,
+        ViewEntities, graph::RenderGraph,
     },
     resources::{
-        AssetExtractors, DefaultSampler, ExtractError, ExtractInfo, Fallbacks, Mesh, PipelineCache,
-        RenderAssetEvent, RenderAssetEvents, RenderAssetExtractor, RenderResource,
+        AssetExtractors, DefaultSampler, ExtractError, ExtractInfo, Fallbacks, Material, Mesh,
+        PipelineCache, RenderAssetEvent, RenderAssetEvents, RenderAssetExtractor, RenderResource,
         ResourceExtractors, ShaderSource, Texture1d, Texture2d, Texture2dArray, Texture3d,
         TextureCube,
     },
@@ -38,6 +38,7 @@ impl Plugin for RenderPlugin {
             .add_sub_phase::<Update, Process>()
             .add_sub_phase::<Update, Queue>()
             .add_sub_phase::<Update, Render>()
+            .add_sub_phase::<Update, PostRender>()
             .add_resource(AssetExtractors::default())
             .add_resource(ResourceExtractors::default())
             .add_resource(PipelineCache::default())
@@ -55,8 +56,6 @@ impl Plugin for RenderPlugin {
             .extract_render_asset::<ShaderSource>()
             .extract_render_resource::<Fallbacks>()
             .extract_render_resource::<DefaultSampler>()
-            .extract_view::<OriginView>()
-            .register::<OriginView>()
             .register_asset::<Mesh>()
             .register_asset::<Texture1d>()
             .register_asset::<Texture2d>()
@@ -70,15 +69,19 @@ impl Plugin for RenderPlugin {
 
     fn finish(&mut self, game: &mut game::GameBuilder) {
         game.scoped_sub_app::<RenderApp>(|game, app| {
+            app.add_systems(ProcessResources, ResourceExtractors::process)
+                .add_systems(ProcessPipelines, PipelineCache::process)
+                .add_systems(Render, RenderGraph::run_graph)
+                .add_resource(game.resource::<AssetDatabase>().clone());
+
             if let Some(extractors) = app.remove_resource::<AssetExtractors>() {
                 app.add_systems(Extract, extractors.extract)
                     .add_systems(ProcessAssets, extractors.process);
             }
 
-            app.add_systems(ProcessAssets, ResourceExtractors::process)
-                .add_systems(ProcessPipelines, PipelineCache::process)
-                .add_systems(Render, RenderGraph::run_graph)
-                .add_resource(game.resource::<AssetDatabase>().clone());
+            if let Some(pass) = app.remove_resource::<MainDrawPass>() {
+                app.non_send_resource_mut::<RenderGraph>().add_pass(pass);
+            }
         });
     }
 
@@ -92,39 +95,55 @@ impl Plugin for RenderPlugin {
 }
 
 pub trait RenderAppExt {
+    fn add_pass<P: GraphPass>(&mut self, pass: P) -> &mut Self;
+    fn add_view<V: View>(&mut self) -> &mut Self;
+    fn add_draw<D: Draw>(&mut self) -> &mut Self;
     fn extract_render_asset<R: RenderAssetExtractor>(&mut self) -> &mut Self;
     fn extract_render_resource<R: RenderResource>(&mut self) -> &mut Self;
-    fn extract_view<V: View>(&mut self) -> &mut Self;
-    fn add_draw_calls<D: Draw>(&mut self) -> &mut Self;
-    fn add_pass<P: GraphPass>(&mut self) -> &mut Self;
-    fn add_material_pass<M: MaterialPass>(&mut self) -> &mut Self;
 }
 
 impl RenderAppExt for GameBuilder {
+    fn add_pass<P: GraphPass>(&mut self, pass: P) -> &mut Self {
+        self.sub_app_mut::<RenderApp>()
+            .non_send_resource_mut::<RenderGraph>()
+            .add_pass::<P>(pass);
+        self
+    }
+
+    fn add_view<V: View>(&mut self) -> &mut Self {
+        self.add_plugin(ViewPlugin::<V>::new())
+    }
+
+    fn add_draw<D: Draw>(&mut self) -> &mut Self {
+        self.add_plugin(DrawPlugin::<D>::new())
+    }
+
     fn extract_render_asset<R: RenderAssetExtractor>(&mut self) -> &mut Self {
         self.scoped_sub_app::<RenderApp>(|game, app| {
-            game.add_resource(RenderAssetEvents::<R>::new());
-            app.add_resource(ExtractInfo::<R>::new());
-            app.add_resource(RenderAssets::<R::RenderAsset>::new());
-            app.register_event::<ExtractError<R>>();
-            app.resource_mut::<AssetExtractors>().add::<R>();
+            if app.resource_mut::<AssetExtractors>().add::<R>() {
+                app.register_event::<ExtractError<R>>();
+                app.add_resource(ExtractInfo::<R>::new());
+                app.add_resource(RenderAssets::<R::RenderAsset>::new());
 
-            app.observe::<AssetEvent<R>, _>(
-                |events: Res<Events<AssetEvent<R>>>, mut other: ResMut<RenderAssetEvents<R>>| {
-                    for event in events.iter() {
-                        let event = match event {
-                            AssetEvent::Added { id } => RenderAssetEvent::Added(*id),
-                            AssetEvent::Unloaded { id, .. } => RenderAssetEvent::Removed(*id),
-                            AssetEvent::Loaded { id } => RenderAssetEvent::Modified(*id),
-                            AssetEvent::Modified { id } => RenderAssetEvent::Modified(*id),
-                            AssetEvent::Failed { id, .. } => RenderAssetEvent::Removed(*id),
-                            _ => continue,
-                        };
+                game.add_resource(RenderAssetEvents::<R>::new());
+                game.observe::<AssetEvent<R>, _>(
+                    |events: Res<Events<AssetEvent<R>>>,
+                     mut other: ResMut<RenderAssetEvents<R>>| {
+                        for event in events.iter() {
+                            let event = match event {
+                                AssetEvent::Added { id } => RenderAssetEvent::Added(*id),
+                                AssetEvent::Unloaded { id, .. } => RenderAssetEvent::Removed(*id),
+                                AssetEvent::Loaded { id } => RenderAssetEvent::Modified(*id),
+                                AssetEvent::Modified { id } => RenderAssetEvent::Modified(*id),
+                                AssetEvent::Failed { id, .. } => RenderAssetEvent::Removed(*id),
+                                _ => continue,
+                            };
 
-                        other.add(event);
-                    }
-                },
-            );
+                            other.add(event);
+                        }
+                    },
+                );
+            }
         });
 
         self
@@ -132,60 +151,87 @@ impl RenderAppExt for GameBuilder {
 
     fn extract_render_resource<R: RenderResource>(&mut self) -> &mut Self {
         self.sub_app_mut::<RenderApp>()
+            .register_event::<ExtractError<()>>()
             .resource_mut::<ResourceExtractors>()
             .add::<R>();
         self
     }
+}
 
-    fn extract_view<V: View>(&mut self) -> &mut Self {
-        self.sub_app_mut::<RenderApp>()
+pub struct ViewPlugin<V: View>(std::marker::PhantomData<V>);
+impl<V: View> ViewPlugin<V> {
+    pub fn new() -> Self {
+        Self(Default::default())
+    }
+}
+
+impl<V: View> Plugin for ViewPlugin<V> {
+    fn name(&self) -> &'static str {
+        std::any::type_name::<V>()
+    }
+
+    fn start(&mut self, game: &mut GameBuilder) {
+        game.sub_app_mut::<RenderApp>()
             .add_resource(ExtractedViews::<V>::default())
             .add_systems(Extract, ViewBuffer::<V>::extract_views)
             .add_systems(QueueViews, ViewBuffer::<V>::queue_views);
 
-        self.extract_render_resource::<ViewBuffer<V>>()
+        game.extract_render_resource::<ViewBuffer<V>>();
+    }
+}
+
+pub struct DrawPlugin<D: Draw>(std::marker::PhantomData<D>);
+impl<D: Draw> DrawPlugin<D> {
+    pub fn new() -> Self {
+        Self(Default::default())
+    }
+}
+
+impl<D: Draw> Plugin for DrawPlugin<D> {
+    fn name(&self) -> &'static str {
+        std::any::type_name::<D>()
     }
 
-    fn add_draw_calls<D: Draw>(&mut self) -> &mut Self {
-        self.scoped_sub_app::<RenderApp>(|_, app| {
+    fn start(&mut self, game: &mut GameBuilder) {
+        game.scoped_sub_app::<RenderApp>(|_, app| {
             app.add_resource(DrawCalls::<D>::default());
             app.add_resource(ViewDrawCalls::<D>::default());
             app.add_systems(Extract, DrawCalls::<D>::extract_draws);
             app.add_systems(QueueDraws, DrawCalls::<D>::queue_view_draws);
-            match app.try_resource_mut::<DrawPasses<D::Pass>>() {
+            app.add_systems(PostRender, DrawCalls::<D>::clear_draws);
+            match app.try_resource_mut::<DrawFunctions<D::Pass>>() {
                 Some(passes) => passes.add::<D>(),
                 None => {
-                    let mut passes = DrawPasses::<D::Pass>::new();
+                    let mut passes = DrawFunctions::<D::Pass>::new();
                     passes.add::<D>();
                     app.add_resource(passes);
                 }
             }
+
+            match app.try_resource_mut::<MainDrawPass>() {
+                Some(pass) => pass.add::<D::Pass>(),
+                None => {
+                    let mut pass = MainDrawPass::new();
+                    pass.add::<D::Pass>();
+                    app.add_resource(pass);
+                }
+            }
         });
 
-        self.extract_render_resource::<MeshDataBuffer<D::Mesh>>();
-        self.add_material_pass::<D::Pass>();
-        // TODO: Add draw call systems and register materials
+        game.load_asset::<ShaderSource>(D::shader().into());
+        game.load_asset::<ShaderSource>(D::Material::shader().into());
 
-        self
+        game.register_asset::<D::Material>();
+        game.extract_render_asset::<D::Material>();
+        game.extract_render_resource::<MeshDataBuffer<D::Mesh>>();
+        game.extract_render_resource::<DrawPipline<D>>();
     }
 
-    fn add_pass<P: GraphPass>(&mut self) -> &mut Self {
-        self.sub_app_mut::<RenderApp>()
-            .non_send_resource_mut::<RenderGraph>()
-            .add_pass::<P>();
-        self
-    }
+    fn dependencies(&self) -> game::Plugins {
+        let mut plugins = game::Plugins::new();
+        plugins.add(RenderPlugin);
+        plugins.add(ViewPlugin::<D::View>::new());
 
-    fn add_material_pass<M: MaterialPass>(&mut self) -> &mut Self {
-        if self
-            .sub_app::<RenderApp>()
-            .try_resource::<DrawPasses<M>>()
-            .is_none()
-        {
-            self.sub_app_mut::<RenderApp>()
-                .add_resource(DrawPasses::<M>::new());
-        };
-
-        self.add_pass::<MaterialGraphPass<M>>()
+        plugins
     }
 }

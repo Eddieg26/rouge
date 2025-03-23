@@ -1,5 +1,8 @@
-use super::{FilterMode, Texture, TextureDimension, TextureFace, WrapMode};
+use crate::{ExtractError, RenderAssetExtractor, RenderDevice};
+
+use super::{FilterMode, GpuTexture, Sampler, Texture, TextureDimension, TextureFace, WrapMode};
 use asset::derive::Asset;
+use ecs::system::unlifetime::ReadRes;
 use std::ops::Range;
 use wgpu::TextureFormat;
 
@@ -105,6 +108,20 @@ impl Texture for TextureCube {
     }
 }
 
+impl RenderAssetExtractor for TextureCube {
+    type RenderAsset = GpuTexture;
+
+    type Arg = ReadRes<RenderDevice>;
+
+    fn extract(
+        texture: Self,
+        device: &mut ecs::system::ArgItem<Self::Arg>,
+    ) -> Result<Self::RenderAsset, ExtractError<Self>> {
+        let sampler = Sampler::from_texture(device, &texture);
+        Ok(GpuTexture::create(device, &texture, sampler))
+    }
+}
+
 #[derive(Clone, serde::Serialize, serde::Deserialize, Asset)]
 pub struct TextureCubeArray {
     width: u32,
@@ -206,5 +223,19 @@ impl Texture for TextureCubeArray {
 
     fn pixels(&self, range: Range<usize>) -> &[u8] {
         &self.pixels[range]
+    }
+}
+
+impl RenderAssetExtractor for TextureCubeArray {
+    type RenderAsset = GpuTexture;
+
+    type Arg = ReadRes<RenderDevice>;
+
+    fn extract(
+        texture: Self,
+        device: &mut ecs::system::ArgItem<Self::Arg>,
+    ) -> Result<Self::RenderAsset, ExtractError<Self>> {
+        let sampler = Sampler::from_texture(device, &texture);
+        Ok(GpuTexture::create(device, &texture, sampler))
     }
 }

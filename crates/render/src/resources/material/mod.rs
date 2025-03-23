@@ -1,15 +1,14 @@
+use super::{RenderAssetExtractor, RenderResource};
 use crate::{
     device::RenderDevice,
     resources::{
-        binding::{BindGroup, BindGroupLayout, AsBinding},
+        binding::{AsBinding, BindGroup, BindGroupLayout},
         extract::RenderAsset,
         shader::ShaderPath,
     },
 };
 use asset::asset::Asset;
 use ecs::{Resource, system::unlifetime::ReadRes};
-
-use super::RenderResource;
 
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
@@ -28,7 +27,7 @@ impl Into<wgpu::BlendState> for BlendMode {
     }
 }
 
-pub trait Material: Asset + AsBinding + Send + Sync + 'static {
+pub trait Material: Asset + AsBinding + Clone + Sized {
     fn mode() -> BlendMode;
     fn shader() -> impl Into<ShaderPath>;
 }
@@ -94,3 +93,33 @@ impl<M: Material> std::ops::Deref for MaterialBinding<M> {
 }
 
 impl<M: Material> RenderAsset for MaterialBinding<M> {}
+
+impl<M: Material> RenderAssetExtractor for M {
+    type RenderAsset = MaterialBinding<M>;
+
+    type Arg = (
+        ReadRes<RenderDevice>,
+        Option<ReadRes<MaterialLayout<M>>>,
+        M::Arg,
+    );
+
+    fn extract(
+        asset: Self,
+        arg: &mut ecs::prelude::ArgItem<Self::Arg>,
+    ) -> Result<Self::RenderAsset, super::ExtractError<Self>> {
+        let (device, layout, arg) = arg;
+        let layout = match layout.as_ref() {
+            Some(layout) => layout,
+            None => return Err(super::ExtractError::Retry(asset)),
+        };
+
+        let binding = asset
+            .create_bind_group(device, &layout, arg)
+            .map_err(|_| super::ExtractError::Retry(asset))?;
+
+        Ok(MaterialBinding {
+            bind_group: binding,
+            _marker: std::marker::PhantomData,
+        })
+    }
+}

@@ -14,7 +14,7 @@ use crate::{
     io::{
         cache::LoadPath, embedded::EmbeddedFs, local::LocalFs, source::AssetSourceName, FileSystem,
     },
-    AssetId,
+    AssetId, AssetRef,
 };
 use ecs::{core::resource::ResMut, event::Events, world::builtin::events::ResourceUpdate};
 use futures::executor::block_on;
@@ -73,7 +73,7 @@ pub trait AssetExt: 'static {
     fn load_asset<A: Asset>(&mut self, path: impl Into<LoadPath>) -> &mut Self;
     fn add_asset<A: Asset>(
         &mut self,
-        id: AssetId,
+        id: impl Into<AssetRef<A>>,
         asset: A,
         dependencies: Vec<AssetId>,
     ) -> &mut Self;
@@ -142,12 +142,12 @@ impl AssetExt for GameBuilder {
 
     fn add_asset<A: Asset>(
         &mut self,
-        id: AssetId,
+        id: impl Into<AssetRef<A>>,
         asset: A,
         dependencies: Vec<AssetId>,
     ) -> &mut Self {
         self.actions()
-            .add(AssetAdded::new(id, asset).with_dependencies(dependencies));
+            .add(AssetAdded::new(id.into(), asset).with_dependencies(dependencies));
         self
     }
 }

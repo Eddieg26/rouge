@@ -60,6 +60,8 @@ impl<T: ShaderType + WriteInto> StorageBuffer<T> {
 
     pub fn set(&mut self, value: T) {
         self.value = value;
+        self.data.as_mut().clear();
+        self.data.write(&self.value).unwrap();
         self.is_dirty = true;
     }
 
@@ -73,7 +75,13 @@ impl<T: ShaderType + WriteInto> StorageBuffer<T> {
     }
 }
 
-pub struct StorageBufferArray<T: ShaderType + WriteInto> {
+impl<T: ShaderType + WriteInto> AsRef<Buffer> for StorageBuffer<T> {
+    fn as_ref(&self) -> &Buffer {
+        &self.buffer
+    }
+}
+
+pub struct StorageBufferArray<T: ShaderType> {
     data: encase::DynamicStorageBuffer<Vec<u8>>,
     buffer: Buffer,
     alignment: u64,
@@ -81,10 +89,11 @@ pub struct StorageBufferArray<T: ShaderType + WriteInto> {
     _marker: std::marker::PhantomData<T>,
 }
 
-impl<T: ShaderType + WriteInto> StorageBufferArray<T> {
+impl<T: ShaderType> StorageBufferArray<T> {
     pub fn new(device: &RenderDevice, label: Label, usage: Option<BufferUsages>) -> Self {
-        let alignment = AlignmentValue::new(T::min_size().get())
-            .round_up(device.limits().min_storage_buffer_offset_alignment as u64);
+        let alignment = AlignmentValue::new(T::min_size().get().next_power_of_two())
+            .get()
+            .max(device.limits().min_storage_buffer_offset_alignment as u64);
 
         let data = encase::DynamicStorageBuffer::new_with_alignment(Vec::new(), alignment);
 
@@ -128,32 +137,6 @@ impl<T: ShaderType + WriteInto> StorageBufferArray<T> {
         self.data.as_ref().len() / self.alignment as usize
     }
 
-    pub fn push(&mut self, value: &T) -> DynamicOffset {
-        self.is_dirty = true;
-        self.data.write(value).unwrap() as DynamicOffset
-    }
-
-    pub fn set(&mut self, index: usize, values: impl IntoIterator<Item = T>) -> Vec<DynamicOffset> {
-        self.is_dirty = true;
-        self.data
-            .set_offset(index as wgpu::BufferAddress * self.alignment);
-
-        let offsets = values
-            .into_iter()
-            .map(|value| self.data.write(&value).unwrap() as DynamicOffset)
-            .collect();
-
-        self.data.set_offset(self.data.as_ref().len() as u64);
-
-        offsets
-    }
-
-    pub fn clear(&mut self) {
-        self.data.as_mut().clear();
-        self.data.set_offset(0);
-        self.is_dirty = true;
-    }
-
     /// Commits the buffer to the GPU. If the buffer is resized, the data is copied to the new buffer.
     /// If the buffer is not resized, the data is written to the buffer.
     /// Returns the new buffer size if the buffer was resized.
@@ -179,7 +162,35 @@ impl<T: ShaderType + WriteInto> StorageBufferArray<T> {
     }
 }
 
-impl<T: ShaderType + WriteInto> AsRef<Buffer> for StorageBufferArray<T> {
+impl<T: ShaderType + WriteInto> StorageBufferArray<T> {
+    pub fn push(&mut self, value: &T) -> DynamicOffset {
+        self.is_dirty = true;
+        self.data.write(value).unwrap() as DynamicOffset
+    }
+
+    pub fn set(&mut self, index: usize, values: impl IntoIterator<Item = T>) -> Vec<DynamicOffset> {
+        self.is_dirty = true;
+        self.data
+            .set_offset(index as wgpu::BufferAddress * self.alignment);
+
+        let offsets = values
+            .into_iter()
+            .map(|value| self.data.write(&value).unwrap() as DynamicOffset)
+            .collect();
+
+        self.data.set_offset(self.data.as_ref().len() as u64);
+
+        offsets
+    }
+
+    pub fn clear(&mut self) {
+        self.data.as_mut().clear();
+        self.data.set_offset(0);
+        self.is_dirty = true;
+    }
+}
+
+impl<T: ShaderType> AsRef<Buffer> for StorageBufferArray<T> {
     fn as_ref(&self) -> &Buffer {
         &self.buffer
     }

@@ -15,12 +15,15 @@ impl Phase for Process {
 
     fn schedule() -> Schedule {
         let mut schedule = Schedule::new(PhaseId::of::<Self>());
+        schedule.add_child(ProcessResources::schedule());
         schedule.add_child(ProcessAssets::schedule());
         schedule.add_child(ProcessPipelines::schedule());
         schedule
     }
 }
 
+pub struct ProcessResources;
+impl Phase for ProcessResources {}
 pub struct ProcessAssets;
 impl Phase for ProcessAssets {}
 
@@ -47,3 +50,6 @@ impl Phase for QueueDraws {}
 
 pub struct Render;
 impl Phase for Render {}
+
+pub struct PostRender;
+impl Phase for PostRender {}

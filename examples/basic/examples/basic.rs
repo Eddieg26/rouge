@@ -1,9 +1,16 @@
-use asset::AssetRef;
-use ecs::world::{action::WorldActions, builtin::actions::Spawn};
+use asset::{derive::Asset, embed_asset, embedded::EmbeddedFs, AssetExt, AssetRef};
+use ecs::{
+    derive::Component,
+    system::unlifetime::Read,
+    world::{action::WorldActions, builtin::actions::Spawn},
+    Entity,
+};
 use game::{Game, Init};
 use render::{
     derive::{AsBinding, ShaderType},
-    Color, GraphPass, OriginView, RenderAppExt, RenderPass, RenderPlugin, StoreOp, Texture2d,
+    Color, Draw, DrawPass, MainDrawPass, Material, Mesh, MeshAttribute, MeshAttributeType,
+    MeshAttributeValues, MeshTopology, Operations, RenderAppExt, RenderPass, RenderPlugin,
+    ShaderPath, ShaderSource, StoreOp,
 };
 use uuid::Uuid;
 
@@ -13,47 +20,224 @@ const MATERIAL_ID: Uuid = Uuid::from_u128(0);
 const MESH_ID: Uuid = Uuid::from_u128(1);
 
 fn main() {
+    const QUAD: &[glam::Vec2] = &[
+        glam::Vec2::new(-1.0, -1.0), // Bottom-left
+        glam::Vec2::new(1.0, -1.0),  // Bottom-right
+        glam::Vec2::new(-1.0, 1.0),  // Top-left
+        glam::Vec2::new(1.0, -1.0),  // Bottom-right
+        glam::Vec2::new(1.0, 1.0),   // Top-right
+        glam::Vec2::new(-1.0, 1.0),  // Top-left
+    ];
+
+    let quad = Mesh::new(MeshTopology::TriangleList).with_attribute(MeshAttribute::new(
+        MeshAttributeType::Position,
+        MeshAttributeValues::Vec2(QUAD.to_vec()),
+    ));
+
+    let embedded = EmbeddedFs::new("assets");
+
+    let vs_id = AssetRef::<ShaderSource>::from(VERTEX_SHADER_ID);
+    embed_asset!(embedded, vs_id, "assets/vertex.wgsl", ());
+
+    let fs_id = AssetRef::<ShaderSource>::from(FRAGMENT_SHADER_ID);
+    embed_asset!(embedded, fs_id, "assets/fragment.wgsl", ());
+
     Game::new()
         .add_plugin(RenderPlugin)
-        .add_pass::<BasicPass>()
+        .add_draw::<DrawMesh2d>()
+        .embed_assets("embedded", embedded)
+        .register::<Camera2d>()
+        .register::<Mesh2dRenderer>()
+        .add_asset(MATERIAL_ID, UnlitColor::new(Color::blue()), vec![])
+        .add_asset(MESH_ID, quad, vec![])
         .add_systems(Init, |actions: WorldActions| {
-            actions.add(Spawn::new().with(OriginView::default()));
+            actions.add(Spawn::new().with(Camera2d::default()));
+            actions.add(Spawn::new().with(Mesh2dRenderer::new(MESH_ID, MATERIAL_ID)));
         })
         .run();
 }
 
-pub struct BasicPass;
+#[derive(AsBinding, Asset, Clone, serde::Serialize, serde::Deserialize)]
+#[uniform(0)]
+pub struct UnlitColor {
+    #[uniform]
+    pub color: Color,
+}
 
-impl GraphPass for BasicPass {
-    type Data = RenderPass;
-
-    const NAME: render::Name = "Basic";
-
-    fn setup(builder: &mut render::PassBuilder) -> Self::Data {
-        let surface = builder.write(builder.surface_id());
-        RenderPass::new().with_color(surface, None, StoreOp::Store, Some(Color::blue()))
-    }
-
-    fn execute(ctx: &mut render::RenderContext, data: &Self::Data) {
-        let mut encoder = ctx.encoder();
-        if let Some(_) = data.begin(&mut encoder, ctx, Some(Color::red())) {}
-
-        ctx.submit(encoder.finish());
+impl UnlitColor {
+    pub fn new(color: Color) -> Self {
+        Self { color }
     }
 }
 
-#[derive(AsBinding)]
-#[uniform(0)]
-pub struct Test {
-    #[uniform]
-    age: u32,
+impl Material for UnlitColor {
+    fn mode() -> render::BlendMode {
+        render::BlendMode::Opaque
+    }
 
-    #[uniform]
-    height: f32,
+    fn shader() -> impl Into<render::ShaderPath> {
+        ShaderPath::from(FRAGMENT_SHADER_ID)
+    }
+}
 
-    #[texture(1)]
-    #[sampler(2)]
-    color: AssetRef<Texture2d>,
+#[derive(ShaderType, Clone, Copy)]
+pub struct Mesh2dData {
+    model: glam::Mat4,
+}
+
+impl render::MeshData for Mesh2dData {
+    fn world(&self) -> glam::Mat4 {
+        self.model
+    }
+}
+
+#[derive(Default, Component, Clone, Copy)]
+pub struct Camera2d;
+
+#[derive(ShaderType, Clone, Copy)]
+pub struct Camera2dView {
+    pub world: glam::Mat4,
+    pub view: glam::Mat4,
+    pub projection: glam::Mat4,
+}
+
+impl render::View for Camera2dView {
+    type Query = (Entity, Read<Camera2d>);
+
+    fn world(&self) -> glam::Mat4 {
+        self.world
+    }
+
+    fn view(&self) -> glam::Mat4 {
+        self.view
+    }
+
+    fn projection(&self) -> glam::Mat4 {
+        self.projection
+    }
+
+    fn extract<'a>(
+        query: <Self::Query as ecs::prelude::query::BaseQuery>::Item<'a>,
+    ) -> render::ExtractedView<Self> {
+        let (entity, _) = query;
+        render::ExtractedView {
+            entity,
+            view: Camera2dView {
+                world: glam::Mat4::IDENTITY,
+                view: glam::Mat4::IDENTITY,
+                projection: glam::Mat4::IDENTITY,
+            },
+            depth: 0,
+            viewport: None,
+            clear_color: None,
+        }
+    }
+}
+
+pub struct UnlitColorPass;
+impl DrawPass for UnlitColorPass {
+    type View = Camera2dView;
+
+    const NAME: render::renderer::Name = "UnlitColor";
+
+    fn setup(builder: &mut render::renderer::PassBuilder) -> RenderPass {
+        let surface = builder.write(builder.surface_id());
+        let depth = builder.write(builder.resource_id(MainDrawPass::DEPTH_TEXTURE));
+
+        RenderPass::new()
+            .with_color(surface, None, StoreOp::Store, Some(Color::green()))
+            .with_depth(
+                depth,
+                Operations {
+                    load: render::LoadOp::Clear(1.0),
+                    store: StoreOp::Store,
+                },
+                None,
+            )
+    }
+}
+
+#[derive(Component, Clone, Copy)]
+pub struct Mesh2dRenderer {
+    pub mesh: AssetRef<render::Mesh>,
+    pub material: AssetRef<UnlitColor>,
+}
+
+impl Mesh2dRenderer {
+    pub fn new(
+        mesh: impl Into<AssetRef<render::Mesh>>,
+        material: impl Into<AssetRef<UnlitColor>>,
+    ) -> Self {
+        Self {
+            mesh: mesh.into(),
+            material: material.into(),
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct DrawMesh2d {
+    enitity: Entity,
+    material: AssetRef<UnlitColor>,
+    mesh: AssetRef<render::Mesh>,
+    data: Mesh2dData,
+}
+
+impl Draw for DrawMesh2d {
+    type View = Camera2dView;
+
+    type Mesh = Mesh2dData;
+
+    type Material = UnlitColor;
+
+    type Pass = UnlitColorPass;
+
+    type Query = (Entity, Read<Mesh2dRenderer>);
+
+    fn entity(&self) -> Entity {
+        self.enitity
+    }
+
+    fn data(&self) -> Self::Mesh {
+        self.data
+    }
+
+    fn material(&self) -> AssetRef<Self::Material> {
+        self.material
+    }
+
+    fn mesh(&self) -> AssetRef<render::Mesh> {
+        self.mesh
+    }
+
+    fn shader() -> impl Into<ShaderPath> {
+        ShaderPath::from(VERTEX_SHADER_ID)
+    }
+
+    fn vertex_layout() -> &'static [render::wgpu::VertexFormat] {
+        &[render::wgpu::VertexFormat::Float32x2]
+    }
+
+    fn instance_layout() -> &'static [render::wgpu::VertexFormat] {
+        &[
+            render::wgpu::VertexFormat::Float32x4,
+            render::wgpu::VertexFormat::Float32x4,
+            render::wgpu::VertexFormat::Float32x4,
+            render::wgpu::VertexFormat::Float32x4,
+        ]
+    }
+
+    fn extract<'a>(query: <Self::Query as ecs::prelude::query::BaseQuery>::Item<'a>) -> Self {
+        let (entity, renderer) = query;
+        Self {
+            enitity: entity,
+            material: renderer.material,
+            mesh: renderer.mesh,
+            data: Mesh2dData {
+                model: glam::Mat4::IDENTITY,
+            },
+        }
+    }
 }
 
 // fn main() {

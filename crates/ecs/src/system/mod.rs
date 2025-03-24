@@ -1,35 +1,134 @@
 use crate::{
-    core::{
-        component::ComponentId,
-        entity::Entities,
-        resource::{NonSend, NonSendMut, Res, ResMut, Resource, ResourceId},
-        Type,
-    },
+    task::ScopedTaskPool,
     world::{cell::WorldCell, World},
+    Entities, NonSend, NonSendMut, Res, ResMut, Resource,
 };
-use std::{hash::Hash, sync::Arc};
+use hashbrown::HashMap;
+use std::{
+    any::TypeId,
+    num::NonZero,
+    sync::{
+        atomic::{AtomicU32, Ordering},
+        Arc,
+    },
+};
 
 pub mod observer;
 pub mod schedule;
-pub mod systems;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+static SYSTEM_ID: AtomicU32 = AtomicU32::new(0);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SystemId(u32);
+impl std::ops::Deref for SystemId {
+    type Target = u32;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 impl SystemId {
-    pub fn new() -> Self {
-        let mut hasher = crc32fast::Hasher::new();
-        uuid::Uuid::new_v4().hash(&mut hasher);
-        Self(hasher.finalize())
+    pub(crate) fn new() -> Self {
+        let id = SYSTEM_ID.fetch_add(1, Ordering::Relaxed);
+        Self(id)
+    }
+
+    pub fn id(&self) -> u32 {
+        self.0
     }
 }
 
 pub type SystemFunc = Arc<dyn Fn(WorldCell) + Send + Sync>;
 
-#[derive(Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Access {
+    Read,
+    Write,
+    Exclusive,
+}
+
+pub struct SystemAccess {
+    pub ty: TypeId,
+    pub access: Access,
+}
+
+impl SystemAccess {
+    pub fn new<T: 'static>(access: Access) -> Self {
+        Self {
+            ty: TypeId::of::<T>(),
+            access,
+        }
+    }
+
+    pub fn world() -> Self {
+        Self {
+            ty: TypeId::of::<World>(),
+            access: Access::Exclusive,
+        }
+    }
+}
+
+pub struct SystemConfig {
+    id: SystemId,
+    name: Option<&'static str>,
+    access: Vec<SystemAccess>,
+    after: Vec<SystemId>,
+    send: bool,
+    exclusive: bool,
+    system: SystemFunc,
+}
+
+impl SystemConfig {
+    pub fn new(
+        name: Option<&'static str>,
+        system: SystemFunc,
+        access: Vec<SystemAccess>,
+        send: bool,
+    ) -> Self {
+        let exclusive = access
+            .iter()
+            .any(|access| access.access == Access::Exclusive);
+
+        Self {
+            id: SystemId::new(),
+            name,
+            system,
+            access,
+            after: Vec::new(),
+            send,
+            exclusive,
+        }
+    }
+
+    pub fn id(&self) -> SystemId {
+        self.id
+    }
+
+    pub fn name(&self) -> Option<&'static str> {
+        self.name
+    }
+
+    pub fn access(&self) -> &[SystemAccess] {
+        &self.access
+    }
+
+    pub fn after(&self) -> &[SystemId] {
+        &self.after
+    }
+
+    pub fn send(&self) -> bool {
+        self.send
+    }
+
+    pub fn exclusive(&self) -> bool {
+        self.exclusive
+    }
+}
+
 pub struct System {
     id: SystemId,
     name: Option<&'static str>,
-    run: SystemFunc,
+    system: SystemFunc,
 }
 
 impl System {
@@ -37,7 +136,7 @@ impl System {
         Self {
             id: config.id,
             name: config.name,
-            run: config.run,
+            system: config.system,
         }
     }
 
@@ -50,66 +149,7 @@ impl System {
     }
 
     pub fn run(&self, world: WorldCell) {
-        (self.run)(world)
-    }
-}
-
-pub struct SystemConfig {
-    id: SystemId,
-    name: Option<&'static str>,
-    run: SystemFunc,
-    access: fn() -> Vec<WorldAccess>,
-    custom: Vec<WorldAccess>,
-    after: Option<SystemId>,
-    is_send: bool,
-}
-
-impl SystemConfig {
-    pub fn new(
-        name: Option<&'static str>,
-        run: SystemFunc,
-        access: fn() -> Vec<WorldAccess>,
-        is_send: bool,
-    ) -> Self {
-        Self {
-            id: SystemId::new(),
-            name,
-            run,
-            access,
-            custom: Vec::new(),
-            after: None,
-            is_send,
-        }
-    }
-
-    pub fn id(&self) -> SystemId {
-        self.id
-    }
-
-    pub fn name(&self) -> Option<&'static str> {
-        self.name
-    }
-
-    pub fn access(&self) -> Vec<WorldAccess> {
-        (self.access)()
-    }
-
-    pub fn add_custom(&mut self, access: WorldAccess) {
-        self.custom.push(access);
-    }
-
-    pub fn after(&self) -> Option<SystemId> {
-        self.after
-    }
-
-    pub fn is_send(&self) -> bool {
-        self.is_send
-    }
-}
-
-impl From<SystemConfig> for System {
-    fn from(config: SystemConfig) -> Self {
-        System::new(config)
+        (self.system)(world);
     }
 }
 
@@ -124,31 +164,61 @@ impl IntoSystemConfigs<()> for SystemConfig {
         vec![self]
     }
 
-    fn before<Marker>(self, system: impl IntoSystemConfigs<Marker>) -> Vec<SystemConfig> {
-        system.after(self)
+    fn before<Marker>(mut self, system: impl IntoSystemConfigs<Marker>) -> Vec<SystemConfig> {
+        let mut configs = system.configs();
+        self.after.extend(configs.iter().map(|s| s.id));
+
+        configs.push(self);
+        configs
     }
 
     fn after<Marker>(self, system: impl IntoSystemConfigs<Marker>) -> Vec<SystemConfig> {
         let mut configs = system.configs();
-        let id = configs.first().unwrap().id();
+        configs.iter_mut().for_each(|s| s.after.push(self.id));
 
-        let mut config = self;
-        config.after = Some(id);
-
-        match configs.iter().position(|config| config.id() == id) {
-            Some(index) => configs.insert(index + 1, config),
-            None => configs.push(config),
-        }
-
+        configs.push(self);
         configs
     }
 }
 
 impl<M, I: IntoSystemConfigs<M>> IntoSystemConfigs<M> for Vec<I> {
     fn configs(self) -> Vec<SystemConfig> {
-        self.into_iter()
-            .flat_map(|config| config.configs())
-            .collect()
+        self.into_iter().flat_map(|i| i.configs()).collect()
+    }
+
+    fn before<Marker>(mut self, configs: impl IntoSystemConfigs<Marker>) -> Vec<SystemConfig> {
+        let mut configs = configs.configs();
+        for before in self.drain(..).map(|s| s.configs()) {
+            for mut config in before {
+                config.after.extend(configs.iter().map(|s| s.id));
+                configs.push(config);
+            }
+        }
+
+        configs
+    }
+
+    fn after<Marker>(mut self, configs: impl IntoSystemConfigs<Marker>) -> Vec<SystemConfig> {
+        let mut configs = configs.configs();
+        for after in self.drain(..).map(|s| s.configs()) {
+            for config in after {
+                configs.iter_mut().for_each(|s| s.after.push(config.id));
+                configs.push(config);
+            }
+        }
+
+        configs
+    }
+}
+
+impl<F: Fn() + Send + Sync + 'static> IntoSystemConfigs<F> for F {
+    fn configs(self) -> Vec<SystemConfig> {
+        let name = std::any::type_name::<F>();
+        let run = move |_: WorldCell| {
+            self();
+        };
+
+        vec![SystemConfig::new(Some(name), Arc::new(run), vec![], true)]
     }
 
     fn before<Marker>(self, system: impl IntoSystemConfigs<Marker>) -> Vec<SystemConfig> {
@@ -157,141 +227,158 @@ impl<M, I: IntoSystemConfigs<M>> IntoSystemConfigs<M> for Vec<I> {
 
     fn after<Marker>(self, system: impl IntoSystemConfigs<Marker>) -> Vec<SystemConfig> {
         let mut configs = system.configs();
-        let id = configs.last().unwrap().id();
+        let config = self.configs().pop().unwrap();
 
-        for config in self.into_iter().flat_map(|config| config.configs()) {
-            let mut config = config;
-            config.after = Some(id);
-            configs.push(config);
-        }
+        configs.iter_mut().for_each(|s| s.after.push(config.id));
+        configs.push(config);
 
         configs
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum AccessType {
-    Read,
-    Write,
+pub enum SystemCluster {
+    Parallel(Vec<usize>),
+    Sequential(Vec<usize>),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum WorldAccess {
-    Resource {
-        ty: ResourceId,
-        access: AccessType,
-        send: bool,
-    },
-    Component {
-        ty: ComponentId,
-        access: AccessType,
-    },
-    Other {
-        ty: Type,
-        access: AccessType,
-    },
-    World,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunMode {
+    Sequential,
+    Parallel,
 }
 
-pub struct WorldAccessMeta {
-    pub ty: Type,
-    pub access: AccessType,
-    pub send: bool,
+pub struct SystemGraph {
+    clusters: Vec<SystemCluster>,
+    systems: Vec<System>,
 }
 
-impl From<&WorldAccess> for WorldAccessMeta {
-    fn from(value: &WorldAccess) -> Self {
-        match value {
-            WorldAccess::Resource { ty, access, send } => Self {
-                ty: ty.into(),
-                access: *access,
-                send: *send,
-            },
-            WorldAccess::Component { ty, access } => Self {
-                ty: ty.into(),
-                access: *access,
-                send: true,
-            },
-            WorldAccess::Other { ty, access } => Self {
-                ty: *ty,
-                access: *access,
-                send: true,
-            },
-            WorldAccess::World => Self {
-                ty: Type::of::<World>(),
-                access: AccessType::Read,
-                send: false,
-            },
+impl SystemGraph {
+    pub fn new(mut configs: Vec<SystemConfig>) -> Self {
+        let mut dependencies = HashMap::new();
+        for (index, config) in configs.iter().enumerate() {
+            for after in &config.after {
+                dependencies
+                    .entry(*after)
+                    .or_insert_with(Vec::new)
+                    .push(config.id);
+            }
+
+            dependencies.entry(config.id).or_insert_with(Vec::new);
+            for other in configs.iter().skip(index + 1) {
+                if config.access.iter().any(|access| {
+                    other.access.iter().any(|other| {
+                        access.ty == other.ty
+                            && (access.access == Access::Write || other.access == Access::Write)
+                    })
+                }) {
+                    dependencies.entry(other.id).or_default().push(config.id);
+                }
+            }
+        }
+
+        let mut clusters = Vec::new();
+
+        while !dependencies.is_empty() {
+            let group = dependencies
+                .iter()
+                .filter_map(|(id, deps)| {
+                    deps.iter()
+                        .all(|dep| !dependencies.contains_key(dep))
+                        .then_some(*id)
+                })
+                .collect::<Vec<_>>();
+
+            if group.is_empty() {
+                panic!("Cyclic dependency detected");
+            }
+
+            let current: Vec<SystemCluster> = vec![];
+            let cluster = group
+                .iter()
+                .fold(current, |mut current, id| match current.last_mut() {
+                    Some(cluster) => {
+                        let index = configs.iter().position(|config| config.id == *id).unwrap();
+                        let config = &configs[index];
+                        let sequintial = config.exclusive || !config.send;
+
+                        match (sequintial, cluster) {
+                            (true, SystemCluster::Sequential(items)) => items.push(index),
+                            (false, SystemCluster::Parallel(items)) => items.push(index),
+                            (true, _) => {
+                                let cluster = SystemCluster::Sequential(vec![index]);
+                                current.push(cluster);
+                            }
+                            (false, _) => {
+                                let cluster = SystemCluster::Parallel(vec![index]);
+                                current.push(cluster);
+                            }
+                        }
+
+                        dependencies.remove(id);
+
+                        current
+                    }
+                    None => {
+                        let index = configs.iter().position(|config| config.id == *id).unwrap();
+                        let config = &configs[index];
+                        if config.exclusive || !config.send {
+                            current.push(SystemCluster::Sequential(vec![index]));
+                        } else {
+                            current.push(SystemCluster::Parallel(vec![index]));
+                        }
+
+                        dependencies.remove(id);
+
+                        current
+                    }
+                });
+
+            clusters.extend(cluster);
+        }
+
+        Self {
+            clusters,
+            systems: configs.drain(..).map(|c| System::new(c)).collect(),
         }
     }
-}
 
-impl WorldAccess {
-    pub fn resource<R: crate::core::resource::Resource + Send>(access: AccessType) -> Self {
-        Self::Resource {
-            ty: ResourceId::of::<R>(),
-            access,
-            send: true,
+    pub fn run(&self, world: &World, mode: RunMode) {
+        let world = unsafe { world.cell() };
+        match mode {
+            RunMode::Sequential => {
+                for system in &self.systems {
+                    system.run(world);
+                }
+            }
+            RunMode::Parallel => {
+                for cluster in &self.clusters {
+                    match cluster {
+                        SystemCluster::Parallel(items) => {
+                            let pool_size = items.len().min(Self::max_threads());
+                            if pool_size > 0 {
+                                let mut pool = ScopedTaskPool::new(pool_size);
+                                for index in items.iter() {
+                                    pool.spawn(move || self.systems[*index].run(world));
+                                }
+
+                                pool.run();
+                            }
+                        }
+                        SystemCluster::Sequential(items) => {
+                            for index in items {
+                                self.systems[*index].run(world);
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
-    pub fn non_send_resource<R: crate::core::resource::Resource>(access: AccessType) -> Self {
-        Self::Resource {
-            ty: ResourceId::of::<R>(),
-            access,
-            send: false,
-        }
-    }
-
-    pub fn component<C: crate::core::component::Component>(access: AccessType) -> Self {
-        Self::Component {
-            ty: ComponentId::of::<C>(),
-            access,
-        }
-    }
-
-    pub fn world() -> Self {
-        Self::World
-    }
-
-    pub fn types_equal(&self, other: &WorldAccess) -> bool {
-        match (self, other) {
-            (WorldAccess::Resource { ty: a, .. }, WorldAccess::Resource { ty: b, .. }) => a == b,
-            (WorldAccess::Component { ty: a, .. }, WorldAccess::Component { ty: b, .. }) => a == b,
-            (WorldAccess::World, WorldAccess::World) => true,
-            _ => false,
-        }
-    }
-
-    pub fn ty(&self) -> Type {
-        match self {
-            WorldAccess::Resource { ty, .. } => ty.into(),
-            WorldAccess::Component { ty, .. } => ty.into(),
-            WorldAccess::Other { ty, .. } => *ty,
-            WorldAccess::World => Type::of::<World>(),
-        }
-    }
-
-    pub fn access(&self) -> AccessType {
-        match self {
-            WorldAccess::Resource { access, .. } => *access,
-            WorldAccess::Component { access, .. } => *access,
-            WorldAccess::Other { access, .. } => *access,
-            WorldAccess::World => AccessType::Read,
-        }
-    }
-
-    pub fn access_ty(&self) -> (Type, AccessType, bool) {
-        match self {
-            WorldAccess::Resource { ty, access, send } => (ty.into(), *access, *send),
-            WorldAccess::Component { ty, access } => (ty.into(), *access, false),
-            WorldAccess::Other { ty, access } => (*ty, *access, false),
-            WorldAccess::World => (Type::of::<World>(), AccessType::Read, true),
-        }
-    }
-
-    pub fn meta(&self) -> WorldAccessMeta {
-        self.into()
+    fn max_threads() -> usize {
+        std::thread::available_parallelism()
+            .unwrap_or(NonZero::<usize>::new(1).unwrap())
+            .into()
     }
 }
 
@@ -300,11 +387,11 @@ pub trait SystemArg {
 
     fn init(_world: &WorldCell) {}
     fn get<'a>(world: WorldCell<'a>) -> Self::Item<'a>;
-    fn access() -> Vec<WorldAccess> {
+    fn access() -> Vec<SystemAccess> {
         Vec::new()
     }
 
-    fn is_send() -> bool {
+    fn send() -> bool {
         true
     }
 
@@ -328,7 +415,7 @@ impl SystemArg for &World {
         world.get()
     }
 
-    fn is_send() -> bool {
+    fn send() -> bool {
         false
     }
 }
@@ -375,43 +462,6 @@ impl<R: Resource> SystemArg for Option<NonSendMut<'_, R>> {
 
 pub type ArgItem<'a, A> = <A as SystemArg>::Item<'a>;
 
-impl<F: Fn() + Send + Sync + 'static> IntoSystemConfigs<F> for F {
-    fn configs(self) -> Vec<SystemConfig> {
-        let name = std::any::type_name::<F>();
-        let run = move |_: WorldCell| {
-            self();
-        };
-        let access = || Vec::new();
-        let is_send = true;
-
-        vec![SystemConfig::new(
-            Some(name),
-            Arc::new(run),
-            access,
-            is_send,
-        )]
-    }
-
-    fn before<Marker>(self, system: impl IntoSystemConfigs<Marker>) -> Vec<SystemConfig> {
-        system.after(self)
-    }
-
-    fn after<Marker>(self, system: impl IntoSystemConfigs<Marker>) -> Vec<SystemConfig> {
-        let mut configs = system.configs();
-        let id = configs.first().unwrap().id();
-
-        let mut config = self.configs().pop().unwrap();
-        config.after = Some(id);
-
-        match configs.iter().position(|config| config.id() == id) {
-            Some(index) => configs.insert(index + 1, config),
-            None => configs.push(config),
-        }
-
-        configs
-    }
-}
-
 macro_rules! impl_into_system_configs {
     ($($arg:ident),*) => {
     #[allow(non_snake_case)]
@@ -425,32 +475,24 @@ macro_rules! impl_into_system_configs {
                     let ($($arg,)*) = ($($arg::get(world),)*);
                     self($($arg),*);
                 };
-                let access = || {
-                    let mut metas = Vec::new();
-                    $(metas.extend($arg::access());)*
-                    metas
-                };
+                let mut access = Vec::new();
+                $(access.extend($arg::access());)*
 
-                let is_send = ($($arg::is_send() &&)* true);
+                let send = ($($arg::send() &&)* true);
 
-                vec![SystemConfig::new(Some(name), Arc::new(run), access, is_send)]
+                vec![SystemConfig::new(Some(name), Arc::new(run), access, send)]
             }
 
-            fn before<Marker>(self, system: impl IntoSystemConfigs<Marker>) -> Vec<SystemConfig> {
-                system.after(self)
+            fn before<Marker>(self, configs: impl IntoSystemConfigs<Marker>) -> Vec<SystemConfig> {
+                configs.after(self)
             }
 
-            fn after<Marker>(self, system: impl IntoSystemConfigs<Marker>) -> Vec<SystemConfig> {
-                let mut configs = system.configs();
-                let id = configs.first().unwrap().id();
+            fn after<Marker>(self, configs: impl IntoSystemConfigs<Marker>) -> Vec<SystemConfig> {
+                let mut configs = configs.configs();
+                let config = self.configs().pop().unwrap();
 
-                let mut config = self.configs().pop().unwrap();
-                config.after = Some(id);
-
-                match configs.iter().position(|config| config.id() == id) {
-                    Some(index) => configs.insert(index + 1, config),
-                    None => configs.push(config),
-                }
+                configs.iter_mut().for_each(|s| s.after.push(config.id));
+                configs.push(config);
 
                 configs
             }
@@ -463,14 +505,14 @@ macro_rules! impl_into_system_configs {
                 ($($arg::get(world),)*)
             }
 
-            fn access() -> Vec<WorldAccess> {
+            fn access() -> Vec<SystemAccess> {
                 let mut metas = Vec::new();
                 $(metas.extend($arg::access());)*
                 metas
             }
 
-            fn is_send() -> bool {
-                ($($arg::is_send() &&)* true)
+            fn send() -> bool {
+                ($($arg::send() &&)* true)
             }
         }
     };
@@ -524,7 +566,7 @@ impl<S: SystemArg + 'static> SystemArg for StaticArg<'_, S> {
         StaticArg(S::get(world))
     }
 
-    fn access() -> Vec<WorldAccess> {
+    fn access() -> Vec<SystemAccess> {
         S::access()
     }
 }

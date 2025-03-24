@@ -1,12 +1,15 @@
 use crate::{
     core::{
         bitset::Bitset,
-        resource::{NonSend, NonSendMut, Res, ResMut, Resource, ResourceId},
+        resource::{NonSend, NonSendMut, Res, ResMut, Resource},
         Type,
     },
     system::SystemArg,
 };
-use std::sync::{Arc, Mutex};
+use std::{
+    any::TypeId,
+    sync::{Arc, Mutex},
+};
 
 use super::cell::WorldCell;
 
@@ -85,11 +88,10 @@ impl<R: Resource + Send> SystemArg for Res<'_, R> {
         }
     }
 
-    fn access() -> Vec<crate::system::WorldAccess> {
-        vec![crate::system::WorldAccess::Resource {
-            ty: ResourceId::of::<R>(),
-            access: crate::system::AccessType::Read,
-            send: true,
+    fn access() -> Vec<crate::system::SystemAccess> {
+        vec![crate::system::SystemAccess {
+            ty: TypeId::of::<R>(),
+            access: crate::system::Access::Read,
         }]
     }
 
@@ -97,7 +99,7 @@ impl<R: Resource + Send> SystemArg for Res<'_, R> {
         world.has_resource::<R>()
     }
 
-    fn is_send() -> bool {
+    fn send() -> bool {
         true
     }
 }
@@ -130,11 +132,10 @@ impl<R: Resource + Send> SystemArg for ResMut<'_, R> {
         }
     }
 
-    fn access() -> Vec<crate::system::WorldAccess> {
-        vec![crate::system::WorldAccess::Resource {
-            ty: ResourceId::of::<R>(),
-            access: crate::system::AccessType::Write,
-            send: true,
+    fn access() -> Vec<crate::system::SystemAccess> {
+        vec![crate::system::SystemAccess {
+            ty: TypeId::of::<R>(),
+            access: crate::system::Access::Write,
         }]
     }
 
@@ -142,7 +143,7 @@ impl<R: Resource + Send> SystemArg for ResMut<'_, R> {
         world.has_resource::<R>()
     }
 
-    fn is_send() -> bool {
+    fn send() -> bool {
         true
     }
 }
@@ -183,11 +184,10 @@ impl<R: Resource> SystemArg for NonSend<'_, R> {
         }
     }
 
-    fn access() -> Vec<crate::system::WorldAccess> {
-        vec![crate::system::WorldAccess::Resource {
-            ty: ResourceId::of::<R>(),
-            access: crate::system::AccessType::Read,
-            send: false,
+    fn access() -> Vec<crate::system::SystemAccess> {
+        vec![crate::system::SystemAccess {
+            ty: TypeId::of::<R>(),
+            access: crate::system::Access::Read,
         }]
     }
 
@@ -195,7 +195,7 @@ impl<R: Resource> SystemArg for NonSend<'_, R> {
         world.has_non_send_resource::<R>()
     }
 
-    fn is_send() -> bool {
+    fn send() -> bool {
         false
     }
 }
@@ -228,11 +228,10 @@ impl<R: Resource> SystemArg for NonSendMut<'_, R> {
         }
     }
 
-    fn access() -> Vec<crate::system::WorldAccess> {
-        vec![crate::system::WorldAccess::Resource {
-            ty: ResourceId::of::<R>(),
-            access: crate::system::AccessType::Write,
-            send: false,
+    fn access() -> Vec<crate::system::SystemAccess> {
+        vec![crate::system::SystemAccess {
+            ty: TypeId::of::<R>(),
+            access: crate::system::Access::Write,
         }]
     }
 
@@ -240,7 +239,7 @@ impl<R: Resource> SystemArg for NonSendMut<'_, R> {
         world.has_non_send_resource::<R>()
     }
 
-    fn is_send() -> bool {
+    fn send() -> bool {
         false
     }
 }
@@ -263,15 +262,14 @@ impl<R: Resource + Send> SystemArg for Removed<R> {
         Self { resource }
     }
 
-    fn access() -> Vec<crate::system::WorldAccess> {
-        vec![crate::system::WorldAccess::Resource {
-            ty: ResourceId::of::<R>(),
-            access: crate::system::AccessType::Write,
-            send: true,
+    fn access() -> Vec<crate::system::SystemAccess> {
+        vec![crate::system::SystemAccess {
+            ty: TypeId::of::<R>(),
+            access: crate::system::Access::Write,
         }]
     }
 
-    fn is_send() -> bool {
+    fn send() -> bool {
         true
     }
 

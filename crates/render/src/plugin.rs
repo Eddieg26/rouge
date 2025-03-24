@@ -19,7 +19,7 @@ use asset::{
     database::{AssetDatabase, events::AssetEvent},
     plugin::{AssetExt, AssetPlugin},
 };
-use ecs::{Res, ResMut, event::Events};
+use ecs::{Res, ResMut, event::Events, system::IntoSystemConfigs};
 use game::{Extract, GameBuilder, Plugin, Update};
 use window::{
     events::{WindowCreated, WindowResized},

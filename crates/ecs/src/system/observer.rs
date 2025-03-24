@@ -1,4 +1,4 @@
-use super::{schedule::SystemGraph, systems::RunMode, IntoSystemConfigs, SystemConfig};
+use super::{IntoSystemConfigs, SystemConfig, SystemGraph};
 use crate::{
     event::{Event, EventId, Events},
     world::{cell::WorldCell, World},
@@ -29,17 +29,13 @@ impl<E: Event> IntoSystemConfigs<()> for Observer<E> {
         system.after(self)
     }
 
-    fn after<Marker>(mut self, system: impl IntoSystemConfigs<Marker>) -> Vec<SystemConfig> {
+    fn after<Marker>(self, system: impl IntoSystemConfigs<Marker>) -> Vec<SystemConfig> {
         let mut configs = system.configs();
-        let id = configs.first().unwrap().id();
+        configs.iter_mut().for_each(|config| {
+            config.after.push(self.config.id());
+        });
 
-        self.config.after = Some(id);
-
-        match configs.iter().position(|config| config.id() == id) {
-            Some(index) => configs.insert(index + 1, self.config),
-            None => configs.push(self.config),
-        }
-
+        configs.push(self.config);
         configs
     }
 }
@@ -89,10 +85,10 @@ impl ObserverConfigs {
         self.configs.is_empty()
     }
 
-    pub fn into_observers(&mut self, mode: RunMode) -> IndexMap<EventId, SystemGraph> {
+    pub fn into_observers(&mut self) -> IndexMap<EventId, SystemGraph> {
         self.configs
             .drain()
-            .map(|(ty, configs)| (ty, SystemGraph::new(mode, configs)))
+            .map(|(ty, configs)| (ty, SystemGraph::new(configs)))
             .collect()
     }
 }
@@ -113,10 +109,9 @@ impl Observers {
     }
 
     pub fn run(&self, world: WorldCell, invoked: impl IntoIterator<Item = EventId>) {
-        let meta = world.get().configs().meta();
         for ty in invoked {
             if let Some(observers) = self.observers.get(&ty) {
-                meta.runner().run(&world, &[observers]);
+                observers.run(world.get(), world.get().mode());
                 self.extensions.get(&ty).unwrap().clear(world.get_mut());
             }
         }
@@ -126,9 +121,9 @@ impl Observers {
         self.configs.add::<E, M>(observers);
     }
 
-    pub fn build(&mut self, mode: RunMode) {
+    pub fn build(&mut self) {
         if !self.configs.is_empty() {
-            self.observers.extend(self.configs.into_observers(mode));
+            self.observers.extend(self.configs.into_observers());
             let ext = std::mem::take(&mut self.configs.extensions);
             self.extensions.extend(ext);
         }

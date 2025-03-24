@@ -1,12 +1,6 @@
-use super::{
-    systems::{RunMode, SystemRunner},
-    IntoSystemConfigs, System, SystemConfig,
-};
-use crate::{
-    core::Type,
-    system::{AccessType, WorldAccess, WorldAccessMeta},
-    world::cell::WorldCell,
-};
+use super::{IntoSystemConfigs, RunMode, SystemConfig, SystemGraph};
+use crate::{core::Type, world::cell::WorldCell};
+use hashbrown::HashMap;
 use indexmap::IndexMap;
 
 pub trait Phase: Sized + 'static {
@@ -38,225 +32,29 @@ impl Into<Type> for PhaseId {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct SystemGroup {
-    indexes: Vec<usize>,
-    send: usize,
-}
-
-impl SystemGroup {
-    pub fn new(indexes: Vec<usize>, send: usize) -> Self {
-        Self { indexes, send }
-    }
-
-    pub fn indexes(&self) -> &[usize] {
-        &self.indexes
-    }
-
-    pub fn send(&self) -> usize {
-        self.send
-    }
-}
-
-pub struct SystemGraph {
-    systems: Vec<System>,
-    groups: Vec<SystemGroup>,
-}
-
-impl SystemGraph {
-    pub fn new(mode: RunMode, mut configs: Vec<SystemConfig>) -> Self {
-        let (groups, systems) = match mode {
-            RunMode::Sequential => {
-                let systems = configs.drain(..).map(System::new).collect::<Vec<_>>();
-                let indexes = (0..systems.len()).collect::<Vec<_>>();
-                let group = SystemGroup::new(indexes, systems.len());
-                (vec![group], systems)
-            }
-            RunMode::Parallel => {
-                #[derive(Default)]
-                struct GroupInfo {
-                    send: Vec<usize>,
-                    non_send: Vec<usize>,
-                    access: IndexMap<Type, (bool, bool)>,
-                }
-
-                impl GroupInfo {
-                    fn new_send(index: usize, access: Vec<WorldAccess>) -> Self {
-                        let mut group = Self::default();
-                        group.with_access(access);
-                        group.send.push(index);
-                        group
-                    }
-
-                    fn new_non_send(index: usize, access: Vec<WorldAccess>) -> Self {
-                        let mut group = Self::default();
-                        group.with_access(access);
-                        group.non_send.push(index);
-                        group
-                    }
-
-                    fn with_access(&mut self, access: Vec<WorldAccess>) {
-                        for access in access {
-                            let (ty, access, _) = access.access_ty();
-                            let (read, write) = self.access.entry(ty).or_default();
-                            *read |= access == AccessType::Read;
-                            *write |= access == AccessType::Write;
-                        }
-                    }
-                }
-
-                let mut groups = Vec::<GroupInfo>::new();
-                let mut systems = Vec::with_capacity(configs.len());
-
-                for (index, config) in configs.drain(..).enumerate() {
-                    let mut last_group_index: Option<usize> = None;
-                    let access = config.access();
-                    for (group_index, group) in groups.iter().enumerate().rev() {
-                        let mut has_dependency = false;
-                        for world_access in &access {
-                            let WorldAccessMeta { ty, access, .. } = world_access.meta();
-                            if group
-                                .access
-                                .get(&ty)
-                                .is_some_and(|(_, write)| *write || access == AccessType::Write)
-                            {
-                                has_dependency = true;
-                                break;
-                            }
-                        }
-
-                        if !has_dependency {
-                            last_group_index = Some(group_index);
-                        }
-                    }
-
-                    match last_group_index {
-                        Some(group) => {
-                            match config.is_send {
-                                true => groups[group].send.push(index),
-                                false => groups[group].non_send.push(index),
-                            }
-                            groups[group].with_access(access);
-                        }
-                        None => {
-                            let group = match config.is_send {
-                                true => GroupInfo::new_send(index, access),
-                                false => GroupInfo::new_non_send(index, access)
-                            };
-
-                            groups.push(group);
-                        }
-                    }
-
-                    systems.push(System::new(config));
-                }
-
-                let groups = groups
-                    .into_iter()
-                    .map(|group| {
-                        let mut indexes = group.send;
-                        let send = indexes.len();
-                        indexes.extend(group.non_send);
-                        SystemGroup::new(indexes, send)
-                    })
-                    .collect();
-
-                (groups, systems)
-            }
-        };
-
-        Self { systems, groups }
-    }
-
-    pub fn systems(&self) -> &[System] {
-        &self.systems
-    }
-
-    pub fn groups(&self) -> &[SystemGroup] {
-        &self.groups
-    }
-}
-
-pub struct PhaseSystemGraphs {
-    graphs: IndexMap<PhaseId, SystemGraph>,
-}
-
-impl PhaseSystemGraphs {
-    pub fn new() -> Self {
-        Self {
-            graphs: IndexMap::new(),
-        }
-    }
-
-    pub fn add_graph(&mut self, phase: PhaseId, graph: SystemGraph) {
-        self.graphs.insert(phase, graph);
-    }
-
-    pub fn get(&self, id: PhaseId) -> Option<&SystemGraph> {
-        self.graphs.get(&id)
-    }
-}
-
-#[derive(Default)]
-pub struct PhaseSystemConfigs {
-    configs: IndexMap<PhaseId, Vec<SystemConfig>>,
-}
-
-impl PhaseSystemConfigs {
-    pub fn new() -> Self {
-        Self {
-            configs: IndexMap::new(),
-        }
-    }
-
-    pub fn get(&self, id: &PhaseId) -> Option<&[SystemConfig]> {
-        self.configs.get(id).map(AsRef::as_ref)
-    }
-
-    pub fn len(&self) -> usize {
-        self.configs.len()
-    }
-
-    pub fn add_systems<M>(&mut self, phase: impl Phase, configs: impl IntoSystemConfigs<M>) {
-        self.configs
-            .entry(phase.id())
-            .or_default()
-            .extend(configs.configs());
-    }
-
-    pub fn into_graphs(mut self, mode: RunMode) -> PhaseSystemGraphs {
-        let graphs = self
-            .configs
-            .drain(..)
-            .map(|(id, configs)| (id, SystemGraph::new(mode, configs)));
-
-        PhaseSystemGraphs {
-            graphs: graphs.collect(),
-        }
-    }
+pub trait SystemRunner: Send + Sync + 'static {
+    fn run(&self, world: &WorldCell, systems: &[&SystemGraph]);
 }
 
 pub struct RunContext<'a> {
     world: &'a WorldCell<'a>,
     systems: &'a [&'a SystemGraph],
-    runner: &'a dyn SystemRunner,
+    mode: RunMode,
 }
 
 impl<'a> RunContext<'a> {
-    pub fn new(
-        world: &'a WorldCell,
-        systems: &'a [&'a SystemGraph],
-        runner: &'a dyn SystemRunner,
-    ) -> Self {
+    pub fn new(world: &'a WorldCell, systems: &'a [&'a SystemGraph], mode: RunMode) -> Self {
         Self {
             world,
             systems,
-            runner,
+            mode,
         }
     }
 
     pub fn run(&self) {
-        self.runner.run(self.world, self.systems);
+        for system in self.systems {
+            system.run(self.world.get(), self.mode);
+        }
     }
 }
 
@@ -267,44 +65,6 @@ pub trait PhaseRunner: Send + 'static {
 impl PhaseRunner for () {
     fn run(&mut self, ctx: RunContext) {
         ctx.run();
-    }
-}
-
-pub struct PhaseRunners {
-    default: Box<dyn PhaseRunner>,
-    runners: IndexMap<PhaseId, Box<dyn PhaseRunner>>,
-}
-
-impl PhaseRunners {
-    pub fn new() -> Self {
-        Self {
-            default: Box::new(()),
-            runners: IndexMap::new(),
-        }
-    }
-
-    pub fn add_runner(&mut self, id: PhaseId, runner: impl PhaseRunner) {
-        self.runners.insert(id, Box::new(runner));
-    }
-
-    pub fn get(&self, id: &PhaseId) -> &dyn PhaseRunner {
-        self.runners
-            .get(id)
-            .map(|r| r.as_ref())
-            .unwrap_or(self.default.as_ref())
-    }
-
-    pub fn get_mut(&mut self, id: &PhaseId) -> &mut dyn PhaseRunner {
-        self.runners
-            .get_mut(id)
-            .map(|r| r.as_mut())
-            .unwrap_or(self.default.as_mut())
-    }
-}
-
-impl Default for PhaseRunners {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -390,6 +150,121 @@ impl Schedule {
             self.children.iter().find_map(|c| c.child(id, recursive))
         } else {
             None
+        }
+    }
+
+    pub fn run(&self, world: &WorldCell, systems: &Systems, mode: RunMode) {
+        let runner = systems.runner(self.id());
+        let graphs = systems.get_phases(self.id());
+        if !graphs.is_empty() {
+            let ctx = RunContext::new(world, &graphs, mode);
+            runner(ctx);
+        }
+
+        world.get_mut().flush(Some(self.id()));
+
+        for child in self.children() {
+            child.run(world, systems, mode);
+        }
+    }
+
+    pub fn run_child(&self, child: PhaseId, world: &WorldCell, systems: &Systems, mode: RunMode) {
+        if let Some(child) = self.child(child, true) {
+            child.run(world, systems, mode);
+        }
+    }
+}
+
+pub struct Phases(HashMap<PhaseId, SystemGraph>);
+
+impl Phases {
+    pub fn new() -> Self {
+        Self(HashMap::new())
+    }
+
+    pub fn add_systems(&mut self, phase: PhaseId, configs: Vec<SystemConfig>) {
+        self.0.insert(phase, SystemGraph::new(configs));
+    }
+}
+
+pub struct Root;
+impl Phase for Root {}
+
+pub struct Systems {
+    mode: RunMode,
+    schedule: Schedule,
+    phases: IndexMap<&'static str, Phases>,
+    runners: HashMap<PhaseId, fn(RunContext)>,
+    configs: HashMap<PhaseId, Vec<SystemConfig>>,
+}
+
+impl Systems {
+    pub fn new(mode: RunMode) -> Self {
+        Self {
+            mode,
+            schedule: Schedule::new(PhaseId::of::<Root>()),
+            phases: IndexMap::new(),
+            runners: HashMap::new(),
+            configs: HashMap::new(),
+        }
+    }
+
+    pub fn mode(&self) -> RunMode {
+        self.mode
+    }
+
+    pub fn add_phases(&mut self, name: &'static str, phases: Phases) {
+        self.phases.insert(name, phases);
+    }
+
+    pub fn add_systems<M>(&mut self, phase: PhaseId, configs: impl IntoSystemConfigs<M>) {
+        self.configs
+            .entry(phase)
+            .or_default()
+            .extend(configs.configs());
+    }
+
+    pub fn add_runners(&mut self, phase: PhaseId, runner: fn(RunContext)) {
+        self.runners.insert(phase, runner);
+    }
+
+    pub fn runner(&self, phase: PhaseId) -> fn(RunContext) {
+        self.runners
+            .get(&phase)
+            .copied()
+            .unwrap_or(|ctx: RunContext| ctx.run())
+    }
+
+    pub fn get_phases(&self, phase: PhaseId) -> Vec<&SystemGraph> {
+        self.phases
+            .values()
+            .filter_map(|phases| phases.0.get(&phase).map(|systems| systems))
+            .collect()
+    }
+
+    pub fn schedule(&self) -> &Schedule {
+        &self.schedule
+    }
+
+    pub fn schedule_mut(&mut self) -> &mut Schedule {
+        &mut self.schedule
+    }
+
+    pub(crate) fn add_configs(&mut self) {
+        if !self.configs.is_empty() {
+            let configs = std::mem::take(&mut self.configs);
+            let phases = self.phases.entry("default").or_insert(Phases::new());
+            for (phase, configs) in configs {
+                phases.add_systems(phase, configs);
+            }
+        }
+    }
+
+    pub fn run(&self, phase: impl Phase, world: WorldCell) {
+        if phase.id() == self.schedule.id() {
+            self.schedule.run(&world, self, self.mode);
+        } else {
+            self.schedule.run_child(phase.id(), &world, self, self.mode);
         }
     }
 }

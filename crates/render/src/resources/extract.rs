@@ -1,10 +1,10 @@
 use asset::{AssetId, Assets, asset::Asset};
 use ecs::{
-    IndexSet, ResMut, Resource, ResourceId,
+    IndexSet, ResMut, Resource,
     event::{Event, Events},
     system::{
-        AccessType, ArgItem, IntoSystemConfigs, StaticArg, SystemArg, SystemConfig, SystemFunc,
-        WorldAccess,
+        Access, ArgItem, IntoSystemConfigs, StaticArg, SystemAccess, SystemArg, SystemConfig,
+        SystemFunc,
     },
     world::action::{WorldAction, WorldActionFn, WorldActions},
 };
@@ -177,29 +177,19 @@ impl AssetExtractors {
             return false;
         }
 
-        let access = || {
-            let mut access = R::Arg::access();
-            access.push(WorldAccess::resource::<Assets<R>>(AccessType::Write));
-            access.push(WorldAccess::resource::<RenderAssets<R::RenderAsset>>(
-                AccessType::Write,
-            ));
-            access.push(WorldAccess::resource::<RenderAssetEvents<R>>(
-                AccessType::Write,
-            ));
-            access.push(WorldAccess::resource::<Events<ExtractError<R>>>(
-                AccessType::Write,
-            ));
-
-            for dep in R::dependencies() {
-                access.push(WorldAccess::Resource {
-                    ty: ResourceId::dynamic(dep.0.into()),
-                    access: AccessType::Write,
-                    send: true,
-                });
-            }
-
-            access
-        };
+        let mut access = R::Arg::access();
+        access.push(SystemAccess::new::<Assets<R>>(Access::Write));
+        access.push(SystemAccess::new::<RenderAssets<R::RenderAsset>>(
+            Access::Write,
+        ));
+        access.push(SystemAccess::new::<RenderAssetEvents<R>>(Access::Write));
+        access.push(SystemAccess::new::<Events<ExtractError<R>>>(Access::Write));
+        for dep in R::dependencies() {
+            access.push(SystemAccess {
+                ty: dep.0,
+                access: Access::Write,
+            });
+        }
 
         let run: SystemFunc = Arc::new(|world| {
             let extract_info = ResMut::<ExtractInfo<R>>::get(world);
@@ -399,7 +389,6 @@ impl ResourceExtractors {
 }
 
 impl Resource for ResourceExtractors {}
-
 
 #[derive(Debug, Clone)]
 pub enum ExtractError<T: Send + Sync + 'static = ()> {

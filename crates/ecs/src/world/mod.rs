@@ -1,3 +1,5 @@
+use crate::system::schedule::Systems;
+use crate::system::RunMode;
 use crate::world::id::WorldKind;
 use crate::{
     archetype::{table::Row, Archetypes, EntityMove},
@@ -5,13 +7,11 @@ use crate::{
         component::{Component, ComponentId},
         entity::{Entities, Entity},
         resource::{Resource, Resources},
-        Type,
     },
     event::{Event, EventId, Events, InvokedEvents},
     system::{
         observer::Observers,
         schedule::{Phase, PhaseId},
-        systems::{Global, RunMode, SystemConfigs, Systems},
         IntoSystemConfigs,
     },
     task::TaskPool,
@@ -48,7 +48,6 @@ pub struct World {
     actions: WorldActions,
     resources: Resources<true>,
     non_send_resources: Resources<false>,
-    configs: SystemConfigs,
     systems: Systems,
     observers: Observers,
     tasks: TaskPool,
@@ -75,8 +74,7 @@ impl World {
             actions: WorldActions::default(),
             resources: Resources::new(),
             non_send_resources: Resources::new(),
-            configs: SystemConfigs::new(RunMode::Parallel),
-            systems: Systems::new(),
+            systems: Systems::new(RunMode::Parallel),
             observers: Observers::new(),
             tasks: TaskPool::default(),
         };
@@ -129,16 +127,12 @@ impl World {
         self.registry.get(ty)
     }
 
-    pub fn configs(&self) -> &SystemConfigs {
-        &self.configs
-    }
-
     pub fn tasks(&self) -> &TaskPool {
         &self.tasks
     }
 
     pub fn mode(&self) -> RunMode {
-        self.configs.mode()
+        self.systems.mode()
     }
 
     pub fn resource<R: Resource + Send>(&self) -> &R {
@@ -264,8 +258,7 @@ impl World {
         phase: impl Phase,
         systems: impl IntoSystemConfigs<M>,
     ) -> &mut Self {
-        self.configs
-            .add_systems(Type::of::<Global>(), phase, systems);
+        self.systems.add_systems(phase.id(), systems);
         self
     }
 
@@ -295,10 +288,7 @@ impl World {
     }
 
     pub fn run(&mut self, phase: impl Phase) {
-        if !self.configs.is_empty() {
-            self.systems.add_graphs(self.configs.build_graphs());
-        }
-
+        self.systems.add_configs();
         self.systems.run(phase, WorldCell::from(self as &Self));
     }
 
@@ -308,7 +298,7 @@ impl World {
         while !actions.is_empty() || !invoked.is_empty() {
             actions.drain(..).for_each(|a| a.execute(self));
 
-            self.observers.build(self.mode());
+            self.observers.build();
             self.observers.run(WorldCell::from(self as &Self), invoked);
 
             invoked = self.take_invoked();
@@ -320,7 +310,7 @@ impl World {
         let invoked = self.events.invoked();
         let mut invoked = invoked.lock().unwrap();
         if invoked.shift_remove(&ty) {
-            self.observers.build(self.mode());
+            self.observers.build();
             self.observers.run(WorldCell::from(self as &Self), vec![ty]);
         }
     }

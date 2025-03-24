@@ -4,12 +4,11 @@ use crate::{
     core::{
         component::{Component, ComponentId},
         entity::Entity,
-        resource::ResourceId,
-        Type,
     },
-    system::{AccessType, SystemArg, WorldAccess},
+    system::{Access, SystemAccess, SystemArg},
 };
 use indexmap::IndexSet;
+use std::any::TypeId;
 
 pub struct QueryCursor<'a> {
     archetypes: IndexSet<&'a Archetype>,
@@ -67,7 +66,7 @@ pub trait BaseQuery: Send + Sync {
 
     fn init(_: &World, _: &mut QueryState) {}
     fn fetch<'a>(world: WorldCell<'a>, entity: Entity) -> Self::Item<'a>;
-    fn access() -> Vec<WorldAccess>;
+    fn access() -> Vec<SystemAccess>;
 }
 
 impl<C: Component> BaseQuery for &C {
@@ -90,10 +89,10 @@ impl<C: Component> BaseQuery for &C {
         world.get().get_component(entity).unwrap()
     }
 
-    fn access() -> Vec<WorldAccess> {
-        vec![WorldAccess::Component {
-            ty: ComponentId::of::<C>(),
-            access: AccessType::Read,
+    fn access() -> Vec<SystemAccess> {
+        vec![SystemAccess {
+            ty: TypeId::of::<C>(),
+            access: Access::Read,
         }]
     }
 }
@@ -118,10 +117,10 @@ impl<C: Component> BaseQuery for &mut C {
         world.get_mut().get_component_mut(entity).unwrap()
     }
 
-    fn access() -> Vec<WorldAccess> {
-        vec![WorldAccess::Component {
-            ty: ComponentId::of::<C>(),
-            access: AccessType::Write,
+    fn access() -> Vec<SystemAccess> {
+        vec![SystemAccess {
+            ty: TypeId::of::<C>(),
+            access: Access::Write,
         }]
     }
 }
@@ -137,7 +136,7 @@ impl<C: Component> BaseQuery for Option<&C> {
         world.get().get_component(entity)
     }
 
-    fn access() -> Vec<WorldAccess> {
+    fn access() -> Vec<SystemAccess> {
         <&C as BaseQuery>::access()
     }
 }
@@ -153,7 +152,7 @@ impl<C: Component> BaseQuery for Option<&mut C> {
         world.get_mut().get_component_mut(entity)
     }
 
-    fn access() -> Vec<WorldAccess> {
+    fn access() -> Vec<SystemAccess> {
         <&mut C as BaseQuery>::access()
     }
 }
@@ -165,7 +164,7 @@ impl BaseQuery for Entity {
         entity
     }
 
-    fn access() -> Vec<WorldAccess> {
+    fn access() -> Vec<SystemAccess> {
         vec![]
     }
 }
@@ -331,15 +330,18 @@ impl<Q: BaseQuery, F: QueryFilter> SystemArg for Query<'_, Q, F> {
         Query::new(world)
     }
 
-    fn access() -> Vec<WorldAccess> {
+    fn access() -> Vec<SystemAccess> {
         let mut access = Q::access();
-        access.push(WorldAccess::Resource {
-            ty: ResourceId::dynamic(Type::of::<Archetypes>()),
-            access: AccessType::Read,
-            send: true,
+        access.push(SystemAccess {
+            ty: TypeId::of::<Archetypes>(),
+            access: Access::Read,
         });
 
         access
+    }
+
+    fn send() -> bool {
+        true
     }
 }
 
@@ -360,7 +362,7 @@ macro_rules! impl_base_query_for_tuples {
                     ($($name::fetch(world, entity),)+)
                 }
 
-                fn access() -> Vec<WorldAccess> {
+                fn access() -> Vec<SystemAccess> {
                     let mut metas = Vec::new();
                     $(
                         metas.extend($name::access());

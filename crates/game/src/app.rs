@@ -2,7 +2,7 @@ use crate::phases::{Extract, Update};
 use ecs::{
     core::{component::Component, resource::Resource, IndexMap, Type},
     event::Event,
-    system::{schedule::Phase, ArgItem, IntoSystemConfigs, SystemArg, WorldAccess},
+    system::{schedule::Phase, ArgItem, IntoSystemConfigs, SystemAccess, SystemArg},
     task::TaskPool,
     world::{
         action::{WorldActionFn, WorldActions},
@@ -10,7 +10,7 @@ use ecs::{
         World,
     },
 };
-use std::sync::{Arc, Mutex};
+use std::thread::JoinHandle;
 
 pub trait AppTag: 'static + Send {
     const NAME: &'static str;
@@ -262,28 +262,24 @@ impl AppBuilders {
     pub fn into_apps(&mut self) -> Apps {
         Apps {
             main: std::mem::take(&mut self.main),
-            apps: self
-                .apps
-                .drain(..)
-                .map(|(k, v)| (k, Arc::new(Mutex::new(v))))
-                .collect(),
-            tasks: TaskPool::default(),
+            apps: self.apps.drain(..).map(|(_, v)| v).collect(),
+            handles: Vec::new(),
         }
     }
 }
 
 pub struct Apps {
     main: App,
-    apps: IndexMap<Type, Arc<Mutex<App>>>,
-    tasks: TaskPool,
+    apps: Vec<App>,
+    handles: Vec<JoinHandle<App>>,
 }
 
 impl Apps {
     pub fn new() -> Self {
         Self {
             main: App::new(World::new()),
-            apps: IndexMap::new(),
-            tasks: TaskPool::default(),
+            apps: Vec::new(),
+            handles: Vec::new(),
         }
     }
 
@@ -304,17 +300,30 @@ impl Apps {
     }
 
     pub fn run(&mut self) {
-        let main = MainWorld::new(self.main.world_mut());
-        for app in self.apps.values_mut() {
-            let mut app_lock = app.lock().unwrap();
-            app_lock.extract(main);
+        self.await_apps();
 
-            let app = app.clone();
-            self.tasks.spawn(move || {
-                let mut app_lock = app.lock().unwrap();
-                app_lock.run(Update);
-            });
+        let mut handles = Vec::new();
+        let main = MainWorld::new(self.main.world_mut());
+        for mut app in self.apps.drain(..) {
+            app.extract(main);
+
+            handles.push(std::thread::spawn(move || {
+                app.run(Update);
+                app
+            }));
         }
+
+        self.handles = handles;
+    }
+
+    fn await_apps(&mut self) {
+        let mut apps = Vec::new();
+        self.handles.drain(..).for_each(|handle| {
+            let app = handle.join().unwrap();
+            apps.push(app);
+        });
+
+        self.apps.extend(apps);
     }
 }
 
@@ -436,7 +445,7 @@ impl<S: SystemArg + 'static> SystemArg for Main<'_, S> {
         Main(S::get(world.inner().into()))
     }
 
-    fn access() -> Vec<WorldAccess> {
+    fn access() -> Vec<SystemAccess> {
         S::access()
     }
 }

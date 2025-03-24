@@ -457,7 +457,6 @@ impl<D: Draw> Default for DrawCalls<D> {
 
 impl<D: Draw> DrawCalls<D> {
     pub(crate) fn extract_draws(query: Main<Query<D::Query>>, mut draws: ResMut<Self>) {
-        // draws.0.clear();
         for item in query.into_inner() {
             let draw = D::extract(item);
             draws.0.push(draw);

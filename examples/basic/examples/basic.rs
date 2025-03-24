@@ -1,16 +1,16 @@
 use asset::{derive::Asset, embed_asset, embedded::EmbeddedFs, AssetExt, AssetRef};
 use ecs::{
     derive::Component,
-    system::unlifetime::Read,
+    system::{unlifetime::Read, IntoSystemConfigs},
     world::{action::WorldActions, builtin::actions::Spawn},
     Entity,
 };
-use game::{Game, Init};
+use game::{Extract, Game, Init, Update};
 use render::{
     derive::{AsBinding, ShaderType},
     Color, Draw, DrawPass, MainDrawPass, Material, Mesh, MeshAttribute, MeshAttributeType,
-    MeshAttributeValues, MeshTopology, Operations, RenderAppExt, RenderPass, RenderPlugin,
-    ShaderPath, ShaderSource, StoreOp,
+    MeshAttributeValues, MeshTopology, Operations, PostRender, RenderApp, RenderAppExt, RenderPass,
+    RenderPlugin, ShaderPath, ShaderSource, StoreOp,
 };
 use uuid::Uuid;
 
@@ -53,6 +53,22 @@ fn main() {
         .add_systems(Init, |actions: WorldActions| {
             actions.add(Spawn::new().with(Camera2d::default()));
             actions.add(Spawn::new().with(Mesh2dRenderer::new(MESH_ID, MATERIAL_ID)));
+        })
+        .add_systems(Update, || {
+            println!("Main Update");
+        })
+        .scoped_sub_app::<RenderApp>(|_, app| {
+            app.add_systems(
+                Extract,
+                (|| {
+                    println!("Extract 1");
+                })
+                .before(|| {
+                    println!("Extract 2");
+                }),
+            );
+
+            app.add_systems(PostRender, || println!("-----------------------"));
         })
         .run();
 }

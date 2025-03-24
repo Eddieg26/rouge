@@ -1,10 +1,11 @@
 use super::{builtin::events::Spawned, cell::WorldCell, registry::ComponentExtension, World};
 use crate::{
     archetype::{table::Row, Archetypes},
-    core::{component::Component, entity::Entity, resource::ResourceId, Type},
-    system::{AccessType, SystemArg, WorldAccess},
+    core::{component::Component, entity::Entity},
+    system::{Access, SystemAccess, SystemArg},
 };
 use indexmap::IndexMap;
+use std::any::TypeId;
 
 pub struct Spawner<'a> {
     world: &'a mut World,
@@ -66,11 +67,10 @@ impl SystemArg for Spawner<'_> {
         Spawner::new(world.get_mut())
     }
 
-    fn access() -> Vec<WorldAccess> {
-        vec![WorldAccess::Resource {
-            ty: ResourceId::dynamic(Type::of::<Archetypes>()),
-            access: AccessType::Write,
-            send: true,
+    fn access() -> Vec<SystemAccess> {
+        vec![SystemAccess {
+            ty: TypeId::of::<Archetypes>(),
+            access: Access::Write,
         }]
     }
 }

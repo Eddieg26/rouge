@@ -103,10 +103,10 @@ impl MeshAttributeValues {
 
     pub fn size(&self) -> usize {
         match self {
-            MeshAttributeValues::Float(v) => v.len() * std::mem::size_of::<f32>(),
-            MeshAttributeValues::Vec2(v) => v.len() * std::mem::size_of::<glam::Vec2>(),
-            MeshAttributeValues::Vec3(v) => v.len() * std::mem::size_of::<glam::Vec3>(),
-            MeshAttributeValues::Vec4(v) => v.len() * std::mem::size_of::<glam::Vec4>(),
+            MeshAttributeValues::Float(_) => std::mem::size_of::<f32>(),
+            MeshAttributeValues::Vec2(_) => std::mem::size_of::<glam::Vec2>(),
+            MeshAttributeValues::Vec3(_) => std::mem::size_of::<glam::Vec3>(),
+            MeshAttributeValues::Vec4(_) => std::mem::size_of::<glam::Vec4>(),
         }
     }
 

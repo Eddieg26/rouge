@@ -48,6 +48,9 @@ impl Phase for QueueViews {}
 pub struct QueueDraws;
 impl Phase for QueueDraws {}
 
+pub struct PreRender;
+impl Phase for PreRender {}
+
 pub struct Render;
 impl Phase for Render {}
 

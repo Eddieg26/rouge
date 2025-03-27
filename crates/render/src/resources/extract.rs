@@ -126,7 +126,6 @@ impl<R: RenderAsset> Resource for RenderAssets<R> {}
 pub struct ExtractInfo<R: RenderAssetExtractor> {
     pub extracted: Vec<(AssetId, R)>,
     pub removed: HashSet<Id<R::RenderAsset>>,
-    pub re_extract: Vec<(AssetId, R)>,
 }
 
 impl<R: RenderAssetExtractor> ExtractInfo<R> {
@@ -134,7 +133,6 @@ impl<R: RenderAssetExtractor> ExtractInfo<R> {
         Self {
             extracted: Vec::new(),
             removed: HashSet::new(),
-            re_extract: Vec::new(),
         }
     }
 }
@@ -229,7 +227,6 @@ impl AssetExtractors {
         mut extract_info: ResMut<ExtractInfo<R>>,
         mut events: Main<ResMut<RenderAssetEvents<R>>>,
     ) {
-        assets.extend(extract_info.re_extract.drain(..));
         extract_info.removed.clear();
 
         for event in events.drain(..) {
@@ -278,7 +275,7 @@ impl AssetExtractors {
 
         assets.retain(|id, _| !extract_info.removed.contains(&id));
 
-        extract_info.re_extract = extract;
+        extract_info.extracted = extract;
     }
 }
 

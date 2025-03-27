@@ -47,6 +47,12 @@ impl<T> Into<wgpu::Operations<T>> for Operations<T> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ClearOp {
+    Off,
+    Color(Color),
+}
+
 pub struct ColorAttachment {
     pub resource: ResourceId,
     pub resolve_target: Option<ResourceId>,
@@ -109,7 +115,7 @@ impl RenderPass {
         &self,
         encoder: &'a mut wgpu::CommandEncoder,
         ctx: &'a RenderContext,
-        clear: Option<Color>,
+        clear: Option<ClearOp>,
     ) -> Option<wgpu::RenderPass<'a>> {
         let mut color_attachments = vec![];
         for color in self.colors.iter() {
@@ -119,7 +125,10 @@ impl RenderPass {
                 .map(|attachment| &**ctx.get::<TextureView>(attachment));
 
             let load = match clear {
-                Some(color) => wgpu::LoadOp::Clear(color.into()),
+                Some(op) => match op {
+                    ClearOp::Off => wgpu::LoadOp::Load,
+                    ClearOp::Color(color) => wgpu::LoadOp::Clear(color.into()),
+                },
                 None => match color.clear {
                     Some(color) => wgpu::LoadOp::Clear(color.into()),
                     None => wgpu::LoadOp::Load,

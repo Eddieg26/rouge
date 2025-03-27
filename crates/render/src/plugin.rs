@@ -1,5 +1,5 @@
 use crate::{
-    DrawPipline, ExtractedViews, MainDrawPass, PostRender, ProcessResources, RenderAssets,
+    DrawPipline, ExtractedViews, MeshData, PostRender, PreRender, ProcessResources, RenderAssets,
     app::{
         Process, ProcessAssets, ProcessPipelines, Queue, QueueDraws, QueueViews, Render, RenderApp,
     },
@@ -19,7 +19,7 @@ use asset::{
     database::{AssetDatabase, events::AssetEvent},
     plugin::{AssetExt, AssetPlugin},
 };
-use ecs::{Res, ResMut, event::Events, system::IntoSystemConfigs};
+use ecs::{Res, ResMut, event::Events};
 use game::{Extract, GameBuilder, Plugin, Update};
 use window::{
     events::{WindowCreated, WindowResized},
@@ -37,6 +37,7 @@ impl Plugin for RenderPlugin {
         game.add_sub_app::<RenderApp>()
             .add_sub_phase::<Update, Process>()
             .add_sub_phase::<Update, Queue>()
+            .add_sub_phase::<Update, PreRender>()
             .add_sub_phase::<Update, Render>()
             .add_sub_phase::<Update, PostRender>()
             .add_resource(AssetExtractors::default())
@@ -77,10 +78,6 @@ impl Plugin for RenderPlugin {
             if let Some(extractors) = app.remove_resource::<AssetExtractors>() {
                 app.add_systems(Extract, extractors.extract)
                     .add_systems(ProcessAssets, extractors.process);
-            }
-
-            if let Some(pass) = app.remove_resource::<MainDrawPass>() {
-                app.non_send_resource_mut::<RenderGraph>().add_pass(pass);
             }
         });
     }
@@ -174,7 +171,9 @@ impl<V: View> Plugin for ViewPlugin<V> {
         game.sub_app_mut::<RenderApp>()
             .add_resource(ExtractedViews::<V>::default())
             .add_systems(Extract, ViewBuffer::<V>::extract_views)
-            .add_systems(QueueViews, ViewBuffer::<V>::queue_views);
+            .add_systems(QueueViews, ViewBuffer::<V>::queue_views)
+            .add_systems(PreRender, ViewBuffer::<V>::update_views)
+            .add_systems(PostRender, ViewBuffer::<V>::clear_views);
 
         game.extract_render_resource::<ViewBuffer<V>>();
     }
@@ -208,14 +207,7 @@ impl<D: Draw> Plugin for DrawPlugin<D> {
                 }
             }
 
-            match app.try_resource_mut::<MainDrawPass>() {
-                Some(pass) => pass.add::<D::Pass>(),
-                None => {
-                    let mut pass = MainDrawPass::new();
-                    pass.add::<D::Pass>();
-                    app.add_resource(pass);
-                }
-            }
+            // TODO Add Material Pass
         });
 
         game.load_asset::<ShaderSource>(D::shader().into());
@@ -223,7 +215,6 @@ impl<D: Draw> Plugin for DrawPlugin<D> {
 
         game.register_asset::<D::Material>();
         game.extract_render_asset::<D::Material>();
-        game.extract_render_resource::<MeshDataBuffer<D::Mesh>>();
         game.extract_render_resource::<DrawPipline<D>>();
     }
 
@@ -231,7 +222,28 @@ impl<D: Draw> Plugin for DrawPlugin<D> {
         let mut plugins = game::Plugins::new();
         plugins.add(RenderPlugin);
         plugins.add(ViewPlugin::<D::View>::new());
+        plugins.add(MeshDataPlugin::<D::Mesh>::new());
 
         plugins
+    }
+}
+
+pub struct MeshDataPlugin<M: MeshData>(std::marker::PhantomData<M>);
+impl<M: MeshData> MeshDataPlugin<M> {
+    pub fn new() -> Self {
+        Self(Default::default())
+    }
+}
+
+impl<M: MeshData> Plugin for MeshDataPlugin<M> {
+    fn name(&self) -> &'static str {
+        std::any::type_name::<M>()
+    }
+
+    fn start(&mut self, game: &mut GameBuilder) {
+        game.extract_render_resource::<MeshDataBuffer<M>>();
+        game.sub_app_mut::<RenderApp>()
+            .add_systems(PreRender, MeshDataBuffer::<M>::update_mesh_buffer)
+            .add_systems(PostRender, MeshDataBuffer::<M>::clear_mesh_buffer);
     }
 }

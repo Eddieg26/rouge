@@ -1,11 +1,10 @@
-use super::{RenderView, View, ViewBuffer, ViewEntities};
 use crate::{
     device::RenderDevice,
     resources::{Buffer, ComputePipeline, PipelineCache, PipelineId, RenderPipeline},
     surface::RenderSurface,
 };
-use ecs::{Entity, NonSendMut, Res, ResMut, Resource, world::World};
-use std::{any::Any, sync::Arc};
+use ecs::{Entity, IndexSet, NonSendMut, Res, Resource, world::World};
+use std::{any::Any, collections::HashMap, sync::Arc};
 use wgpu::{BufferSize, BufferUsages, TextureFormat, TextureUsages};
 
 pub type Name = &'static str;
@@ -284,6 +283,10 @@ impl PassNode {
         &self.writes
     }
 
+    pub fn creates(&self) -> &[NodeId] {
+        &self.creates
+    }
+
     pub fn has_side_effect(&self) -> bool {
         self.has_side_effect
     }
@@ -297,6 +300,7 @@ pub struct RenderGraph {
     passes: Vec<PassNode>,
     resources: Vec<ResourceNode>,
     entries: Vec<ResourceEntry>,
+    subgraphs: HashMap<Name, RenderGraph>,
 }
 
 impl RenderGraph {
@@ -311,6 +315,7 @@ impl RenderGraph {
             passes: vec![],
             resources,
             entries,
+            subgraphs: HashMap::new(),
         }
     }
 
@@ -469,36 +474,28 @@ impl RenderGraph {
         }
     }
 
-    pub fn run(
-        &mut self,
-        world: &World,
-        device: &RenderDevice,
-        surface: &RenderSurface,
-        views: &mut ViewEntities,
-    ) {
+    pub fn run(&mut self, world: &World, device: &RenderDevice, surface: &RenderSurface) {
         let mut compiled = self.compile();
 
-        for view in views.0.drain(..) {
-            for pass in &compiled.passes {
-                for id in self.passes[*pass].creates.iter().copied() {
-                    let resource = self.resources[id as usize].resource;
-                    self.entries[resource as usize].create(device, surface);
-                }
-
-                {
-                    let mut ctx = RenderContext::new(view, self, world, device);
-                    self.passes[*pass].execute(&mut ctx);
-                    device.queue.submit(ctx.finish());
-                }
-
-                compiled.resources.iter_mut().for_each(|info| {
-                    let destroy = info.last_pass == Some(self.passes[*pass].id)
-                        && self.entries[info.id as usize].ty == ResourceType::Transient;
-                    if destroy {
-                        self.entries[info.id as usize].destroy();
-                    }
-                });
+        for pass in &compiled.passes {
+            for id in self.passes[*pass].creates.iter().copied() {
+                let resource = self.resources[id as usize].resource;
+                self.entries[resource as usize].create(device, surface);
             }
+
+            {
+                let mut ctx = RenderContext::new(self, world, device);
+                self.passes[*pass].execute(&mut ctx);
+                device.queue.submit(ctx.finish());
+            }
+
+            compiled.resources.iter_mut().for_each(|info| {
+                let destroy = info.last_pass == Some(self.passes[*pass].id)
+                    && self.entries[info.id as usize].ty == ResourceType::Transient;
+                if destroy {
+                    self.entries[info.id as usize].destroy();
+                }
+            });
         }
     }
 
@@ -507,7 +504,6 @@ impl RenderGraph {
         device: Res<RenderDevice>,
         surface: Res<RenderSurface>,
         mut graph: NonSendMut<RenderGraph>,
-        mut views: ResMut<ViewEntities>,
     ) {
         let Ok(texture) = surface.texture() else {
             return;
@@ -516,7 +512,7 @@ impl RenderGraph {
         let view = texture.texture.create_view(&Default::default());
 
         graph.import::<TextureView>(RenderGraph::SURFACE, Some(view.into()));
-        graph.run(world, &device, &surface, &mut views);
+        graph.run(world, &device, &surface);
         graph.remove(RenderGraph::SURFACE);
 
         texture.present();
@@ -637,7 +633,7 @@ impl<'a> PassBuilder<'a> {
 }
 
 pub struct RenderContext<'a> {
-    view: Entity,
+    view: Option<Entity>,
     graph: &'a RenderGraph,
     world: &'a World,
     device: &'a RenderDevice,
@@ -646,14 +642,9 @@ pub struct RenderContext<'a> {
 }
 
 impl<'a> RenderContext<'a> {
-    pub fn new(
-        view: Entity,
-        graph: &'a RenderGraph,
-        world: &'a World,
-        device: &'a RenderDevice,
-    ) -> Self {
+    pub fn new(graph: &'a RenderGraph, world: &'a World, device: &'a RenderDevice) -> Self {
         Self {
-            view,
+            view: None,
             graph,
             world,
             device,
@@ -662,12 +653,8 @@ impl<'a> RenderContext<'a> {
         }
     }
 
-    pub fn view(&self) -> Entity {
+    pub fn view(&self) -> Option<Entity> {
         self.view
-    }
-
-    pub fn render_view<V: View>(&self) -> Option<&RenderView<V>> {
-        self.world.resource::<ViewBuffer<V>>().get_view(self.view)
     }
 
     pub fn world(&self) -> &'a World {
@@ -702,5 +689,9 @@ impl<'a> RenderContext<'a> {
 
     pub fn finish(self) -> Vec<wgpu::CommandBuffer> {
         self.buffers
+    }
+
+    pub(crate) fn set_view(&mut self, view: Option<Entity>) {
+        self.view = view
     }
 }

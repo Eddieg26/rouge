@@ -1,16 +1,16 @@
 use asset::{derive::Asset, embed_asset, embedded::EmbeddedFs, AssetExt, AssetRef};
 use ecs::{
     derive::Component,
-    system::{unlifetime::Read, IntoSystemConfigs},
+    system::unlifetime::Read,
     world::{action::WorldActions, builtin::actions::Spawn},
     Entity,
 };
-use game::{Extract, Game, Init, Update};
+use game::{Game, Init};
 use render::{
     derive::{AsBinding, ShaderType},
     Color, Draw, DrawPass, MainDrawPass, Material, Mesh, MeshAttribute, MeshAttributeType,
-    MeshAttributeValues, MeshTopology, Operations, PostRender, RenderApp, RenderAppExt, RenderPass,
-    RenderPlugin, ShaderPath, ShaderSource, StoreOp,
+    MeshAttributeValues, MeshTopology, Operations, RenderAppExt, RenderPass, RenderPlugin,
+    ShaderPath, ShaderSource, StoreOp,
 };
 use uuid::Uuid;
 
@@ -48,27 +48,11 @@ fn main() {
         .embed_assets("embedded", embedded)
         .register::<Camera2d>()
         .register::<Mesh2dRenderer>()
-        .add_asset(MATERIAL_ID, UnlitColor::new(Color::blue()), vec![])
+        .add_asset(MATERIAL_ID, UnlitColor::new(Color::red()), vec![])
         .add_asset(MESH_ID, quad, vec![])
         .add_systems(Init, |actions: WorldActions| {
-            actions.add(Spawn::new().with(Camera2d::default()));
+            actions.add(Spawn::new().with(Camera2d));
             actions.add(Spawn::new().with(Mesh2dRenderer::new(MESH_ID, MATERIAL_ID)));
-        })
-        .add_systems(Update, || {
-            println!("Main Update");
-        })
-        .scoped_sub_app::<RenderApp>(|_, app| {
-            app.add_systems(
-                Extract,
-                (|| {
-                    println!("Extract 1");
-                })
-                .before(|| {
-                    println!("Extract 2");
-                }),
-            );
-
-            app.add_systems(PostRender, || println!("-----------------------"));
         })
         .run();
 }

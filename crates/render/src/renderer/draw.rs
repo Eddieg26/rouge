@@ -1,4 +1,4 @@
-use super::{GraphPass, TextureDesc, TextureView};
+use super::GraphPass;
 use crate::{
     device::RenderDevice,
     renderer::{graph::RenderContext, pass::RenderPass, state::RenderState},
@@ -10,12 +10,11 @@ use crate::{
         buffer::{Buffer, UniformBufferArray},
     },
     surface::RenderSurface,
-    types::{Color, Viewport},
 };
 use asset::{AssetRef, database::AssetDatabase};
 use ecs::{
-    Component, Entity, IndexMap, Res, ResMut, Resource,
-    system::unlifetime::{Read, ReadRes, WriteRes},
+    Entity, Res, ResMut, Resource,
+    system::unlifetime::{ReadRes, WriteRes},
     world::{
         action::WorldActions,
         builtin::actions::AddResource,
@@ -28,8 +27,7 @@ use glam::{Mat4, Vec3};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, hash::Hash, ops::Range};
 use wgpu::{
-    BufferUsages, ColorTargetState, PrimitiveState, ShaderStages, TextureUsages, VertexFormat,
-    VertexStepMode,
+    BufferUsages, ColorTargetState, PrimitiveState, ShaderStages, VertexFormat, VertexStepMode,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -45,15 +43,7 @@ impl Resource for ViewEntities {}
 pub trait View: ShaderType + WriteInto + Send + Sync + Sized + 'static {
     type Query: BaseQuery;
 
-    fn world(&self) -> Mat4;
-    fn view(&self) -> Mat4;
-    fn projection(&self) -> Mat4;
-    fn position(&self) -> Vec3 {
-        let world = self.world();
-        Vec3::new(world.w_axis.x, world.w_axis.y, world.w_axis.z)
-    }
-
-    fn extract<'a>(query: <Self::Query as BaseQuery>::Item<'a>) -> ExtractedView<Self>;
+    fn extract<'a>(query: <Self::Query as BaseQuery>::Item<'a>) -> Self;
 }
 
 #[derive(ShaderType, Clone, Copy)]
@@ -73,40 +63,9 @@ impl Default for SimpleView {
     }
 }
 
-impl View for SimpleView {
-    type Query = (Entity, Read<SimpleView>);
-
-    fn world(&self) -> Mat4 {
-        self.world
-    }
-
-    fn view(&self) -> Mat4 {
-        self.view
-    }
-
-    fn projection(&self) -> Mat4 {
-        self.projection
-    }
-
-    fn extract<'a>(item: <Self::Query as BaseQuery>::Item<'a>) -> ExtractedView<SimpleView> {
-        ExtractedView {
-            entity: item.0,
-            view: *item.1,
-            depth: 0,
-            viewport: None,
-            clear_color: None,
-        }
-    }
-}
-
-impl Component for SimpleView {}
-
 pub struct ExtractedView<V: View> {
     pub entity: Entity,
     pub view: V,
-    pub depth: i32,
-    pub viewport: Option<Viewport>,
-    pub clear_color: Option<Color>,
 }
 
 pub struct ExtractedViews<V: View>(pub(crate) Vec<ExtractedView<V>>);
@@ -120,27 +79,14 @@ impl<V: View> Default for ExtractedViews<V> {
 pub struct RenderView<V: View> {
     entity: Entity,
     view: V,
-    depth: i32,
-    viewport: Option<Viewport>,
-    clear_color: Option<Color>,
     dynamic_offset: u32,
 }
 
 impl<V: View> RenderView<V> {
-    pub fn new(
-        entity: Entity,
-        view: V,
-        depth: i32,
-        viewport: Option<Viewport>,
-        clear_color: Option<Color>,
-        dynamic_offset: u32,
-    ) -> Self {
+    pub fn new(entity: Entity, view: V, dynamic_offset: u32) -> Self {
         Self {
             entity,
             view,
-            depth,
-            viewport,
-            clear_color,
             dynamic_offset,
         }
     }
@@ -151,18 +97,6 @@ impl<V: View> RenderView<V> {
 
     pub fn view(&self) -> &V {
         &self.view
-    }
-
-    pub fn depth(&self) -> i32 {
-        self.depth
-    }
-
-    pub fn viewport(&self) -> Option<&Viewport> {
-        self.viewport.as_ref()
-    }
-
-    pub fn clear_color(&self) -> Option<Color> {
-        self.clear_color
     }
 
     pub fn dynamic_offset(&self) -> u32 {
@@ -217,23 +151,10 @@ impl<V: View> ViewBuffer<V> {
         &self.bind_group_layout
     }
 
-    pub fn add_view(
-        &mut self,
-        entity: Entity,
-        view: V,
-        depth: i32,
-        clear_color: Option<Color>,
-        viewport: Option<Viewport>,
-    ) {
+    pub fn add_view(&mut self, entity: Entity, view: V) {
         let dynamic_offset = self.buffer.push(&view) as u32;
-        self.views.push(RenderView::new(
-            entity,
-            view,
-            depth,
-            viewport,
-            clear_color,
-            dynamic_offset,
-        ));
+        self.views
+            .push(RenderView::new(entity, view, dynamic_offset));
     }
 
     pub fn clear(&mut self) {
@@ -250,16 +171,15 @@ impl<V: View> ViewBuffer<V> {
     }
 
     pub(crate) fn extract_views(
-        query: Main<Query<V::Query>>,
+        query: Main<Query<(Entity, V::Query)>>,
         mut views: ResMut<ExtractedViews<V>>,
         mut view_entites: ResMut<ViewEntities>,
     ) {
-        for item in query.into_inner() {
-            let extracted = V::extract(item);
-            views.0.push(extracted);
+        for (entity, item) in query.into_inner() {
+            let view = V::extract(item);
+            views.0.push(ExtractedView { entity, view });
         }
 
-        views.0.sort_by(|a, b| a.depth.cmp(&b.depth));
         view_entites
             .0
             .extend(views.0.iter().map(|view| view.entity));
@@ -270,14 +190,16 @@ impl<V: View> ViewBuffer<V> {
         mut extracted_views: ResMut<ExtractedViews<V>>,
     ) {
         for view in extracted_views.0.drain(..) {
-            view_buffer.add_view(
-                view.entity,
-                view.view,
-                view.depth,
-                view.clear_color,
-                view.viewport,
-            );
+            view_buffer.add_view(view.entity, view.view);
         }
+    }
+
+    pub(crate) fn clear_views(mut view_buffer: ResMut<ViewBuffer<V>>) {
+        view_buffer.clear();
+    }
+
+    pub(crate) fn update_views(device: Res<RenderDevice>, mut view_buffer: ResMut<ViewBuffer<V>>) {
+        view_buffer.update(&device);
     }
 }
 
@@ -331,6 +253,10 @@ impl<T: MeshData> MeshDataBuffer<T> {
         &self.buffer
     }
 
+    pub fn data(&self) -> &[u8] {
+        &self.data
+    }
+
     pub fn push(&mut self, data: T) -> u32 {
         let offset = self.offset;
         let mut writer = encase::internal::Writer::new(&data, &mut self.data, offset).unwrap();
@@ -343,7 +269,9 @@ impl<T: MeshData> MeshDataBuffer<T> {
 
     pub fn append(&mut self, mut data: Vec<T>) -> Range<u32> {
         let offset = self.offset;
-        let _ = data.drain(..).map(|data| self.push(data));
+        data.drain(..).for_each(|data| {
+            self.push(data);
+        });
         (offset / Self::SIZE) as u32..(self.offset / Self::SIZE) as u32
     }
 
@@ -363,6 +291,14 @@ impl<T: MeshData> MeshDataBuffer<T> {
         } else {
             self.buffer.resize(device, Self::SIZE as u64);
         }
+    }
+
+    pub(crate) fn update_mesh_buffer(device: Res<RenderDevice>, mut buffer: ResMut<Self>) {
+        buffer.update(&device);
+    }
+
+    pub(crate) fn clear_mesh_buffer(mut buffer: ResMut<Self>) {
+        buffer.clear();
     }
 }
 
@@ -397,6 +333,16 @@ impl<M: Material> Hash for BatchKey<M> {
         self.material.hash(state);
         self.mesh.hash(state);
         self.sub_mesh.hash(state);
+    }
+}
+
+impl<M: Material> std::fmt::Debug for BatchKey<M> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BatchKey")
+            .field("material", &self.material)
+            .field("mesh", &self.mesh)
+            .field("sub_mesh", &self.sub_mesh)
+            .finish()
     }
 }
 
@@ -766,19 +712,13 @@ impl<M: DrawPass> DrawFunctions<M> {
         buffer: &ViewBuffer<M::View>,
         meshes: &RenderAssets<RenderMesh>,
         state: &mut RenderState,
-        mode: BlendMode,
     ) {
-        match mode {
-            BlendMode::Opaque => {
-                for pass in &self.opaque {
-                    pass(ctx, view, buffer, meshes, state);
-                }
-            }
-            BlendMode::Transparent => {
-                for pass in &self.transparent {
-                    pass(ctx, view, buffer, meshes, state);
-                }
-            }
+        for pass in &self.opaque {
+            pass(ctx, view, buffer, meshes, state);
+        }
+
+        for pass in &self.transparent {
+            pass(ctx, view, buffer, meshes, state);
         }
     }
 }
@@ -793,7 +733,7 @@ pub trait DrawPass: Send + Sync + 'static {
     fn setup(builder: &mut super::PassBuilder) -> RenderPass;
 }
 
-pub type DrawCommand = fn(BlendMode, &mut RenderContext, &RenderAssets<RenderMesh>, &RenderPass);
+pub type DrawCommand = fn(&RenderContext, &mut RenderState, &RenderAssets<RenderMesh>);
 
 pub struct DrawPassBuilder {
     setup: fn(&mut super::PassBuilder) -> RenderPass,
@@ -804,23 +744,16 @@ impl DrawPassBuilder {
     pub fn new<P: DrawPass>() -> Self {
         Self {
             setup: P::setup,
-            command: |mode, ctx, meshes, render_pass| {
+            command: |ctx, state, meshes| {
                 let view_buffer = ctx.world().resource::<ViewBuffer<P::View>>();
-                let Some(view) = view_buffer.get_view(ctx.view()) else {
+
+                let Some(view) = ctx.view().and_then(|e| view_buffer.get_view(e)) else {
                     return;
                 };
 
-                let mut encoder = ctx.encoder();
                 let passes = ctx.world().resource::<DrawFunctions<P>>();
 
-                if let Some(mut render_pass) =
-                    render_pass.begin(&mut encoder, ctx, view.clear_color())
-                {
-                    let mut state = RenderState::new(&mut render_pass);
-                    passes.draw(ctx, view, view_buffer, meshes, &mut state, mode);
-                }
-
-                ctx.submit(encoder.finish());
+                passes.draw(ctx, view, view_buffer, meshes, state);
             },
         }
     }
@@ -840,66 +773,67 @@ pub struct ErasedDrawPass {
 }
 
 impl ErasedDrawPass {
+    pub fn begin<'a>(
+        &'a self,
+        encoder: &'a mut wgpu::CommandEncoder,
+        ctx: &'a RenderContext,
+        clear: Option<super::ClearOp>,
+    ) -> Option<wgpu::RenderPass<'a>> {
+        self.pass.begin(encoder, ctx, clear)
+    }
+
     pub fn execute(
         &self,
-        mode: BlendMode,
-        ctx: &mut RenderContext,
+        ctx: &RenderContext,
+        state: &mut RenderState,
         meshes: &RenderAssets<RenderMesh>,
     ) {
-        (self.command)(mode, ctx, meshes, &self.pass);
+        (self.command)(ctx, state, meshes);
     }
 }
 
-pub struct MainDrawPass {
-    builders: IndexMap<super::Name, DrawPassBuilder>,
+use crate::{Cameras, ClearOp};
+
+pub struct MainMaterialPass {
+    builders: Vec<DrawPassBuilder>,
 }
 
-impl MainDrawPass {
-    pub const DEPTH_TEXTURE: super::Name = "depth";
-
-    pub fn new() -> Self {
-        Self {
-            builders: IndexMap::new(),
-        }
-    }
-
-    pub fn add<P: DrawPass>(&mut self) {
-        self.builders.insert(P::NAME, DrawPassBuilder::new::<P>());
-    }
-}
-
-impl Resource for MainDrawPass {}
-
-impl GraphPass for MainDrawPass {
+impl GraphPass for MainMaterialPass {
     type Data = Vec<ErasedDrawPass>;
 
-    const NAME: super::Name = "MainDrawPass";
+    const NAME: crate::Name = "MainMaterialPass";
 
-    fn setup(self, builder: &mut super::PassBuilder) -> Self::Data {
-        builder.create::<TextureView>(
-            Self::DEPTH_TEXTURE,
-            TextureDesc {
-                usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
-                format: RenderSurface::DEPTH_FORMAT,
-            },
-        );
-
-        let mut commands = Vec::new();
-        for command in self.builders.into_values() {
-            commands.push(command.build(builder));
-        }
-
-        commands
+    fn setup(mut self, builder: &mut crate::PassBuilder) -> Self::Data {
+        self.builders
+            .drain(..)
+            .map(|setup| setup.build(builder))
+            .collect()
     }
 
-    fn execute(ctx: &mut RenderContext, data: &Self::Data) {
+    fn execute(ctx: &mut crate::RenderContext, data: &Self::Data) {
+        let cameras = ctx.world().resource::<Cameras>();
         let meshes = ctx.world().resource::<RenderAssets<RenderMesh>>();
-        for pass in data {
-            pass.execute(BlendMode::Opaque, ctx, meshes);
-        }
 
-        for pass in data {
-            pass.execute(BlendMode::Transparent, ctx, meshes);
+        let mut encoder = ctx.encoder();
+        for (entity, camera) in cameras.iter() {
+            ctx.set_view(Some(*entity));
+
+            let clear_op = match camera.clear_color {
+                Some(clear) => Some(ClearOp::Color(clear)),
+                None => None,
+            };
+
+            for (index, pass) in data.iter().enumerate() {
+                let clear_op = match index == 0 {
+                    true => clear_op,
+                    false => None,
+                };
+
+                if let Some(mut render_pass) = pass.begin(&mut encoder, ctx, clear_op) {
+                    let mut state = RenderState::new(&mut render_pass);
+                    pass.execute(ctx, &mut state, meshes);
+                }
+            }
         }
     }
 }

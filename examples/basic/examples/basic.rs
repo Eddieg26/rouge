@@ -8,9 +8,9 @@ use ecs::{
 use game::{Game, Init};
 use render::{
     derive::{AsBinding, ShaderType},
-    Color, Draw, DrawPass, MainDrawPass, Material, Mesh, MeshAttribute, MeshAttributeType,
-    MeshAttributeValues, MeshTopology, Operations, RenderAppExt, RenderPass, RenderPlugin,
-    ShaderPath, ShaderSource, StoreOp,
+    Color, Draw, DrawPass, Material, Mesh, MeshAttribute, MeshAttributeType, MeshAttributeValues,
+    MeshTopology, Operations, RenderAppExt, RenderPass, RenderPlugin, ShaderPath, ShaderSource,
+    StoreOp,
 };
 use uuid::Uuid;
 
@@ -104,33 +104,8 @@ pub struct Camera2dView {
 impl render::View for Camera2dView {
     type Query = (Entity, Read<Camera2d>);
 
-    fn world(&self) -> glam::Mat4 {
-        self.world
-    }
-
-    fn view(&self) -> glam::Mat4 {
-        self.view
-    }
-
-    fn projection(&self) -> glam::Mat4 {
-        self.projection
-    }
-
-    fn extract<'a>(
-        query: <Self::Query as ecs::prelude::query::BaseQuery>::Item<'a>,
-    ) -> render::ExtractedView<Self> {
-        let (entity, _) = query;
-        render::ExtractedView {
-            entity,
-            view: Camera2dView {
-                world: glam::Mat4::IDENTITY,
-                view: glam::Mat4::IDENTITY,
-                projection: glam::Mat4::IDENTITY,
-            },
-            depth: 0,
-            viewport: None,
-            clear_color: None,
-        }
+    fn extract<'a>(query: <Self::Query as ecs::prelude::query::BaseQuery>::Item<'a>) -> Self {
+        todo!()
     }
 }
 
@@ -141,20 +116,24 @@ impl DrawPass for UnlitColorPass {
     const NAME: render::renderer::Name = "UnlitColor";
 
     fn setup(builder: &mut render::renderer::PassBuilder) -> RenderPass {
-        let surface = builder.write(builder.surface_id());
-        let depth = builder.write(builder.resource_id(MainDrawPass::DEPTH_TEXTURE));
-
-        RenderPass::new()
-            .with_color(surface, None, StoreOp::Store, Some(Color::green()))
-            .with_depth(
-                depth,
-                Operations {
-                    load: render::LoadOp::Clear(1.0),
-                    store: StoreOp::Store,
-                },
-                None,
-            )
+        todo!()
     }
+
+    // fn setup(builder: &mut render::renderer::PassBuilder) -> RenderPass {
+    //     let surface = builder.write(builder.surface_id());
+    //     let depth = builder.write(builder.resource_id(MainDrawPass::DEPTH_TEXTURE));
+
+    //     RenderPass::new()
+    //         .with_color(surface, None, StoreOp::Store, Some(Color::green()))
+    //         .with_depth(
+    //             depth,
+    //             Operations {
+    //                 load: render::LoadOp::Clear(1.0),
+    //                 store: StoreOp::Store,
+    //             },
+    //             None,
+    //         )
+    // }
 }
 
 #[derive(Component, Clone, Copy)]

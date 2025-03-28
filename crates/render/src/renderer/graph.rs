@@ -1,13 +1,20 @@
 use crate::{
-    device::RenderDevice,
-    resources::{Buffer, ComputePipeline, PipelineCache, PipelineId, RenderPipeline},
-    surface::RenderSurface,
+    ComputePipeline, PipelineCache, PipelineId, RenderDevice, RenderPipeline, RenderSurface,
 };
-use ecs::{Entity, IndexSet, NonSendMut, Res, Resource, world::World};
+use ecs::{Entity, derive::Resource, world::World};
 use std::{any::Any, collections::HashMap, sync::Arc};
-use wgpu::{BufferSize, BufferUsages, TextureFormat, TextureUsages};
+
+use super::Cameras;
 
 pub type Name = &'static str;
+pub type NodeId = u32;
+pub type ResourceId = u32;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ResourceType {
+    Imported,
+    Transient,
+}
 
 pub trait GraphResource: Any + Sized + 'static {
     type Desc: Any + 'static;
@@ -20,23 +27,19 @@ pub trait GraphResource: Any + Sized + 'static {
     ) -> Self;
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct TextureDesc {
-    pub usage: TextureUsages,
-    pub format: TextureFormat,
+    pub usage: wgpu::TextureUsages,
+    pub format: wgpu::TextureFormat,
 }
 
-impl Default for TextureDesc {
-    fn default() -> Self {
-        Self {
-            usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
-            format: TextureFormat::Bgra8UnormSrgb,
-        }
+pub struct RenderTarget(wgpu::TextureView);
+impl From<wgpu::TextureView> for RenderTarget {
+    fn from(value: wgpu::TextureView) -> Self {
+        Self(value)
     }
 }
 
-pub struct TextureView(wgpu::TextureView);
-impl std::ops::Deref for TextureView {
+impl std::ops::Deref for RenderTarget {
     type Target = wgpu::TextureView;
 
     fn deref(&self) -> &Self::Target {
@@ -44,25 +47,13 @@ impl std::ops::Deref for TextureView {
     }
 }
 
-impl AsRef<wgpu::TextureView> for TextureView {
+impl AsRef<wgpu::TextureView> for RenderTarget {
     fn as_ref(&self) -> &wgpu::TextureView {
         &self.0
     }
 }
 
-impl From<wgpu::TextureView> for TextureView {
-    fn from(value: wgpu::TextureView) -> Self {
-        Self(value)
-    }
-}
-
-impl From<wgpu::Texture> for TextureView {
-    fn from(value: wgpu::Texture) -> Self {
-        Self(value.create_view(&Default::default()))
-    }
-}
-
-impl GraphResource for TextureView {
+impl GraphResource for RenderTarget {
     type Desc = TextureDesc;
 
     fn create(
@@ -90,31 +81,44 @@ impl GraphResource for TextureView {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct BufferDesc {
-    pub size: BufferSize,
-    pub usage: BufferUsages,
+    pub size: wgpu::BufferSize,
+    pub usage: wgpu::BufferUsages,
 }
 
-impl GraphResource for Buffer {
-    type Desc = BufferDesc;
-
-    fn create(device: &RenderDevice, _: &RenderSurface, name: Name, desc: &Self::Desc) -> Self {
-        Buffer::new(device, desc.size.get(), desc.usage, Some(name.into()))
+pub struct RenderBuffer(wgpu::Buffer);
+impl From<wgpu::Buffer> for RenderBuffer {
+    fn from(value: wgpu::Buffer) -> Self {
+        Self(value)
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum ResourceType {
-    Imported,
-    Transient,
+impl std::ops::Deref for RenderBuffer {
+    type Target = wgpu::Buffer;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
 }
 
-pub type NodeId = u32;
-pub type ResourceId = u32;
-pub type ResourceDesc = Arc<dyn Any>;
-pub type ResourceObj = Box<dyn Any>;
-pub type CreateResource = fn(&RenderDevice, &RenderSurface, Name, &ResourceDesc) -> ResourceObj;
+impl AsRef<wgpu::Buffer> for RenderBuffer {
+    fn as_ref(&self) -> &wgpu::Buffer {
+        &self.0
+    }
+}
+
+impl GraphResource for RenderBuffer {
+    type Desc = BufferDesc;
+
+    fn create(device: &RenderDevice, _: &RenderSurface, name: Name, desc: &Self::Desc) -> Self {
+        RenderBuffer::from(device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(name),
+            size: desc.size.get(),
+            usage: desc.usage,
+            mapped_at_creation: false,
+        }))
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct ResourceNode {
@@ -133,13 +137,15 @@ impl ResourceNode {
     }
 }
 
+pub type CreateResource = fn(&RenderDevice, &RenderSurface, Name, &dyn Any) -> Box<dyn Any>;
+
 pub struct ResourceEntry {
     pub id: ResourceId,
     pub name: Name,
     pub version: u32,
     pub ty: ResourceType,
-    desc: ResourceDesc,
-    object: Option<ResourceObj>,
+    desc: Arc<dyn Any>,
+    object: Option<Box<dyn Any>>,
     creator: Option<NodeId>,
     last_pass: Option<NodeId>,
     create: CreateResource,
@@ -176,21 +182,7 @@ impl ResourceEntry {
             version: 0,
             ty: ResourceType::Imported,
             desc: Arc::new(()),
-            object: object.map(|o| Box::new(o) as ResourceObj),
-            creator: None,
-            last_pass: None,
-            create: |_, _, _, _| Box::new(()),
-        }
-    }
-
-    fn surface() -> Self {
-        Self {
-            id: RenderGraph::SURFACE_ID,
-            name: RenderGraph::SURFACE,
-            version: 0,
-            ty: ResourceType::Imported,
-            desc: Arc::new(()),
-            object: None,
+            object: object.map(|o| Box::new(o) as Box<dyn Any>),
             creator: None,
             last_pass: None,
             create: |_, _, _, _| Box::new(()),
@@ -202,6 +194,11 @@ impl ResourceEntry {
         self.object = Some(object)
     }
 
+    pub fn inc_version(&mut self) -> u32 {
+        self.version += 1;
+        self.version
+    }
+
     pub fn destroy(&mut self) {
         self.object = None;
         self.last_pass = None;
@@ -209,24 +206,164 @@ impl ResourceEntry {
     }
 }
 
-impl ResourceEntry {
-    pub fn inc_version(&mut self) -> u32 {
-        self.version += 1;
-        self.version
+pub type PassExecutor = Box<dyn Fn(&mut RenderContext)>;
+
+pub struct PassNode {
+    pub id: NodeId,
+    pub name: Name,
+    pub creates: Vec<NodeId>,
+    pub reads: Vec<NodeId>,
+    pub writes: Vec<NodeId>,
+    pub has_side_effect: bool,
+    executor: PassExecutor,
+}
+
+impl PassNode {
+    pub fn execute(&self, ctx: &mut RenderContext) {
+        (self.executor)(ctx);
     }
 }
 
-pub trait GraphPass: 'static {
-    type Data: Any + 'static;
-
-    const NAME: Name;
-
-    fn setup(self, builder: &mut PassBuilder) -> Self::Data;
-    fn execute(ctx: &mut RenderContext, data: &Self::Data);
+pub struct PassBuilder<'a> {
+    id: NodeId,
+    creates: Vec<ResourceId>,
+    reads: Vec<ResourceId>,
+    writes: Vec<ResourceId>,
+    has_side_effect: bool,
+    graph: &'a mut RenderGraph,
 }
 
-pub type PassData = Box<dyn Any>;
-pub type ExecutePass = fn(&mut RenderContext, &PassData);
+impl<'a> PassBuilder<'a> {
+    pub fn new(id: NodeId, graph: &'a mut RenderGraph) -> Self {
+        Self {
+            id,
+            creates: vec![],
+            reads: vec![],
+            writes: vec![],
+            has_side_effect: false,
+            graph,
+        }
+    }
+
+    pub fn create<R: GraphResource>(&mut self, name: Name, desc: R::Desc) -> ResourceId {
+        let resource = self.graph.entries.len() as u32;
+        let entry = ResourceEntry::new::<R>(resource, name, ResourceType::Transient, desc);
+        let node = ResourceNode::new(self.graph.resources.len() as u32, resource);
+
+        self.graph.resources.push(node);
+        self.graph.entries.push(entry);
+        self.creates.push(resource);
+
+        resource
+    }
+
+    pub fn read(&mut self, id: ResourceId) -> ResourceId {
+        assert!(self.validate(id));
+
+        self.reads.push(id);
+
+        id
+    }
+
+    pub fn write(&mut self, id: ResourceId) -> ResourceId {
+        assert!(self.validate(id));
+
+        if self.entry(id).ty == ResourceType::Imported {
+            self.has_side_effect = true;
+        }
+
+        if self.creates.contains(&id) {
+            self.writes.push(id);
+            id
+        } else {
+            self.reads.push(id);
+
+            let mut node = self.graph.resources[id as usize].clone();
+            node.version = self.entry_mut(id).inc_version();
+
+            let id = self.graph.resources.len() as u32;
+            node.id = id;
+
+            self.writes.push(id);
+            self.graph.resources.push(node);
+
+            id
+        }
+    }
+
+    fn validate(&self, id: ResourceId) -> bool {
+        let index = id as usize;
+        let node = &self.graph.resources[index];
+        node.version == self.graph.entries[node.resource as usize].version
+    }
+
+    fn entry(&self, id: ResourceId) -> &ResourceEntry {
+        let node = &self.graph.resources[id as usize];
+        &self.graph.entries[node.resource as usize]
+    }
+
+    fn entry_mut(&mut self, id: ResourceId) -> &mut ResourceEntry {
+        let node = &self.graph.resources[id as usize];
+        &mut self.graph.entries[node.resource as usize]
+    }
+
+    fn build<P: GraphPass>(mut self, pass: P) -> PassNode {
+        let executor = P::setup(pass, &mut self);
+        PassNode {
+            id: self.id,
+            name: P::NAME,
+            creates: self.creates,
+            reads: self.reads,
+            writes: self.writes,
+            has_side_effect: self.has_side_effect,
+            executor: Box::new(executor),
+        }
+    }
+}
+
+pub trait GraphPass {
+    const NAME: Name;
+
+    fn setup(self, builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + 'static;
+}
+
+pub trait Subgraph {
+    const NAME: Name;
+
+    fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext, &mut RenderGraph) + 'static;
+}
+
+pub struct SubgraphPass<G: Subgraph>(std::marker::PhantomData<G>);
+impl<G: Subgraph> Default for SubgraphPass<G> {
+    fn default() -> Self {
+        Self(std::marker::PhantomData)
+    }
+}
+
+impl<G: Subgraph> GraphPass for SubgraphPass<G> {
+    const NAME: Name = G::NAME;
+
+    fn setup(self, builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + 'static {
+        let executor = G::setup(builder);
+
+        move |ctx| {
+            ctx.run_sub_graph(Self::NAME, &executor);
+        }
+    }
+}
+
+pub struct SubgraphRunner<'a>(&'a mut RenderGraph);
+impl<'a> SubgraphRunner<'a> {
+    pub fn run(
+        &mut self,
+        world: &World,
+        device: &RenderDevice,
+        surface: &RenderSurface,
+        view: Option<Entity>,
+    ) {
+        self.0.run(world, device, surface, view);
+    }
+}
 
 pub struct ResourceInfo {
     id: ResourceId,
@@ -251,146 +388,44 @@ pub struct CompiledGraph {
     resources: Vec<ResourceInfo>,
 }
 
-pub struct PassNode {
-    id: NodeId,
-    name: Name,
-    data: PassData,
-    creates: Vec<NodeId>,
-    reads: Vec<NodeId>,
-    writes: Vec<NodeId>,
-    has_side_effect: bool,
-    execute: ExecutePass,
-}
-
-impl PassNode {
-    pub fn id(&self) -> NodeId {
-        self.id
-    }
-
-    pub fn name(&self) -> Name {
-        self.name
-    }
-
-    pub fn data(&self) -> &PassData {
-        &self.data
-    }
-
-    pub fn reads(&self) -> &[NodeId] {
-        &self.reads
-    }
-
-    pub fn writes(&self) -> &[NodeId] {
-        &self.writes
-    }
-
-    pub fn creates(&self) -> &[NodeId] {
-        &self.creates
-    }
-
-    pub fn has_side_effect(&self) -> bool {
-        self.has_side_effect
-    }
-
-    pub fn execute(&self, ctx: &mut RenderContext) {
-        (self.execute)(ctx, &self.data);
-    }
-}
-
+#[derive(Resource)]
 pub struct RenderGraph {
     passes: Vec<PassNode>,
     resources: Vec<ResourceNode>,
     entries: Vec<ResourceEntry>,
-    subgraphs: HashMap<Name, RenderGraph>,
+    sub_graphs: HashMap<Name, RenderGraph>,
 }
 
 impl RenderGraph {
-    pub const SURFACE: Name = "surface";
-    const SURFACE_ID: ResourceId = 0;
-
     pub fn new() -> Self {
-        let resources = vec![ResourceNode::new(Self::SURFACE_ID, Self::SURFACE_ID)];
-        let entries = vec![ResourceEntry::surface()];
-
         Self {
             passes: vec![],
-            resources,
-            entries,
-            subgraphs: HashMap::new(),
+            resources: vec![],
+            entries: vec![],
+            sub_graphs: HashMap::new(),
         }
     }
 
-    pub fn add_pass<P: GraphPass>(&mut self, pass: P) -> &mut Self {
-        if self.passes.iter().any(|p| p.name() == P::NAME) {
-            return self;
-        }
-
+    pub fn add_pass<P: GraphPass>(&mut self, pass: P) -> NodeId {
         let id = self.passes.len() as u32;
-
         let node = PassBuilder::new(id, self).build::<P>(pass);
         self.passes.push(node);
 
-        self
+        id
     }
 
-    pub fn import<R: GraphResource>(&mut self, name: Name, object: Option<R>) -> ResourceId {
-        if let Some(resource) = self.entries.iter().position(|r| r.name == name) {
-            self.entries[resource].object = object.map(|o| Box::new(o) as ResourceObj);
-            self.resources
-                .iter()
-                .rev()
-                .find(|n| n.resource == resource as u32)
-                .unwrap()
-                .id
-        } else {
-            let resource = self.entries.len() as u32;
-            let entry = ResourceEntry::import(resource, name, object);
-            let node = ResourceNode::new(self.resources.len() as u32, resource);
+    pub fn add_sub_graph<G: Subgraph>(&mut self) {
+        let id = self.add_pass::<SubgraphPass<G>>(SubgraphPass::default());
+        self.passes[id as usize].has_side_effect = true;
 
-            self.resources.push(node);
-            self.entries.push(entry);
-
-            self.resources.len() as u32 - 1
-        }
+        self.sub_graphs.insert(G::NAME, RenderGraph::new());
     }
 
-    pub fn remove(&mut self, name: Name) {
-        if let Some(resource) = self.entries.iter().find(|r| r.name == name) {
-            let resource = self
-                .resources
-                .iter()
-                .rev()
-                .find(|n| n.resource == resource.id)
-                .unwrap()
-                .resource;
-
-            self.entries[resource as usize].destroy();
-        }
-    }
-
-    pub fn get_resource_id(&self, name: Name) -> Option<ResourceId> {
-        self.entries.iter().position(|r| r.name == name).map(|id| {
-            self.resources
-                .iter()
-                .rev()
-                .find(|n| n.resource == id as u32)
-                .unwrap()
-                .id
-        })
-    }
-
-    pub fn get_resource<R: GraphResource>(&self, id: ResourceId) -> Option<&R> {
+    pub fn get_resource<G: GraphResource>(&self, id: ResourceId) -> Option<&G> {
         let resource = self.resources.get(id as usize)?;
         let entry = self.entries.get(resource.resource as usize)?;
 
-        entry.object.as_ref().and_then(|o| o.downcast_ref::<R>())
-    }
-
-    pub fn surface_id(&self) -> ResourceId {
-        self.resources
-            .iter()
-            .rev()
-            .find_map(|node| (node.resource == Self::SURFACE_ID).then_some(node.resource))
-            .expect("Surface resource not found") as u32
+        entry.object.as_ref().and_then(|o| o.downcast_ref::<G>())
     }
 
     fn compile(&self) -> CompiledGraph {
@@ -474,7 +509,13 @@ impl RenderGraph {
         }
     }
 
-    pub fn run(&mut self, world: &World, device: &RenderDevice, surface: &RenderSurface) {
+    pub fn run(
+        &mut self,
+        world: &World,
+        device: &RenderDevice,
+        surface: &RenderSurface,
+        view: Option<Entity>,
+    ) {
         let mut compiled = self.compile();
 
         for pass in &compiled.passes {
@@ -484,9 +525,12 @@ impl RenderGraph {
             }
 
             {
-                let mut ctx = RenderContext::new(self, world, device);
+                let mut sub_graphs = std::mem::take(&mut self.sub_graphs);
+                let mut ctx =
+                    RenderContext::new(self, &mut sub_graphs, world, device, surface, view);
                 self.passes[*pass].execute(&mut ctx);
                 device.queue.submit(ctx.finish());
+                self.sub_graphs = sub_graphs;
             }
 
             compiled.resources.iter_mut().for_each(|info| {
@@ -498,156 +542,35 @@ impl RenderGraph {
             });
         }
     }
-
-    pub(crate) fn run_graph(
-        world: &World,
-        device: Res<RenderDevice>,
-        surface: Res<RenderSurface>,
-        mut graph: NonSendMut<RenderGraph>,
-    ) {
-        let Ok(texture) = surface.texture() else {
-            return;
-        };
-
-        let view = texture.texture.create_view(&Default::default());
-
-        graph.import::<TextureView>(RenderGraph::SURFACE, Some(view.into()));
-        graph.run(world, &device, &surface);
-        graph.remove(RenderGraph::SURFACE);
-
-        texture.present();
-    }
-}
-
-impl Resource for RenderGraph {}
-
-pub struct PassBuilder<'a> {
-    id: NodeId,
-    creates: Vec<ResourceId>,
-    reads: Vec<ResourceId>,
-    writes: Vec<ResourceId>,
-    has_side_effect: bool,
-    graph: &'a mut RenderGraph,
-}
-
-impl<'a> PassBuilder<'a> {
-    pub fn new(id: NodeId, graph: &'a mut RenderGraph) -> Self {
-        Self {
-            id,
-            creates: vec![],
-            reads: vec![],
-            writes: vec![],
-            has_side_effect: false,
-            graph,
-        }
-    }
-
-    pub fn create<R: GraphResource>(&mut self, name: Name, desc: R::Desc) -> ResourceId {
-        let resource = self.graph.entries.len() as u32;
-        let entry = ResourceEntry::new::<R>(resource, name, ResourceType::Transient, desc);
-        let node = ResourceNode::new(self.graph.resources.len() as u32, resource);
-
-        self.graph.resources.push(node);
-        self.graph.entries.push(entry);
-        self.creates.push(resource);
-
-        resource
-    }
-
-    pub fn read(&mut self, id: ResourceId) -> ResourceId {
-        assert!(self.validate(id));
-
-        self.reads.push(id);
-
-        id
-    }
-
-    pub fn write(&mut self, id: ResourceId) -> ResourceId {
-        assert!(self.validate(id));
-
-        if self.entry(id).ty == ResourceType::Imported {
-            self.has_side_effect = true;
-        }
-
-        if self.creates.contains(&id) {
-            self.writes.push(id);
-            id
-        } else {
-            self.reads.push(id);
-
-            let mut node = self.graph.resources[id as usize].clone();
-            node.version = self.entry_mut(id).inc_version();
-
-            let id = self.graph.resources.len() as u32;
-            node.id = id;
-
-            self.writes.push(id);
-            self.graph.resources.push(node);
-
-            id
-        }
-    }
-
-    pub fn surface_id(&self) -> ResourceId {
-        self.graph.surface_id()
-    }
-
-    pub fn resource_id(&self, name: Name) -> ResourceId {
-        self.graph
-            .get_resource_id(name)
-            .expect("resource not found")
-    }
-
-    fn validate(&self, id: ResourceId) -> bool {
-        let index = id as usize;
-        let node = &self.graph.resources[index];
-        node.version == self.graph.entries[node.resource as usize].version
-    }
-
-    fn entry(&self, id: ResourceId) -> &ResourceEntry {
-        let node = &self.graph.resources[id as usize];
-        &self.graph.entries[node.resource as usize]
-    }
-
-    fn entry_mut(&mut self, id: ResourceId) -> &mut ResourceEntry {
-        let node = &self.graph.resources[id as usize];
-        &mut self.graph.entries[node.resource as usize]
-    }
-
-    fn build<P: GraphPass>(mut self, pass: P) -> PassNode {
-        let data = P::setup(pass, &mut self);
-        PassNode {
-            id: self.id,
-            name: P::NAME,
-            data: Box::new(data),
-            creates: self.creates,
-            reads: self.reads,
-            writes: self.writes,
-            has_side_effect: self.has_side_effect,
-            execute: |ctx, data| {
-                let data = data.downcast_ref::<P::Data>().unwrap();
-                P::execute(ctx, data);
-            },
-        }
-    }
 }
 
 pub struct RenderContext<'a> {
     view: Option<Entity>,
     graph: &'a RenderGraph,
+    sub_graphs: &'a mut HashMap<Name, RenderGraph>,
     world: &'a World,
     device: &'a RenderDevice,
+    surface: &'a RenderSurface,
     pipelines: &'a PipelineCache,
     buffers: Vec<wgpu::CommandBuffer>,
 }
 
 impl<'a> RenderContext<'a> {
-    pub fn new(graph: &'a RenderGraph, world: &'a World, device: &'a RenderDevice) -> Self {
+    pub fn new(
+        graph: &'a RenderGraph,
+        sub_graphs: &'a mut HashMap<Name, RenderGraph>,
+        world: &'a World,
+        device: &'a RenderDevice,
+        surface: &'a RenderSurface,
+        view: Option<Entity>,
+    ) -> Self {
         Self {
-            view: None,
+            view,
             graph,
+            sub_graphs,
             world,
             device,
+            surface,
             pipelines: world.resource::<PipelineCache>(),
             buffers: Vec::new(),
         }
@@ -663,6 +586,10 @@ impl<'a> RenderContext<'a> {
 
     pub fn device(&self) -> &'a RenderDevice {
         self.device
+    }
+
+    pub fn surface(&self) -> &'a RenderSurface {
+        self.surface
     }
 
     pub fn get_render_pipeline(&self, id: &PipelineId) -> Option<&RenderPipeline> {
@@ -691,7 +618,35 @@ impl<'a> RenderContext<'a> {
         self.buffers
     }
 
-    pub(crate) fn set_view(&mut self, view: Option<Entity>) {
+    pub fn set_view(&mut self, view: Option<Entity>) {
         self.view = view
+    }
+
+    pub(crate) fn run_sub_graph(
+        &mut self,
+        name: Name,
+        executor: &(impl Fn(&mut RenderContext, &mut RenderGraph) + 'static),
+    ) {
+        if let Some(mut graph) = self.sub_graphs.remove(name) {
+            executor(self, &mut graph);
+            graph.run(self.world, self.device, self.surface, self.view);
+            self.sub_graphs.insert(name, graph);
+        }
+    }
+}
+
+pub struct CameraSubGraph;
+
+impl Subgraph for CameraSubGraph {
+    const NAME: Name = "camera";
+
+    fn setup(_: &mut PassBuilder) -> impl Fn(&mut RenderContext, &mut RenderGraph) + 'static {
+        move |ctx, graph| {
+            let cameras = ctx.world().resource::<Cameras>();
+
+            for entity in cameras.entities() {
+                graph.run(ctx.world(), ctx.device(), ctx.surface(), Some(*entity));
+            }
+        }
     }
 }

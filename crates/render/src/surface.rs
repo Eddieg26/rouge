@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::{app::RenderApp, device::RenderDevice};
 use ecs::{
     Res, ResMut, Resource,
@@ -40,7 +42,7 @@ impl From<HandleError> for RenderSurfaceError {
 impl std::error::Error for RenderSurfaceError {}
 
 pub struct RenderSurface {
-    surface: wgpu::Surface<'static>,
+    surface: Arc<wgpu::Surface<'static>>,
     config: SurfaceConfiguration,
     depth_format: wgpu::TextureFormat,
 }
@@ -101,7 +103,7 @@ impl RenderSurface {
         };
 
         let surface = Self {
-            surface,
+            surface: Arc::new(surface),
             config,
             depth_format,
         };

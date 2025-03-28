@@ -1,22 +1,15 @@
-use super::extract::RenderAsset;
+use super::{Label, RenderAssetExtractor, extract::RenderAsset};
 use crate::device::RenderDevice;
-use asset::asset::Asset;
+use asset::derive::Asset;
+use ecs::system::unlifetime::ReadRes;
 use std::{ops::Range, sync::Arc};
 use wgpu::{TextureAspect, TextureFormat};
 
 pub mod fallbacks;
 pub mod sampler;
-pub mod texture1d;
-pub mod texture2d;
-pub mod texture3d;
-pub mod texture_cube;
 
 pub use fallbacks::*;
 pub use sampler::*;
-pub use texture_cube::*;
-pub use texture1d::*;
-pub use texture2d::*;
-pub use texture3d::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum TextureDimension {
@@ -100,18 +93,143 @@ impl TextureFace {
     }
 }
 
-pub trait Texture: Asset + 'static {
-    fn width(&self) -> u32;
-    fn height(&self) -> u32;
-    fn depth(&self) -> u32;
-    fn format(&self) -> TextureFormat;
-    fn dimension(&self) -> TextureDimension;
-    fn filter_mode(&self) -> FilterMode;
-    fn wrap_mode(&self) -> WrapMode;
-    fn mipmaps(&self) -> bool;
-    fn usage(&self) -> wgpu::TextureUsages;
-    fn faces(&self) -> &[TextureFace];
-    fn pixels(&self, range: Range<usize>) -> &[u8];
+#[derive(Clone, serde::Serialize, serde::Deserialize, Asset)]
+pub struct Texture {
+    pub label: Label,
+    pub width: u32,
+    pub height: u32,
+    pub depth_or_layers: u32,
+    pub mipmaps: bool,
+    pub format: wgpu::TextureFormat,
+    pub dimension: TextureDimension,
+    pub filter: FilterMode,
+    pub wrap: WrapMode,
+    pub usage: wgpu::TextureUsages,
+    pub pixels: Vec<u8>,
+    pub faces: Vec<Range<usize>>,
+}
+
+impl Texture {
+    pub fn new(
+        size: wgpu::Extent3d,
+        dimension: TextureDimension,
+        format: wgpu::TextureFormat,
+        pixels: Vec<u8>,
+        faces: Vec<Range<usize>>,
+    ) -> Self {
+        Self {
+            label: None,
+            width: size.width,
+            height: size.height,
+            depth_or_layers: size.depth_or_array_layers,
+            mipmaps: false,
+            format,
+            dimension,
+            filter: FilterMode::Linear,
+            wrap: WrapMode::ClampToBorder,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_DST
+                | wgpu::TextureUsages::COPY_SRC,
+            pixels,
+            faces,
+        }
+    }
+
+    pub fn default_white(dimension: TextureDimension) -> Self {
+        match dimension {
+            TextureDimension::D1 => Self::new(
+                wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                TextureDimension::D1,
+                wgpu::TextureFormat::Rgba8Unorm,
+                vec![255u8, 255, 255, 255],
+                vec![0..1],
+            ),
+            TextureDimension::D2 => Self::new(
+                wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                TextureDimension::D2,
+                wgpu::TextureFormat::Rgba8Unorm,
+                vec![255u8, 255, 255, 255],
+                vec![0..1],
+            ),
+            TextureDimension::D2Array => Self::new(
+                wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                TextureDimension::D2Array,
+                wgpu::TextureFormat::Rgba8Unorm,
+                vec![255u8, 255, 255, 255],
+                vec![0..1],
+            ),
+            TextureDimension::D3 => Self::new(
+                wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                TextureDimension::D3,
+                wgpu::TextureFormat::Rgba8Unorm,
+                vec![255u8, 255, 255, 255],
+                vec![0..1],
+            ),
+            TextureDimension::Cube => Self::new(
+                wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 6,
+                },
+                TextureDimension::Cube,
+                wgpu::TextureFormat::Rgba8Unorm,
+                vec![[255u8, 255, 255, 255]; 6].concat(),
+                vec![0..1; 6],
+            ),
+            TextureDimension::CubeArray => Self::new(
+                wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 6,
+                },
+                TextureDimension::CubeArray,
+                wgpu::TextureFormat::Rgba8Unorm,
+                vec![[255u8, 255, 255, 255]; 6].concat(),
+                vec![0..1; 6],
+            ),
+        }
+    }
+
+    pub fn with_label(mut self, label: Label) -> Self {
+        self.label = label;
+        self
+    }
+
+    pub fn with_mipmaps(mut self, mipmaps: bool) -> Self {
+        self.mipmaps = mipmaps;
+        self
+    }
+
+    pub fn with_filter(mut self, filter: FilterMode) -> Self {
+        self.filter = filter;
+        self
+    }
+
+    pub fn with_wrap(mut self, wrap: WrapMode) -> Self {
+        self.wrap = wrap;
+        self
+    }
+
+    pub fn with_usage(mut self, usage: wgpu::TextureUsages) -> Self {
+        self.usage = usage;
+        self
+    }
 }
 
 pub struct GpuTexture {
@@ -145,39 +263,39 @@ impl GpuTexture {
         }
     }
 
-    pub fn create<T: Texture>(device: &RenderDevice, texture: &T, sampler: Sampler) -> Self {
+    pub fn create(device: &RenderDevice, texture: &Texture, sampler: Sampler) -> Self {
         let size = wgpu::Extent3d {
-            width: texture.width(),
-            height: texture.height(),
-            depth_or_array_layers: texture.depth(),
+            width: texture.width,
+            height: texture.height,
+            depth_or_array_layers: texture.depth_or_layers,
         };
 
-        let mip_level_count = if texture.mipmaps() {
-            let dimension = texture.dimension().into();
+        let mip_level_count = if texture.mipmaps {
+            let dimension = texture.dimension.into();
             size.max_mips(dimension)
         } else {
             1
         };
 
-        let format = texture.format();
+        let format = texture.format;
 
         let created = device.create_texture(&wgpu::TextureDescriptor {
             label: None,
             size: wgpu::Extent3d {
-                width: texture.width(),
-                height: texture.height(),
-                depth_or_array_layers: texture.depth(),
+                width: texture.width,
+                height: texture.height,
+                depth_or_array_layers: texture.depth_or_layers,
             },
             mip_level_count,
             sample_count: 1,
-            dimension: texture.dimension().into(),
+            dimension: texture.dimension.into(),
             format,
-            usage: texture.usage(),
+            usage: texture.usage,
             view_formats: &[format],
         });
 
         let block_size = format.block_copy_size(None).unwrap_or(0);
-        for (layer, face) in texture.faces().iter().enumerate() {
+        for (layer, face) in texture.faces.iter().enumerate() {
             device.queue.write_texture(
                 wgpu::ImageCopyTexture {
                     texture: &created,
@@ -189,7 +307,7 @@ impl GpuTexture {
                     },
                     aspect: TextureAspect::All,
                 },
-                texture.pixels(face.start..face.start + face.size),
+                &texture.pixels[face.clone()],
                 wgpu::ImageDataLayout {
                     bytes_per_row: Some(block_size * size.width),
                     rows_per_image: Some(block_size * size.width / size.height),
@@ -210,7 +328,7 @@ impl GpuTexture {
             view,
             sampler,
             mip_level_count,
-            format: texture.format(),
+            format,
             width: size.width,
             height: size.height,
         }
@@ -261,16 +379,16 @@ impl AsRef<wgpu::TextureView> for GpuTexture {
 
 impl RenderAsset for GpuTexture {}
 
-// impl<T: Texture + Clone> RenderAssetExtractor for T {
-//     type RenderAsset = GpuTexture;
+impl RenderAssetExtractor for Texture {
+    type RenderAsset = GpuTexture;
 
-//     type Arg = ReadRes<RenderDevice>;
+    type Arg = ReadRes<RenderDevice>;
 
-//     fn extract(
-//         texture: Self,
-//         device: &mut ecs::system::ArgItem<Self::Arg>,
-//     ) -> Result<Self::RenderAsset, super::ExtractError<Self>> {
-//         let sampler = Sampler::from_texture(device, &texture);
-//         Ok(GpuTexture::create(device, &texture, sampler))
-//     }
-// }
+    fn extract(
+        texture: Self,
+        device: &mut ecs::system::ArgItem<Self::Arg>,
+    ) -> Result<Self::RenderAsset, super::ExtractError<Self>> {
+        let sampler = Sampler::from_texture(device, &texture);
+        Ok(GpuTexture::create(device, &texture, sampler))
+    }
+}

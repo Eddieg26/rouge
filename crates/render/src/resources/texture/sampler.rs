@@ -60,14 +60,14 @@ impl Sampler {
         Self(Arc::new(sampler))
     }
 
-    pub fn from_texture<T: Texture>(device: &RenderDevice, texture: &T) -> Self {
+    pub fn from_texture(device: &RenderDevice, texture: &Texture) -> Self {
         Self::new(
             device,
             &SamplerDesc {
                 label: None,
-                wrap_mode: texture.wrap_mode(),
-                filter_mode: texture.filter_mode(),
-                border_color: match texture.wrap_mode() {
+                wrap_mode: texture.wrap,
+                filter_mode: texture.filter,
+                border_color: match texture.wrap {
                     WrapMode::ClampToBorder => Some(wgpu::SamplerBorderColor::TransparentBlack),
                     _ => None,
                 },

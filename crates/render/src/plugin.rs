@@ -1,5 +1,6 @@
 use crate::{
-    DrawPipline, ExtractedViews, MeshData, PostRender, PreRender, ProcessResources, RenderAssets,
+    Cameras, DrawPipline, ExtractedViews, MeshData, Orthographic, Perspective, PostRender,
+    PreRender, ProcessResources, RenderAssets,
     app::{
         Process, ProcessAssets, ProcessPipelines, Queue, QueueDraws, QueueViews, Render, RenderApp,
     },
@@ -10,8 +11,7 @@ use crate::{
     resources::{
         AssetExtractors, DefaultSampler, ExtractError, ExtractInfo, Fallbacks, Material, Mesh,
         PipelineCache, RenderAssetEvent, RenderAssetEvents, RenderAssetExtractor, RenderResource,
-        ResourceExtractors, ShaderSource, Texture1d, Texture2d, Texture2dArray, Texture3d,
-        TextureCube,
+        ResourceExtractors, ShaderSource, Texture,
     },
     surface::RenderSurface,
 };
@@ -46,23 +46,17 @@ impl Plugin for RenderPlugin {
             .add_resource(ViewEntities::default())
             .add_non_send_resource(RenderGraph::new())
             .register_event::<WindowResized>()
+            .add_systems(Extract, Cameras::extract_cameras::<Perspective>)
+            .add_systems(Extract, Cameras::extract_cameras::<Orthographic>)
             .observe::<WindowResized, _>(RenderSurface::resize_surface);
 
         game.extract_render_asset::<Mesh>()
-            .extract_render_asset::<Texture1d>()
-            .extract_render_asset::<Texture2d>()
-            .extract_render_asset::<Texture2dArray>()
-            .extract_render_asset::<Texture3d>()
-            .extract_render_asset::<TextureCube>()
+            .extract_render_asset::<Texture>()
             .extract_render_asset::<ShaderSource>()
             .extract_render_resource::<Fallbacks>()
             .extract_render_resource::<DefaultSampler>()
             .register_asset::<Mesh>()
-            .register_asset::<Texture1d>()
-            .register_asset::<Texture2d>()
-            .register_asset::<Texture2dArray>()
-            .register_asset::<Texture3d>()
-            .register_asset::<TextureCube>()
+            .register_asset::<Texture>()
             .add_importer::<ShaderSource>()
             .observe::<WindowCreated, _>(RenderSurface::extract_surface)
             .observe::<WindowResized, _>(RenderSurface::extract_resize_events);
@@ -72,7 +66,7 @@ impl Plugin for RenderPlugin {
         game.scoped_sub_app::<RenderApp>(|game, app| {
             app.add_systems(ProcessResources, ResourceExtractors::process)
                 .add_systems(ProcessPipelines, PipelineCache::process)
-                .add_systems(Render, RenderGraph::run_graph)
+                // .add_systems(Render, RenderGraph::run_graph)
                 .add_resource(game.resource::<AssetDatabase>().clone());
 
             if let Some(extractors) = app.remove_resource::<AssetExtractors>() {

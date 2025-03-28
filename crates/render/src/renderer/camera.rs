@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use crate::{Color, Viewport};
 use ecs::{
     Component, Entity, IndexMap, ResMut,
@@ -7,8 +5,6 @@ use ecs::{
     world::query::Query,
 };
 use spatial::{Rect, Transform};
-
-use super::TextureView;
 
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy)]
@@ -143,6 +139,10 @@ impl Cameras {
         self.0.get_mut(entity)
     }
 
+    pub fn entities(&self) -> impl Iterator<Item = &Entity> {
+        self.0.keys()
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = (&Entity, &RenderCamera)> {
         self.0.iter()
     }
@@ -158,26 +158,28 @@ impl Cameras {
     pub fn clear(&mut self) {
         self.0.clear();
     }
-}
 
-pub(crate) fn extract_cameras<P: Projection>(
-    mut cameras: ResMut<Cameras>,
-    query: Query<(Entity, &Camera, &P, &Transform)>,
-) {
-    cameras.clear();
+    pub(crate) fn extract_cameras<P: Projection>(
+        mut cameras: ResMut<Cameras>,
+        query: Query<(Entity, &Camera, &P, &Transform)>,
+    ) {
+        cameras.clear();
 
-    for (entity, camera, projection, transform) in query {
-        let render_camera = RenderCamera {
-            camera: camera.clone(),
-            projection: projection.projection(),
-            view: transform.local_to_world.inverse(),
-            world: transform.local_to_world,
-        };
+        for (entity, camera, projection, transform) in query {
+            let render_camera = RenderCamera {
+                camera: camera.clone(),
+                projection: projection.projection(),
+                view: transform.local_to_world.inverse(),
+                world: transform.local_to_world,
+            };
 
-        cameras.insert(entity, render_camera);
+            cameras.insert(entity, render_camera);
+        }
+
+        cameras.sort();
     }
 }
 
 pub struct RenderTargets {
-    views: HashMap<Entity, TextureView>,
+    
 }

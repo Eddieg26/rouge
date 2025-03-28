@@ -799,31 +799,34 @@ pub struct MainMaterialPass {
 }
 
 impl GraphPass for MainMaterialPass {
-    type Data = Vec<ErasedDrawPass>;
-
     const NAME: crate::Name = "MainMaterialPass";
 
-    fn setup(mut self, builder: &mut crate::PassBuilder) -> Self::Data {
-        self.builders
+    fn setup(mut self, builder: &mut super::PassBuilder) -> impl Fn(&mut RenderContext) + 'static {
+        let passes = self
+            .builders
             .drain(..)
             .map(|setup| setup.build(builder))
-            .collect()
-    }
+            .collect::<Vec<_>>();
 
-    fn execute(ctx: &mut crate::RenderContext, data: &Self::Data) {
-        let cameras = ctx.world().resource::<Cameras>();
-        let meshes = ctx.world().resource::<RenderAssets<RenderMesh>>();
+        move |ctx| {
+            let Some(view) = ctx.view() else {
+                return;
+            };
 
-        let mut encoder = ctx.encoder();
-        for (entity, camera) in cameras.iter() {
-            ctx.set_view(Some(*entity));
+            let cameras = ctx.world().resource::<Cameras>();
+            let Some(camera) = cameras.get(&view) else {
+                return;
+            };
+
+            let meshes = ctx.world().resource::<RenderAssets<RenderMesh>>();
+            let mut encoder = ctx.encoder();
 
             let clear_op = match camera.clear_color {
                 Some(clear) => Some(ClearOp::Color(clear)),
                 None => None,
             };
 
-            for (index, pass) in data.iter().enumerate() {
+            for (index, pass) in passes.iter().enumerate() {
                 let clear_op = match index == 0 {
                     true => clear_op,
                     false => None,

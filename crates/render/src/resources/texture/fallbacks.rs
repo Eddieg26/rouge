@@ -1,7 +1,4 @@
-use super::{
-    GpuTexture, Sampler, SamplerDesc, Texture1d, Texture2d, Texture2dArray, Texture3d, TextureCube,
-    TextureCubeArray, TextureDimension,
-};
+use super::{GpuTexture, Sampler, SamplerDesc, Texture, TextureDimension};
 use crate::{device::RenderDevice, resources::extract::RenderResource};
 use ecs::{
     core::resource::Resource,
@@ -21,12 +18,36 @@ pub struct Fallbacks {
 impl Fallbacks {
     pub fn new(device: &RenderDevice) -> Self {
         let sampler = Sampler::new(device, &SamplerDesc::default());
-        let d1 = GpuTexture::create(device, &Texture1d::default(), sampler.clone());
-        let d2 = GpuTexture::create(device, &Texture2d::default(), sampler.clone());
-        let d2_array = GpuTexture::create(device, &Texture2dArray::default(), sampler.clone());
-        let d3 = GpuTexture::create(device, &Texture3d::default(), sampler.clone());
-        let cube = GpuTexture::create(device, &TextureCube::default(), sampler.clone());
-        let cube_array = GpuTexture::create(device, &TextureCubeArray::default(), sampler.clone());
+        let d1 = GpuTexture::create(
+            device,
+            &Texture::default_white(TextureDimension::D1),
+            sampler.clone(),
+        );
+        let d2 = GpuTexture::create(
+            device,
+            &Texture::default_white(TextureDimension::D2),
+            sampler.clone(),
+        );
+        let d2_array = GpuTexture::create(
+            device,
+            &Texture::default_white(TextureDimension::D2Array),
+            sampler.clone(),
+        );
+        let d3 = GpuTexture::create(
+            device,
+            &Texture::default_white(TextureDimension::D3),
+            sampler.clone(),
+        );
+        let cube = GpuTexture::create(
+            device,
+            &Texture::default_white(TextureDimension::Cube),
+            sampler.clone(),
+        );
+        let cube_array = GpuTexture::create(
+            device,
+            &Texture::default_white(TextureDimension::CubeArray),
+            sampler.clone(),
+        );
 
         Self {
             d1,

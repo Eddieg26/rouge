@@ -1,6 +1,6 @@
 use super::graph::RenderContext;
 use crate::{
-    renderer::graph::{ResourceId, TextureView},
+    renderer::graph::{ResourceId, RenderTarget},
     types::Color,
 };
 
@@ -119,10 +119,10 @@ impl RenderPass {
     ) -> Option<wgpu::RenderPass<'a>> {
         let mut color_attachments = vec![];
         for color in self.colors.iter() {
-            let view = ctx.get::<TextureView>(color.resource);
+            let view = ctx.get::<RenderTarget>(color.resource);
             let resolve_target = color
                 .resolve_target
-                .map(|attachment| &**ctx.get::<TextureView>(attachment));
+                .map(|attachment| &**ctx.get::<RenderTarget>(attachment));
 
             let load = match clear {
                 Some(op) => match op {
@@ -149,7 +149,7 @@ impl RenderPass {
 
         let depth_stencil_attachment = match &self.depth {
             Some(attachment) => Some(wgpu::RenderPassDepthStencilAttachment {
-                view: ctx.get::<TextureView>(attachment.resource),
+                view: ctx.get::<RenderTarget>(attachment.resource),
                 depth_ops: Some(wgpu::Operations {
                     load: match attachment.depth_store_op.load {
                         LoadOp::Clear(value) => wgpu::LoadOp::Clear(value),

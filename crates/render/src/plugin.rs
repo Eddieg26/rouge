@@ -1,12 +1,11 @@
 use crate::{
-    Cameras, DrawPipline, ExtractedViews, MeshData, Orthographic, Perspective, PostRender,
-    PreRender, ProcessResources, RenderAssets,
+    DrawPipline, ExtractedViews, MeshData, PostRender, PreRender, ProcessResources, RenderAssets,
     app::{
         Process, ProcessAssets, ProcessPipelines, Queue, QueueDraws, QueueViews, Render, RenderApp,
     },
     renderer::{
-        Draw, DrawCalls, DrawFunctions, GraphPass, MeshDataBuffer, View, ViewBuffer, ViewDrawCalls,
-        ViewEntities, graph::RenderGraph,
+        Draw, DrawFunctions, Draws, MeshDataBuffer, RenderGraphPass, View, ViewBuffer,
+        ViewDrawCalls, ViewEntities, graph::RenderGraph,
     },
     resources::{
         AssetExtractors, DefaultSampler, ExtractError, ExtractInfo, Fallbacks, Material, Mesh,
@@ -46,8 +45,6 @@ impl Plugin for RenderPlugin {
             .add_resource(ViewEntities::default())
             .add_non_send_resource(RenderGraph::new())
             .register_event::<WindowResized>()
-            .add_systems(Extract, Cameras::extract_cameras::<Perspective>)
-            .add_systems(Extract, Cameras::extract_cameras::<Orthographic>)
             .observe::<WindowResized, _>(RenderSurface::resize_surface);
 
         game.extract_render_asset::<Mesh>()
@@ -86,7 +83,7 @@ impl Plugin for RenderPlugin {
 }
 
 pub trait RenderAppExt {
-    fn add_pass<P: GraphPass>(&mut self, pass: P) -> &mut Self;
+    fn add_pass<P: RenderGraphPass>(&mut self, pass: P) -> &mut Self;
     fn add_view<V: View>(&mut self) -> &mut Self;
     fn add_draw<D: Draw>(&mut self) -> &mut Self;
     fn extract_render_asset<R: RenderAssetExtractor>(&mut self) -> &mut Self;
@@ -94,7 +91,7 @@ pub trait RenderAppExt {
 }
 
 impl RenderAppExt for GameBuilder {
-    fn add_pass<P: GraphPass>(&mut self, pass: P) -> &mut Self {
+    fn add_pass<P: RenderGraphPass>(&mut self, pass: P) -> &mut Self {
         self.sub_app_mut::<RenderApp>()
             .non_send_resource_mut::<RenderGraph>()
             .add_pass::<P>(pass);
@@ -187,21 +184,21 @@ impl<D: Draw> Plugin for DrawPlugin<D> {
 
     fn start(&mut self, game: &mut GameBuilder) {
         game.scoped_sub_app::<RenderApp>(|_, app| {
-            app.add_resource(DrawCalls::<D>::default());
-            app.add_resource(ViewDrawCalls::<D>::default());
-            app.add_systems(Extract, DrawCalls::<D>::extract_draws);
-            app.add_systems(QueueDraws, DrawCalls::<D>::queue_view_draws);
-            app.add_systems(PostRender, DrawCalls::<D>::clear_draws);
-            match app.try_resource_mut::<DrawFunctions<D::Pass>>() {
-                Some(passes) => passes.add::<D>(),
+            app.add_resource(Draws::<D>::default());
+            app.add_resource(ViewDrawCalls::<D::Phase>::default());
+            app.add_systems(Extract, Draws::<D>::extract_draws);
+            app.add_systems(QueueDraws, Draws::<D>::queue_view_draws);
+            app.add_systems(PostRender, Draws::<D>::clear_draws);
+            match app.try_resource_mut::<DrawFunctions<D::View>>() {
+                Some(functions) => {
+                    functions.add::<D>();
+                }
                 None => {
-                    let mut passes = DrawFunctions::<D::Pass>::new();
-                    passes.add::<D>();
-                    app.add_resource(passes);
+                    let mut functions = DrawFunctions::<D::View>::default();
+                    functions.add::<D>();
+                    app.add_resource(functions);
                 }
             }
-
-            // TODO Add Material Pass
         });
 
         game.load_asset::<ShaderSource>(D::shader().into());

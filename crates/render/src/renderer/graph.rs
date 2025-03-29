@@ -1,10 +1,12 @@
 use crate::{
     ComputePipeline, PipelineCache, PipelineId, RenderDevice, RenderPipeline, RenderSurface,
 };
-use ecs::{Entity, derive::Resource, world::World};
-use std::{any::Any, collections::HashMap, sync::Arc};
-
-use super::Cameras;
+use ecs::{Entity, IndexMap, derive::Resource, world::World};
+use std::{
+    any::{Any, TypeId},
+    collections::HashMap,
+    sync::Arc,
+};
 
 pub type Name = &'static str;
 pub type NodeId = u32;
@@ -19,105 +21,14 @@ pub enum ResourceType {
 pub trait GraphResource: Any + Sized + 'static {
     type Desc: Any + 'static;
 
+    const NAME: Name;
+
     fn create(
         device: &RenderDevice,
         surface: &RenderSurface,
         name: Name,
         desc: &Self::Desc,
     ) -> Self;
-}
-
-pub struct TextureDesc {
-    pub usage: wgpu::TextureUsages,
-    pub format: wgpu::TextureFormat,
-}
-
-pub struct RenderTarget(wgpu::TextureView);
-impl From<wgpu::TextureView> for RenderTarget {
-    fn from(value: wgpu::TextureView) -> Self {
-        Self(value)
-    }
-}
-
-impl std::ops::Deref for RenderTarget {
-    type Target = wgpu::TextureView;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl AsRef<wgpu::TextureView> for RenderTarget {
-    fn as_ref(&self) -> &wgpu::TextureView {
-        &self.0
-    }
-}
-
-impl GraphResource for RenderTarget {
-    type Desc = TextureDesc;
-
-    fn create(
-        device: &RenderDevice,
-        surface: &RenderSurface,
-        name: Name,
-        desc: &Self::Desc,
-    ) -> Self {
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some(name),
-            size: wgpu::Extent3d {
-                width: surface.width(),
-                height: surface.height(),
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: desc.format,
-            usage: desc.usage,
-            view_formats: &[desc.format],
-        });
-
-        texture.create_view(&Default::default()).into()
-    }
-}
-
-pub struct BufferDesc {
-    pub size: wgpu::BufferSize,
-    pub usage: wgpu::BufferUsages,
-}
-
-pub struct RenderBuffer(wgpu::Buffer);
-impl From<wgpu::Buffer> for RenderBuffer {
-    fn from(value: wgpu::Buffer) -> Self {
-        Self(value)
-    }
-}
-
-impl std::ops::Deref for RenderBuffer {
-    type Target = wgpu::Buffer;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl AsRef<wgpu::Buffer> for RenderBuffer {
-    fn as_ref(&self) -> &wgpu::Buffer {
-        &self.0
-    }
-}
-
-impl GraphResource for RenderBuffer {
-    type Desc = BufferDesc;
-
-    fn create(device: &RenderDevice, _: &RenderSurface, name: Name, desc: &Self::Desc) -> Self {
-        RenderBuffer::from(device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some(name),
-            size: desc.size.get(),
-            usage: desc.usage,
-            mapped_at_creation: false,
-        }))
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -175,10 +86,10 @@ impl ResourceEntry {
         }
     }
 
-    pub fn import<R: GraphResource>(id: ResourceId, name: Name, object: Option<R>) -> Self {
+    pub fn import<R: GraphResource>(id: ResourceId, object: Option<R>) -> Self {
         Self {
             id,
-            name,
+            name: R::NAME,
             version: 0,
             ty: ResourceType::Imported,
             desc: Arc::new(()),
@@ -245,30 +156,39 @@ impl<'a> PassBuilder<'a> {
         }
     }
 
-    pub fn create<R: GraphResource>(&mut self, name: Name, desc: R::Desc) -> ResourceId {
+    pub fn create<R: GraphResource>(&mut self, desc: R::Desc) -> ResourceId {
         let resource = self.graph.entries.len() as u32;
-        let entry = ResourceEntry::new::<R>(resource, name, ResourceType::Transient, desc);
+        let entry = ResourceEntry::new::<R>(resource, R::NAME, ResourceType::Transient, desc);
         let node = ResourceNode::new(self.graph.resources.len() as u32, resource);
 
         self.graph.resources.push(node);
-        self.graph.entries.push(entry);
+        self.graph.entries.insert(TypeId::of::<R>(), entry);
         self.creates.push(resource);
 
         resource
     }
 
-    pub fn read(&mut self, id: ResourceId) -> ResourceId {
-        assert!(self.validate(id));
+    pub fn read<G: GraphResource>(&mut self) -> ResourceId {
+        let id = self
+            .graph
+            .get_resource_entry::<G>()
+            .expect("resource not found")
+            .id;
 
         self.reads.push(id);
 
         id
     }
 
-    pub fn write(&mut self, id: ResourceId) -> ResourceId {
-        assert!(self.validate(id));
+    pub fn write<G: GraphResource>(&mut self) -> ResourceId {
+        let entry = self
+            .graph
+            .get_resource_entry::<G>()
+            .expect("resource not found");
 
-        if self.entry(id).ty == ResourceType::Imported {
+        let id = entry.id;
+
+        if entry.ty == ResourceType::Imported {
             self.has_side_effect = true;
         }
 
@@ -291,15 +211,8 @@ impl<'a> PassBuilder<'a> {
         }
     }
 
-    fn validate(&self, id: ResourceId) -> bool {
-        let index = id as usize;
-        let node = &self.graph.resources[index];
-        node.version == self.graph.entries[node.resource as usize].version
-    }
-
-    fn entry(&self, id: ResourceId) -> &ResourceEntry {
-        let node = &self.graph.resources[id as usize];
-        &self.graph.entries[node.resource as usize]
+    pub fn force(&mut self) {
+        self.has_side_effect = true;
     }
 
     fn entry_mut(&mut self, id: ResourceId) -> &mut ResourceEntry {
@@ -307,7 +220,7 @@ impl<'a> PassBuilder<'a> {
         &mut self.graph.entries[node.resource as usize]
     }
 
-    fn build<P: GraphPass>(mut self, pass: P) -> PassNode {
+    fn build<P: RenderGraphPass>(mut self, pass: P) -> PassNode {
         let executor = P::setup(pass, &mut self);
         PassNode {
             id: self.id,
@@ -321,47 +234,30 @@ impl<'a> PassBuilder<'a> {
     }
 }
 
-pub trait GraphPass {
+pub trait RenderGraphPass {
     const NAME: Name;
 
     fn setup(self, builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + 'static;
 }
 
-pub trait Subgraph {
+pub trait SubGraph: 'static {
     const NAME: Name;
-
-    fn setup(builder: &mut PassBuilder) -> impl Fn(&mut RenderContext, &mut RenderGraph) + 'static;
 }
 
-pub struct SubgraphPass<G: Subgraph>(std::marker::PhantomData<G>);
-impl<G: Subgraph> Default for SubgraphPass<G> {
+pub struct SubgraphPass<G: SubGraph>(std::marker::PhantomData<G>);
+impl<G: SubGraph> Default for SubgraphPass<G> {
     fn default() -> Self {
         Self(std::marker::PhantomData)
     }
 }
 
-impl<G: Subgraph> GraphPass for SubgraphPass<G> {
+impl<G: SubGraph> RenderGraphPass for SubgraphPass<G> {
     const NAME: Name = G::NAME;
 
-    fn setup(self, builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + 'static {
-        let executor = G::setup(builder);
-
+    fn setup(self, _: &mut PassBuilder) -> impl Fn(&mut RenderContext) + 'static {
         move |ctx| {
-            ctx.run_sub_graph(Self::NAME, &executor);
+            ctx.run_sub_graph(Self::NAME);
         }
-    }
-}
-
-pub struct SubgraphRunner<'a>(&'a mut RenderGraph);
-impl<'a> SubgraphRunner<'a> {
-    pub fn run(
-        &mut self,
-        world: &World,
-        device: &RenderDevice,
-        surface: &RenderSurface,
-        view: Option<Entity>,
-    ) {
-        self.0.run(world, device, surface, view);
     }
 }
 
@@ -392,7 +288,7 @@ pub struct CompiledGraph {
 pub struct RenderGraph {
     passes: Vec<PassNode>,
     resources: Vec<ResourceNode>,
-    entries: Vec<ResourceEntry>,
+    entries: IndexMap<TypeId, ResourceEntry>,
     sub_graphs: HashMap<Name, RenderGraph>,
 }
 
@@ -401,12 +297,12 @@ impl RenderGraph {
         Self {
             passes: vec![],
             resources: vec![],
-            entries: vec![],
+            entries: IndexMap::new(),
             sub_graphs: HashMap::new(),
         }
     }
 
-    pub fn add_pass<P: GraphPass>(&mut self, pass: P) -> NodeId {
+    pub fn add_pass<P: RenderGraphPass>(&mut self, pass: P) -> NodeId {
         let id = self.passes.len() as u32;
         let node = PassBuilder::new(id, self).build::<P>(pass);
         self.passes.push(node);
@@ -414,18 +310,45 @@ impl RenderGraph {
         id
     }
 
-    pub fn add_sub_graph<G: Subgraph>(&mut self) {
+    pub fn add_sub_graph<G: SubGraph>(&mut self) {
         let id = self.add_pass::<SubgraphPass<G>>(SubgraphPass::default());
         self.passes[id as usize].has_side_effect = true;
 
         self.sub_graphs.insert(G::NAME, RenderGraph::new());
     }
 
-    pub fn get_resource<G: GraphResource>(&self, id: ResourceId) -> Option<&G> {
-        let resource = self.resources.get(id as usize)?;
-        let entry = self.entries.get(resource.resource as usize)?;
+    pub fn import<R: GraphResource>(&mut self, resource: Option<R>) {
+        let id = self.entries.len() as u32;
+        match self.entries.entry(TypeId::of::<R>()) {
+            ecs::map::Entry::Occupied(mut entry) => {
+                let entry = entry.get_mut();
+                if entry.ty == ResourceType::Transient {
+                    panic!("transient resource already exists: {}", R::NAME);
+                } else {
+                    entry.object = resource.map(|o| Box::new(o) as Box<dyn Any>);
+                }
+            }
+            ecs::map::Entry::Vacant(entry) => {
+                let node = ResourceNode::new(self.resources.len() as u32, id);
+                let resource = ResourceEntry::import::<R>(id, resource);
 
-        entry.object.as_ref().and_then(|o| o.downcast_ref::<G>())
+                self.resources.push(node);
+                entry.insert(resource);
+            }
+        }
+    }
+
+    pub fn get_resource<G: GraphResource>(&self, id: ResourceId) -> Option<&G> {
+        let node = self.resources.get(id as usize)?;
+
+        self.entries[node.resource as usize]
+            .object
+            .as_ref()?
+            .downcast_ref::<G>()
+    }
+
+    pub fn get_resource_entry<G: GraphResource>(&self) -> Option<&ResourceEntry> {
+        self.entries.get(&TypeId::of::<G>())
     }
 
     fn compile(&self) -> CompiledGraph {
@@ -437,7 +360,7 @@ impl RenderGraph {
 
         let mut resources = self
             .entries
-            .iter()
+            .values()
             .map(ResourceInfo::from)
             .collect::<Vec<_>>();
 
@@ -622,31 +545,66 @@ impl<'a> RenderContext<'a> {
         self.view = view
     }
 
-    pub(crate) fn run_sub_graph(
-        &mut self,
-        name: Name,
-        executor: &(impl Fn(&mut RenderContext, &mut RenderGraph) + 'static),
-    ) {
-        if let Some(mut graph) = self.sub_graphs.remove(name) {
-            executor(self, &mut graph);
+    pub(crate) fn run_sub_graph(&mut self, name: Name) {
+        if let Some(graph) = self.sub_graphs.get_mut(name) {
             graph.run(self.world, self.device, self.surface, self.view);
-            self.sub_graphs.insert(name, graph);
         }
     }
 }
 
-pub struct CameraSubGraph;
+pub struct TextureDesc {
+    pub usage: wgpu::TextureUsages,
+    pub format: wgpu::TextureFormat,
+}
 
-impl Subgraph for CameraSubGraph {
-    const NAME: Name = "camera";
+pub struct RenderTarget(Arc<wgpu::TextureView>);
+impl From<wgpu::TextureView> for RenderTarget {
+    fn from(value: wgpu::TextureView) -> Self {
+        Self(Arc::new(value))
+    }
+}
+impl From<Arc<wgpu::TextureView>> for RenderTarget {
+    fn from(value: Arc<wgpu::TextureView>) -> Self {
+        Self(value)
+    }
+}
 
-    fn setup(_: &mut PassBuilder) -> impl Fn(&mut RenderContext, &mut RenderGraph) + 'static {
-        move |ctx, graph| {
-            let cameras = ctx.world().resource::<Cameras>();
+impl RenderTarget {
+    pub fn new(view: wgpu::TextureView) -> Self {
+        Self(Arc::new(view))
+    }
+}
 
-            for entity in cameras.entities() {
-                graph.run(ctx.world(), ctx.device(), ctx.surface(), Some(*entity));
-            }
-        }
+impl std::ops::Deref for RenderTarget {
+    type Target = Arc<wgpu::TextureView>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl GraphResource for RenderTarget {
+    type Desc = ();
+
+    const NAME: Name = "RenderTarget";
+
+    fn create(device: &RenderDevice, surface: &RenderSurface, name: Name, _: &Self::Desc) -> Self {
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some(name),
+            size: wgpu::Extent3d {
+                width: surface.width(),
+                height: surface.height(),
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: surface.format(),
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        Self(Arc::new(view))
     }
 }

@@ -1,7 +1,7 @@
-use super::GraphPass;
+use super::{PassBuilder, RenderGraphPass};
 use crate::{
     device::RenderDevice,
-    renderer::{graph::RenderContext, pass::RenderPass, state::RenderState},
+    renderer::{graph::RenderContext, state::RenderState},
     resources::{
         BlendMode, FragmentState, Id, Material, MaterialBinding, MaterialLayout, Mesh, MeshLayout,
         PipelineCache, PipelineId, RenderAssets, RenderMesh, RenderPipelineDesc, RenderResource,
@@ -11,9 +11,9 @@ use crate::{
     },
     surface::RenderSurface,
 };
-use asset::{AssetRef, database::AssetDatabase};
+use asset::{AssetId, AssetRef, database::AssetDatabase};
 use ecs::{
-    Entity, Res, ResMut, Resource,
+    Entity, IndexMap, Res, ResMut, Resource,
     system::unlifetime::{ReadRes, WriteRes},
     world::{
         action::WorldActions,
@@ -25,7 +25,7 @@ use encase::{ShaderType, internal::WriteInto};
 use game::Main;
 use glam::{Mat4, Vec3};
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, hash::Hash, ops::Range};
+use std::{any::TypeId, collections::HashMap, hash::Hash, ops::Range};
 use wgpu::{
     BufferUsages, ColorTargetState, PrimitiveState, ShaderStages, VertexFormat, VertexStepMode,
 };
@@ -43,28 +43,12 @@ impl Resource for ViewEntities {}
 pub trait View: ShaderType + WriteInto + Send + Sync + Sized + 'static {
     type Query: BaseQuery;
 
-    fn extract<'a>(query: <Self::Query as BaseQuery>::Item<'a>) -> Self;
-}
-
-#[derive(ShaderType, Clone, Copy)]
-pub struct SimpleView {
-    pub world: Mat4,
-    pub view: Mat4,
-    pub projection: Mat4,
-}
-
-impl Default for SimpleView {
-    fn default() -> Self {
-        Self {
-            world: Mat4::IDENTITY,
-            view: Mat4::IDENTITY,
-            projection: Mat4::IDENTITY,
-        }
-    }
+    fn extract<'a>(query: <Self::Query as BaseQuery>::Item<'a>) -> ExtractedView<Self>;
 }
 
 pub struct ExtractedView<V: View> {
     pub entity: Entity,
+    pub depth: i32,
     pub view: V,
 }
 
@@ -79,14 +63,16 @@ impl<V: View> Default for ExtractedViews<V> {
 pub struct RenderView<V: View> {
     entity: Entity,
     view: V,
+    depth: i32,
     dynamic_offset: u32,
 }
 
 impl<V: View> RenderView<V> {
-    pub fn new(entity: Entity, view: V, dynamic_offset: u32) -> Self {
+    pub fn new(entity: Entity, view: V, depth: i32, dynamic_offset: u32) -> Self {
         Self {
             entity,
             view,
+            depth,
             dynamic_offset,
         }
     }
@@ -97,6 +83,10 @@ impl<V: View> RenderView<V> {
 
     pub fn view(&self) -> &V {
         &self.view
+    }
+
+    pub fn depth(&self) -> i32 {
+        self.depth
     }
 
     pub fn dynamic_offset(&self) -> u32 {
@@ -151,15 +141,23 @@ impl<V: View> ViewBuffer<V> {
         &self.bind_group_layout
     }
 
-    pub fn add_view(&mut self, entity: Entity, view: V) {
-        let dynamic_offset = self.buffer.push(&view) as u32;
-        self.views
-            .push(RenderView::new(entity, view, dynamic_offset));
+    pub fn add_view(&mut self, extracted: ExtractedView<V>) {
+        let dynamic_offset = self.buffer.push(&extracted.view) as u32;
+        self.views.push(RenderView::new(
+            extracted.entity,
+            extracted.view,
+            extracted.depth,
+            dynamic_offset,
+        ));
     }
 
     pub fn clear(&mut self) {
         self.views.clear();
         self.buffer.clear();
+    }
+
+    pub fn sort(&mut self) {
+        self.views.sort_by(|a, b| a.depth().cmp(&b.depth()));
     }
 
     pub fn update(&mut self, device: &RenderDevice) {
@@ -171,13 +169,13 @@ impl<V: View> ViewBuffer<V> {
     }
 
     pub(crate) fn extract_views(
-        query: Main<Query<(Entity, V::Query)>>,
+        query: Main<Query<V::Query>>,
         mut views: ResMut<ExtractedViews<V>>,
         mut view_entites: ResMut<ViewEntities>,
     ) {
-        for (entity, item) in query.into_inner() {
+        for item in query.into_inner() {
             let view = V::extract(item);
-            views.0.push(ExtractedView { entity, view });
+            views.0.push(view);
         }
 
         view_entites
@@ -190,8 +188,10 @@ impl<V: View> ViewBuffer<V> {
         mut extracted_views: ResMut<ExtractedViews<V>>,
     ) {
         for view in extracted_views.0.drain(..) {
-            view_buffer.add_view(view.entity, view.view);
+            view_buffer.add_view(view);
         }
+
+        view_buffer.sort();
     }
 
     pub(crate) fn clear_views(mut view_buffer: ResMut<ViewBuffer<V>>) {
@@ -313,73 +313,35 @@ impl<T: MeshData> RenderResource for MeshDataBuffer<T> {
     }
 }
 
-#[derive(Clone, Copy)]
-pub struct BatchKey<M: Material> {
-    pub material: AssetRef<M>,
-    pub mesh: AssetRef<Mesh>,
-    pub sub_mesh: Option<SubMesh>,
-}
-
-impl<M: Material> PartialEq for BatchKey<M> {
-    fn eq(&self, other: &Self) -> bool {
-        self.material == other.material
-            && self.mesh == other.mesh
-            && self.sub_mesh == other.sub_mesh
-    }
-}
-impl<M: Material> Eq for BatchKey<M> {}
-impl<M: Material> Hash for BatchKey<M> {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.material.hash(state);
-        self.mesh.hash(state);
-        self.sub_mesh.hash(state);
-    }
-}
-
-impl<M: Material> std::fmt::Debug for BatchKey<M> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("BatchKey")
-            .field("material", &self.material)
-            .field("mesh", &self.mesh)
-            .field("sub_mesh", &self.sub_mesh)
-            .finish()
-    }
-}
-
-pub struct DrawRanges<D: Draw> {
-    pub(crate) batches: HashMap<BatchKey<D::Material>, Range<u32>>,
-    pub(crate) unbatched: Vec<(BatchKey<D::Material>, u32)>,
-}
-
-pub struct ViewDrawCalls<D: Draw>(HashMap<Entity, DrawRanges<D>>);
-impl<D: Draw> Default for ViewDrawCalls<D> {
+pub struct ViewDrawCalls<D: DrawPhase>(HashMap<Entity, Vec<DrawCall<D>>>);
+impl<D: DrawPhase> Default for ViewDrawCalls<D> {
     fn default() -> Self {
         Self(HashMap::new())
     }
 }
 
-impl<D: Draw> ViewDrawCalls<D> {
+impl<D: DrawPhase> ViewDrawCalls<D> {
     pub fn clear(&mut self) {
         self.0.clear();
     }
 
-    pub fn get(&self, entity: Entity) -> Option<&DrawRanges<D>> {
+    pub fn get(&self, entity: Entity) -> Option<&Vec<DrawCall<D>>> {
         self.0.get(&entity)
     }
 
-    pub fn get_mut(&mut self, entity: Entity) -> Option<&mut DrawRanges<D>> {
+    pub fn get_mut(&mut self, entity: Entity) -> Option<&mut Vec<DrawCall<D>>> {
         self.0.get_mut(&entity)
     }
 
-    pub fn insert(&mut self, entity: Entity, ranges: DrawRanges<D>) {
+    pub fn insert(&mut self, entity: Entity, ranges: Vec<DrawCall<D>>) {
         self.0.insert(entity, ranges);
     }
 
-    pub fn remove(&mut self, entity: Entity) -> Option<DrawRanges<D>> {
+    pub fn remove(&mut self, entity: Entity) -> Option<Vec<DrawCall<D>>> {
         self.0.remove(&entity)
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (&Entity, &DrawRanges<D>)> {
+    pub fn iter(&self) -> impl Iterator<Item = (&Entity, &Vec<DrawCall<D>>)> {
         self.0.iter()
     }
 
@@ -390,18 +352,42 @@ impl<D: Draw> ViewDrawCalls<D> {
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
+
+    pub fn draw(
+        &self,
+        ctx: &RenderContext,
+        view: &RenderView<D::View>,
+        meshes: &RenderAssets<RenderMesh>,
+        view_buffer: &ViewBuffer<D::View>,
+        draw_functions: &DrawFunctions<D::View>,
+        state: &mut RenderState,
+    ) {
+        if let Some(calls) = self.get(view.entity()) {
+            for call in calls.iter() {
+                draw_functions.get(call.id)(
+                    &call.key,
+                    call.instances.clone(),
+                    ctx,
+                    view,
+                    view_buffer,
+                    meshes,
+                    state,
+                );
+            }
+        }
+    }
 }
 
-impl<D: Draw> Resource for ViewDrawCalls<D> {}
+impl<D: DrawPhase> Resource for ViewDrawCalls<D> {}
 
-pub struct DrawCalls<D: Draw>(Vec<D>);
-impl<D: Draw> Default for DrawCalls<D> {
+pub struct Draws<D: Draw>(Vec<D>);
+impl<D: Draw> Default for Draws<D> {
     fn default() -> Self {
         Self(Vec::new())
     }
 }
 
-impl<D: Draw> DrawCalls<D> {
+impl<D: Draw> Draws<D> {
     pub(crate) fn extract_draws(query: Main<Query<D::Query>>, mut draws: ResMut<Self>) {
         for item in query.into_inner() {
             let draw = D::extract(item);
@@ -412,56 +398,57 @@ impl<D: Draw> DrawCalls<D> {
     pub(crate) fn queue_view_draws(
         draws: Res<Self>,
         views: Res<ViewBuffer<D::View>>,
-        mut view_draws: ResMut<ViewDrawCalls<D>>,
+        draw_functions: Res<DrawFunctions<D::View>>,
+        mut view_draws: ResMut<ViewDrawCalls<D::Phase>>,
         mut mesh_buffer: ResMut<MeshDataBuffer<D::Mesh>>,
     ) {
+        let draw_id = draw_functions.get_id::<D>();
+
         for view in views.views() {
             if D::BATCH && D::Material::mode() != BlendMode::Transparent {
                 let mut batches = HashMap::new();
 
-                for call in draws.iter() {
+                for (index, call) in draws.iter().enumerate() {
                     let key = BatchKey {
-                        material: call.material(),
+                        material: call.material().into(),
                         mesh: call.mesh(),
                         sub_mesh: call.sub_mesh(),
                     };
 
-                    batches.entry(key).or_insert(vec![]).push(call.data());
+                    let (draw_index, data) = batches.entry(key).or_insert((index, vec![]));
+                    data.push(call.data());
+
+                    *draw_index = (*draw_index).min(index)
                 }
 
-                view_draws.insert(
-                    view.entity(),
-                    DrawRanges {
-                        batches: batches
-                            .drain()
-                            .map(|(key, data)| {
-                                let range = mesh_buffer.append(data);
-                                (key, range)
-                            })
-                            .collect(),
-                        unbatched: vec![],
-                    },
-                );
+                let calls = batches
+                    .drain()
+                    .map(|(key, (draw_index, data))| {
+                        let instances = mesh_buffer.append(data);
+                        let phase = draws[draw_index].phase(view);
+                        DrawCall::new(draw_id, key, phase, instances)
+                    })
+                    .collect::<Vec<_>>();
+
+                view_draws.insert(view.entity(), calls);
             } else {
                 let mut unbatched = vec![];
 
                 for call in draws.iter() {
                     let offset = mesh_buffer.push(call.data());
                     let key = BatchKey {
-                        material: call.material(),
+                        material: call.material().into(),
                         mesh: call.mesh(),
                         sub_mesh: call.sub_mesh(),
                     };
-                    unbatched.push((key, offset));
-                }
 
-                view_draws.insert(
-                    view.entity(),
-                    DrawRanges {
-                        batches: HashMap::new(),
-                        unbatched,
-                    },
-                );
+                    unbatched.push(DrawCall {
+                        id: draw_id,
+                        key,
+                        phase: call.phase(view),
+                        instances: offset..offset + 1,
+                    });
+                }
             }
         }
     }
@@ -471,7 +458,7 @@ impl<D: Draw> DrawCalls<D> {
     }
 }
 
-impl<D: Draw> std::ops::Deref for DrawCalls<D> {
+impl<D: Draw> std::ops::Deref for Draws<D> {
     type Target = Vec<D>;
 
     fn deref(&self) -> &Self::Target {
@@ -479,16 +466,13 @@ impl<D: Draw> std::ops::Deref for DrawCalls<D> {
     }
 }
 
-impl<D: Draw> std::ops::DerefMut for DrawCalls<D> {
+impl<D: Draw> std::ops::DerefMut for Draws<D> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
 }
 
-impl<D: Draw> Resource for DrawCalls<D> {}
-
-pub type DrawFunction<V> =
-    fn(&RenderContext, &RenderView<V>, &ViewBuffer<V>, &RenderAssets<RenderMesh>, &mut RenderState);
+impl<D: Draw> Resource for Draws<D> {}
 
 pub struct DrawPipline<D: Draw>(PipelineId, std::marker::PhantomData<D>);
 impl<D: Draw> DrawPipline<D> {
@@ -607,43 +591,98 @@ impl<D: Draw> RenderResource for DrawPipline<D> {
     }
 }
 
-pub struct DrawFunctions<M: DrawPass> {
-    opaque: Vec<DrawFunction<M::View>>,
-    transparent: Vec<DrawFunction<M::View>>,
+pub type DrawFunction<V> = fn(
+    &BatchKey,
+    Range<u32>,
+    &RenderContext,
+    &RenderView<V>,
+    &ViewBuffer<V>,
+    &RenderAssets<RenderMesh>,
+    &mut RenderState,
+);
+
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+pub struct DrawId(u32);
+
+pub struct DrawFunctions<V: View>(IndexMap<TypeId, DrawFunction<V>>);
+impl<V: View> Default for DrawFunctions<V> {
+    fn default() -> Self {
+        Self(IndexMap::new())
+    }
 }
 
-impl<M: DrawPass> DrawFunctions<M> {
-    pub fn new() -> Self {
-        Self {
-            opaque: Vec::new(),
-            transparent: Vec::new(),
+impl<V: View> DrawFunctions<V> {
+    pub fn add<D: Draw<View = V>>(&mut self) -> DrawId {
+        let id = TypeId::of::<D>();
+        if !self.0.contains_key(&id) {
+            self.0.insert(id, Self::draw_function::<D>());
         }
+
+        self.0
+            .get_index_of(&id)
+            .map(|index| DrawId(index as u32))
+            .unwrap()
     }
 
-    pub fn add<D: Draw<View = M::View>>(&mut self) {
+    pub fn get(&self, id: DrawId) -> &DrawFunction<V> {
+        &self.0[id.0 as usize]
+    }
+
+    pub fn get_id<D: Draw<View = V>>(&self) -> DrawId {
+        let id = TypeId::of::<D>();
+        self.0
+            .get_index_of(&id)
+            .map(|index| DrawId(index as u32))
+            .unwrap()
+    }
+
+    fn draw_function<D: Draw<View = V>>() -> DrawFunction<V> {
         const VIEW_GROUP: u32 = 0;
         const MATERIAL_GROUP: u32 = 1;
         const VERTEX_BUFFER_SLOT: u32 = 0;
         const INSTANCE_BUFFER_SLOT: u32 = 1;
 
-        let pass: DrawFunction<M::View> = |ctx, view, view_buffer, meshes, state| {
-            let draw_calls = ctx.world().resource::<ViewDrawCalls<D>>();
-            let Some(draw_calls) = draw_calls.get(view.entity()) else {
-                return;
-            };
-
-            let Some(pipeline_id) = ctx.world().try_resource::<DrawPipline<D>>() else {
-                return;
-            };
-
-            let Some(pipeline) = ctx.get_render_pipeline(&pipeline_id) else {
-                return;
-            };
-
+        |key,
+         instances,
+         ctx,
+         view,
+         view_buffer: &ViewBuffer<D::View>,
+         meshes: &RenderAssets<RenderMesh>,
+         state: &mut RenderState| {
             let mesh_data = ctx.world().resource::<MeshDataBuffer<D::Mesh>>();
+
+            let mesh = match meshes.get(&(*key.mesh).into()) {
+                Some(mesh) => mesh,
+                None => return,
+            };
+
             let materials = ctx
                 .world()
                 .resource::<RenderAssets<MaterialBinding<D::Material>>>();
+
+            let material = match materials.get(&(key.material.into())) {
+                Some(material) => material,
+                None => return,
+            };
+
+            let Some(pipeline) = ctx
+                .world()
+                .try_resource::<DrawPipline<D>>()
+                .and_then(|id| ctx.get_render_pipeline(id))
+            else {
+                return;
+            };
+
+            let (vertices, indices) = match key.sub_mesh {
+                Some(sub_mesh) => {
+                    let vertices = sub_mesh.start_vertex as u32
+                        ..(sub_mesh.start_vertex + sub_mesh.vertex_count) as u32;
+                    let indices = sub_mesh.start_index as u32
+                        ..(sub_mesh.start_index + sub_mesh.index_count) as u32;
+                    (vertices, indices)
+                }
+                None => (0..mesh.vertex_count() as u32, 0..mesh.index_count() as u32),
+            };
 
             state.set_pipeline(pipeline);
             state.set_vertex_buffer(INSTANCE_BUFFER_SLOT, mesh_data.buffer().slice(..));
@@ -653,189 +692,82 @@ impl<M: DrawPass> DrawFunctions<M> {
                 &[view.dynamic_offset()],
             );
 
-            let mut execute = |key: &BatchKey<D::Material>, batch: Range<u32>| {
-                let mesh = match meshes.get(&(*key.mesh).into()) {
-                    Some(mesh) => mesh,
-                    None => return,
-                };
+            state.set_vertex_buffer(VERTEX_BUFFER_SLOT, mesh.vertex_buffer().slice(..));
+            state.set_bind_group(MATERIAL_GROUP, material, &[]);
 
-                let material = match materials.get(&(*key.material).into()) {
-                    Some(material) => material,
-                    None => return,
-                };
-
-                let (vertices, indices) = match key.sub_mesh {
-                    Some(sub_mesh) => {
-                        let vertices = sub_mesh.start_vertex as u32
-                            ..(sub_mesh.start_vertex + sub_mesh.vertex_count) as u32;
-                        let indices = sub_mesh.start_index as u32
-                            ..(sub_mesh.start_index + sub_mesh.index_count) as u32;
-                        (vertices, indices)
-                    }
-                    None => (0..mesh.vertex_count() as u32, 0..mesh.index_count() as u32),
-                };
-
-                state.set_vertex_buffer(VERTEX_BUFFER_SLOT, mesh.vertex_buffer().slice(..));
-                state.set_bind_group(MATERIAL_GROUP, material, &[]);
-
-                match mesh.index_buffer() {
-                    Some(buffer) => {
-                        state.set_index_buffer(buffer.slice(..));
-                        state.draw_indexed(indices, vertices.start as i32, batch);
-                    }
-                    None => {
-                        state.draw(vertices, batch);
-                    }
+            match mesh.index_buffer() {
+                Some(buffer) => {
+                    state.set_index_buffer(buffer.slice(..));
+                    state.draw_indexed(indices, vertices.start as i32, instances);
                 }
-            };
-
-            for (key, batch) in &draw_calls.batches {
-                execute(key, batch.clone());
+                None => {
+                    state.draw(vertices, instances);
+                }
             }
-
-            for (key, offset) in &draw_calls.unbatched {
-                let batch = *offset..offset + 1;
-                execute(key, batch);
-            }
-        };
-
-        match D::Material::mode() {
-            BlendMode::Opaque => self.opaque.push(pass),
-            BlendMode::Transparent => self.transparent.push(pass),
-        }
-    }
-
-    pub fn draw(
-        &self,
-        ctx: &RenderContext,
-        view: &RenderView<M::View>,
-        buffer: &ViewBuffer<M::View>,
-        meshes: &RenderAssets<RenderMesh>,
-        state: &mut RenderState,
-    ) {
-        for pass in &self.opaque {
-            pass(ctx, view, buffer, meshes, state);
-        }
-
-        for pass in &self.transparent {
-            pass(ctx, view, buffer, meshes, state);
         }
     }
 }
 
-impl<M: DrawPass> Resource for DrawFunctions<M> {}
+impl<V: View> Resource for DrawFunctions<V> {}
 
-pub trait DrawPass: Send + Sync + 'static {
+pub trait DrawPhase: Send + Sync + 'static {
+    type View: View;
+}
+
+pub trait SortedPhase: 'static {
+    type Key: Hash + Eq + PartialOrd + Ord;
+
+    fn key(&self) -> Self::Key;
+}
+
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+pub struct BatchKey {
+    pub material: AssetId,
+    pub mesh: AssetRef<Mesh>,
+    pub sub_mesh: Option<SubMesh>,
+}
+
+pub struct DrawCall<D: DrawPhase> {
+    pub id: DrawId,
+    pub key: BatchKey,
+    pub phase: D,
+    pub instances: Range<u32>,
+}
+
+impl<D: DrawPhase> DrawCall<D> {
+    pub fn new(id: DrawId, key: BatchKey, phase: D, instances: Range<u32>) -> Self {
+        Self {
+            id,
+            key,
+            phase,
+            instances,
+        }
+    }
+}
+
+pub trait ViewPass: Send + Sync + 'static {
     type View: View;
 
     const NAME: super::Name;
 
-    fn setup(builder: &mut super::PassBuilder) -> RenderPass;
+    fn setup(
+        builder: &mut PassBuilder,
+    ) -> impl Fn(&mut RenderContext, &RenderView<Self::View>) + 'static;
 }
 
-pub type DrawCommand = fn(&RenderContext, &mut RenderState, &RenderAssets<RenderMesh>);
+pub struct ViewPassNode<V: ViewPass>(std::marker::PhantomData<V>);
 
-pub struct DrawPassBuilder {
-    setup: fn(&mut super::PassBuilder) -> RenderPass,
-    command: DrawCommand,
-}
+impl<V: ViewPass> RenderGraphPass for ViewPassNode<V> {
+    const NAME: super::Name = V::NAME;
 
-impl DrawPassBuilder {
-    pub fn new<P: DrawPass>() -> Self {
-        Self {
-            setup: P::setup,
-            command: |ctx, state, meshes| {
-                let view_buffer = ctx.world().resource::<ViewBuffer<P::View>>();
-
-                let Some(view) = ctx.view().and_then(|e| view_buffer.get_view(e)) else {
-                    return;
-                };
-
-                let passes = ctx.world().resource::<DrawFunctions<P>>();
-
-                passes.draw(ctx, view, view_buffer, meshes, state);
-            },
-        }
-    }
-
-    pub fn build(self, builder: &mut super::PassBuilder) -> ErasedDrawPass {
-        let pass = (self.setup)(builder);
-        ErasedDrawPass {
-            pass,
-            command: self.command,
-        }
-    }
-}
-
-pub struct ErasedDrawPass {
-    pass: RenderPass,
-    command: DrawCommand,
-}
-
-impl ErasedDrawPass {
-    pub fn begin<'a>(
-        &'a self,
-        encoder: &'a mut wgpu::CommandEncoder,
-        ctx: &'a RenderContext,
-        clear: Option<super::ClearOp>,
-    ) -> Option<wgpu::RenderPass<'a>> {
-        self.pass.begin(encoder, ctx, clear)
-    }
-
-    pub fn execute(
-        &self,
-        ctx: &RenderContext,
-        state: &mut RenderState,
-        meshes: &RenderAssets<RenderMesh>,
-    ) {
-        (self.command)(ctx, state, meshes);
-    }
-}
-
-use crate::{Cameras, ClearOp};
-
-pub struct MainMaterialPass {
-    builders: Vec<DrawPassBuilder>,
-}
-
-impl GraphPass for MainMaterialPass {
-    const NAME: crate::Name = "MainMaterialPass";
-
-    fn setup(mut self, builder: &mut super::PassBuilder) -> impl Fn(&mut RenderContext) + 'static {
-        let passes = self
-            .builders
-            .drain(..)
-            .map(|setup| setup.build(builder))
-            .collect::<Vec<_>>();
+    fn setup(self, builder: &mut super::PassBuilder) -> impl Fn(&mut RenderContext) + 'static {
+        let execute = V::setup(builder);
 
         move |ctx| {
-            let Some(view) = ctx.view() else {
-                return;
-            };
+            let view_buffer = ctx.world().resource::<ViewBuffer<V::View>>();
 
-            let cameras = ctx.world().resource::<Cameras>();
-            let Some(camera) = cameras.get(&view) else {
-                return;
-            };
-
-            let meshes = ctx.world().resource::<RenderAssets<RenderMesh>>();
-            let mut encoder = ctx.encoder();
-
-            let clear_op = match camera.clear_color {
-                Some(clear) => Some(ClearOp::Color(clear)),
-                None => None,
-            };
-
-            for (index, pass) in passes.iter().enumerate() {
-                let clear_op = match index == 0 {
-                    true => clear_op,
-                    false => None,
-                };
-
-                if let Some(mut render_pass) = pass.begin(&mut encoder, ctx, clear_op) {
-                    let mut state = RenderState::new(&mut render_pass);
-                    pass.execute(ctx, &mut state, meshes);
-                }
+            for view in view_buffer.views() {
+                execute(ctx, view);
             }
         }
     }
@@ -845,12 +777,11 @@ pub trait Draw: Send + Sync + 'static {
     type View: View;
     type Mesh: MeshData;
     type Material: Material;
-    type Pass: DrawPass<View = Self::View>;
+    type Phase: DrawPhase;
     type Query: BaseQuery;
 
     const BATCH: bool = true;
     const CULL: bool = true;
-    const SORT: bool = false;
 
     fn entity(&self) -> Entity;
 
@@ -863,6 +794,8 @@ pub trait Draw: Send + Sync + 'static {
     fn sub_mesh(&self) -> Option<SubMesh> {
         None
     }
+
+    fn phase(&self, view: &RenderView<Self::View>) -> Self::Phase;
 
     fn shader() -> impl Into<ShaderPath>;
 

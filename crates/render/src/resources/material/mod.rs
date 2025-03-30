@@ -27,8 +27,29 @@ impl Into<wgpu::BlendState> for BlendMode {
     }
 }
 
-pub trait Material: Asset + AsBinding + Clone + Sized {
+pub enum DepthWrite {
+    Off,
+    On,
+}
+
+pub trait MaterialPhase: Send + Sync + 'static {
+    type Item: Copy + Send + Sync + 'static;
+
     fn mode() -> BlendMode;
+    fn depth_write() -> DepthWrite {
+        DepthWrite::On
+    }
+}
+
+pub trait SortedPhase: MaterialPhase {
+    type Key: PartialOrd + Ord + Copy + Send + Sync + 'static;
+
+    fn sort_key(&self) -> Self::Key;
+}
+
+pub trait Material: Asset + AsBinding + Clone + Sized {
+    type Phase: MaterialPhase;
+
     fn shader() -> impl Into<ShaderPath>;
 }
 

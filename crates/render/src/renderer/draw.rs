@@ -1,23 +1,14 @@
-use super::{PassBuilder, RenderGraphPass};
 use crate::{
-    device::RenderDevice,
-    renderer::{graph::RenderContext, state::RenderState},
-    resources::{
-        BlendMode, FragmentState, Id, Material, MaterialBinding, MaterialLayout, Mesh, MeshLayout,
-        PipelineCache, PipelineId, RenderAssets, RenderMesh, RenderPipelineDesc, RenderResource,
-        Shader, ShaderPath, SubMesh, VertexState,
-        binding::{BindGroup, BindGroupBuilder, BindGroupLayout, BindGroupLayoutBuilder},
-        buffer::{Buffer, UniformBufferArray},
-    },
-    surface::RenderSurface,
+    BindGroup, BindGroupBuilder, BindGroupLayout, BindGroupLayoutBuilder, BlendMode, Buffer,
+    DepthWrite, FragmentState, Id, Material, MaterialBinding, MaterialLayout, MaterialPhase, Mesh,
+    MeshLayout, PipelineCache, PipelineId, RenderAssets, RenderDevice, RenderMesh,
+    RenderPipelineDesc, RenderResource, RenderSurface, Shader, ShaderPath, SubMesh,
+    UniformBufferArray, VertexState,
 };
-use asset::{AssetId, AssetRef, database::AssetDatabase};
+use asset::{AssetDatabase, AssetId, AssetRef};
 use ecs::{
     Entity, IndexMap, Res, ResMut, Resource,
-    system::{
-        ArgItem, StaticArg, SystemArg,
-        unlifetime::{ReadRes, WriteRes},
-    },
+    system::unlifetime::{ReadRes, WriteRes},
     world::{
         action::WorldActions,
         builtin::actions::AddResource,
@@ -26,56 +17,49 @@ use ecs::{
 };
 use encase::{ShaderType, internal::WriteInto};
 use game::Main;
-use glam::{Mat4, Vec3};
-use serde::{Deserialize, Serialize};
-use std::{any::TypeId, collections::HashMap, hash::Hash, ops::Range};
-use wgpu::{
-    BufferUsages, ColorTargetState, PrimitiveState, ShaderStages, VertexFormat, VertexStepMode,
-};
+use glam::Mat4;
+use spatial::RangeFinder;
+use std::{any::TypeId, collections::HashMap, ops::Range};
+use wgpu::{BufferUsages, ColorTargetState, ShaderStages, VertexFormat, VertexStepMode};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum DepthWrite {
-    On,
-    Off,
-}
+use super::{PassBuilder, RenderContext, RenderGraphPass, RenderState};
 
-#[derive(Debug, Clone, Default)]
-pub struct ViewEntities(pub(crate) Vec<Entity>);
-impl Resource for ViewEntities {}
-
-pub trait View: ShaderType + WriteInto + Send + Sync + Sized + 'static {
+pub trait ViewData: ShaderType + WriteInto + Sized + Send + Sync + 'static {
     type Query: BaseQuery;
 
     fn extract<'a>(query: <Self::Query as BaseQuery>::Item<'a>) -> ExtractedView<Self>;
 }
 
-pub struct ExtractedView<V: View> {
+pub struct ExtractedView<V: ViewData> {
     pub entity: Entity,
-    pub depth: i32,
     pub view: V,
+    pub depth: i32,
+    pub world: Mat4,
 }
 
-pub struct ExtractedViews<V: View>(pub(crate) Vec<ExtractedView<V>>);
-impl<V: View> Resource for ExtractedViews<V> {}
-impl<V: View> Default for ExtractedViews<V> {
+pub struct ExtractedViews<V: ViewData>(pub(crate) Vec<ExtractedView<V>>);
+impl<V: ViewData> Resource for ExtractedViews<V> {}
+impl<V: ViewData> Default for ExtractedViews<V> {
     fn default() -> Self {
         Self(Vec::new())
     }
 }
 
-pub struct RenderView<V: View> {
+pub struct RenderView<V: ViewData> {
     entity: Entity,
     view: V,
     depth: i32,
+    world: Mat4,
     dynamic_offset: u32,
 }
 
-impl<V: View> RenderView<V> {
-    pub fn new(entity: Entity, view: V, depth: i32, dynamic_offset: u32) -> Self {
+impl<V: ViewData> RenderView<V> {
+    pub fn new(entity: Entity, view: V, depth: i32, world: Mat4, dynamic_offset: u32) -> Self {
         Self {
             entity,
             view,
             depth,
+            world,
             dynamic_offset,
         }
     }
@@ -92,19 +76,23 @@ impl<V: View> RenderView<V> {
         self.depth
     }
 
+    pub fn world(&self) -> &Mat4 {
+        &self.world
+    }
+
     pub fn dynamic_offset(&self) -> u32 {
         self.dynamic_offset
     }
 }
 
-pub struct ViewBuffer<V: View> {
+pub struct ViewBuffer<V: ViewData> {
     views: Vec<RenderView<V>>,
     buffer: UniformBufferArray<V>,
     bind_group: BindGroup,
     bind_group_layout: BindGroupLayout,
 }
 
-impl<V: View> ViewBuffer<V> {
+impl<V: ViewData> ViewBuffer<V> {
     pub fn new(device: &RenderDevice) -> Self {
         let buffer = UniformBufferArray::new(device, None, Some(BufferUsages::COPY_DST));
 
@@ -150,6 +138,7 @@ impl<V: View> ViewBuffer<V> {
             extracted.entity,
             extracted.view,
             extracted.depth,
+            extracted.world,
             dynamic_offset,
         ));
     }
@@ -171,22 +160,16 @@ impl<V: View> ViewBuffer<V> {
         }
     }
 
-    pub(crate) fn extract_views(
-        query: Main<Query<V::Query>>,
-        mut views: ResMut<ExtractedViews<V>>,
-        mut view_entites: ResMut<ViewEntities>,
-    ) {
+    pub(crate) fn extract(query: Main<Query<V::Query>>, mut views: ResMut<ExtractedViews<V>>) {
         for item in query.into_inner() {
             let view = V::extract(item);
             views.0.push(view);
         }
 
-        view_entites
-            .0
-            .extend(views.0.iter().map(|view| view.entity));
+        views.0.sort_by(|a, b| a.depth.cmp(&b.depth));
     }
 
-    pub(crate) fn queue_views(
+    pub(crate) fn queue(
         mut view_buffer: ResMut<ViewBuffer<V>>,
         mut extracted_views: ResMut<ExtractedViews<V>>,
     ) {
@@ -206,8 +189,8 @@ impl<V: View> ViewBuffer<V> {
     }
 }
 
-impl<V: View> Resource for ViewBuffer<V> {}
-impl<V: View> RenderResource for ViewBuffer<V> {
+impl<V: ViewData> Resource for ViewBuffer<V> {}
+impl<V: ViewData> RenderResource for ViewBuffer<V> {
     type Arg = ReadRes<RenderDevice>;
 
     fn extract(
@@ -217,13 +200,7 @@ impl<V: View> RenderResource for ViewBuffer<V> {
     }
 }
 
-pub trait MeshData: ShaderType + WriteInto + Send + Sync + Sized + 'static {
-    fn world(&self) -> Mat4;
-    fn position(&self) -> Vec3 {
-        let world = self.world();
-        Vec3::new(world.w_axis.x, world.w_axis.y, world.w_axis.z)
-    }
-}
+pub trait MeshData: ShaderType + WriteInto + Send + Sync + 'static {}
 
 pub struct MeshDataBuffer<T: MeshData> {
     buffer: Buffer,
@@ -316,155 +293,69 @@ impl<T: MeshData> RenderResource for MeshDataBuffer<T> {
     }
 }
 
-pub struct ViewDrawCalls<D: DrawPhase>(HashMap<Entity, Vec<DrawCall<D>>>);
-impl<D: DrawPhase> Default for ViewDrawCalls<D> {
-    fn default() -> Self {
-        Self(HashMap::new())
-    }
-}
+pub trait Renderer {
+    type View: ViewData;
+    type Mesh: MeshData;
 
-impl<D: DrawPhase> ViewDrawCalls<D> {
-    pub fn clear(&mut self) {
-        self.0.clear();
+    fn vertex_layout() -> &'static [VertexFormat];
+
+    fn instance_layout() -> &'static [VertexFormat] {
+        &[]
     }
 
-    pub fn get(&self, entity: Entity) -> Option<&Vec<DrawCall<D>>> {
-        self.0.get(&entity)
-    }
-
-    pub fn get_mut(&mut self, entity: Entity) -> Option<&mut Vec<DrawCall<D>>> {
-        self.0.get_mut(&entity)
-    }
-
-    pub fn insert<I: IntoIterator<Item = DrawCall<D>>>(&mut self, entity: Entity, calls: I) {
-        self.0.entry(entity).or_default().extend(calls);
-    }
-
-    pub fn remove(&mut self, entity: Entity) -> Option<Vec<DrawCall<D>>> {
-        self.0.remove(&entity)
-    }
-
-    pub fn iter(&self) -> impl Iterator<Item = (&Entity, &Vec<DrawCall<D>>)> {
-        self.0.iter()
-    }
-
-    pub fn len(&self) -> usize {
-        self.0.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-
-    pub fn draw(
-        &self,
-        ctx: &RenderContext,
-        view: &RenderView<D::View>,
-        meshes: &RenderAssets<RenderMesh>,
-        view_buffer: &ViewBuffer<D::View>,
-        draw_functions: &DrawFunctions<D::View>,
-        state: &mut RenderState,
-    ) {
-        if let Some(calls) = self.get(view.entity()) {
-            for call in calls.iter() {
-                draw_functions.get(call.id)(
-                    &call.key,
-                    call.instances.clone(),
-                    ctx,
-                    view,
-                    view_buffer,
-                    meshes,
-                    state,
-                );
-            }
+    fn primitive_state() -> wgpu::PrimitiveState {
+        wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            ..Default::default()
         }
     }
+
+    fn shader() -> impl Into<ShaderPath>;
 }
 
-impl<D: DrawPhase> Resource for ViewDrawCalls<D> {}
+pub type DrawMesh<D> = <<D as Draw>::Renderer as Renderer>::Mesh;
+pub type DrawView<D> = <<D as Draw>::Renderer as Renderer>::View;
 
-pub struct Draws<D: Draw>(Vec<D>);
-impl<D: Draw> Default for Draws<D> {
-    fn default() -> Self {
-        Self(Vec::new())
+pub trait Draw: IntoDrawCall<<Self::Material as Material>::Phase> + Send + Sync + 'static {
+    type View: ViewData;
+    type Material: Material;
+    type Renderer: Renderer<View = Self::View>;
+    type Query: BaseQuery;
+
+    const BATCH: bool = true;
+
+    fn entity(&self) -> Entity;
+
+    fn data(&self) -> DrawMesh<Self>;
+
+    fn material(&self) -> AssetRef<Self::Material>;
+
+    fn mesh(&self) -> AssetRef<Mesh>;
+
+    fn sub_mesh(&self) -> Option<SubMesh> {
+        None
     }
+
+    fn extract<'a>(query: <Self::Query as BaseQuery>::Item<'a>) -> Self;
 }
 
+pub struct Draws<D: Draw>(pub(crate) Vec<D>);
 impl<D: Draw> Draws<D> {
-    pub(crate) fn extract_draws(query: Main<Query<D::Query>>, mut draws: ResMut<Self>) {
+    pub(crate) fn extract(query: Main<Query<D::Query>>, mut draws: ResMut<Self>) {
         for item in query.into_inner() {
             let draw = D::extract(item);
             draws.0.push(draw);
         }
     }
 
-    pub(crate) fn queue_view_draws<P: DrawPhase<View = D::View>>(
-        draws: Res<Self>,
-        views: Res<ViewBuffer<D::View>>,
-        draw_functions: Res<DrawFunctions<D::View>>,
-        mut mesh_buffer: ResMut<MeshDataBuffer<D::Mesh>>,
-        mut view_draws: ResMut<ViewDrawCalls<P>>,
-    ) where
-        D: IntoDrawCall<P>,
-    {
-        let draw_id = draw_functions.get_id::<D>();
-
-        for view in views.views() {
-            if D::BATCH && D::Material::mode() != BlendMode::Transparent {
-                let mut batches = HashMap::new();
-
-                for (index, call) in draws.iter().enumerate() {
-                    let key = BatchKey {
-                        material: call.material().into(),
-                        mesh: call.mesh(),
-                        sub_mesh: call.sub_mesh(),
-                    };
-
-                    let (draw_index, data) = batches.entry(key).or_insert((index, vec![]));
-                    data.push(call.data());
-
-                    *draw_index = (*draw_index).min(index)
-                }
-
-                let draw_calls = batches.drain().map(|(key, (draw_index, data))| {
-                    let instances = mesh_buffer.append(data);
-                    let phase = draws[draw_index].into_draw_call(view);
-
-                    DrawCall {
-                        id: draw_id,
-                        key,
-                        phase,
-                        instances,
-                    }
-                });
-
-                view_draws.insert(view.entity(), draw_calls);
-            } else {
-                let draw_calls = draws.iter().map(|call| {
-                    let offset = mesh_buffer.push(call.data());
-                    let key = BatchKey {
-                        material: call.material().into(),
-                        mesh: call.mesh(),
-                        sub_mesh: call.sub_mesh(),
-                    };
-
-                    let phase = call.into_draw_call(view);
-                    let instances = offset..(offset + 1);
-                    DrawCall {
-                        id: draw_id,
-                        key,
-                        phase,
-                        instances,
-                    }
-                });
-
-                view_draws.insert(view.entity(), draw_calls);
-            }
-        }
-    }
-
     pub(crate) fn clear_draws(mut draws: ResMut<Self>) {
         draws.0.clear();
+    }
+}
+
+impl<D: Draw> Default for Draws<D> {
+    fn default() -> Self {
+        Self(Vec::new())
     }
 }
 
@@ -482,7 +373,135 @@ impl<D: Draw> std::ops::DerefMut for Draws<D> {
     }
 }
 
+impl<D: Draw> AsRef<Vec<D>> for Draws<D> {
+    fn as_ref(&self) -> &Vec<D> {
+        &self.0
+    }
+}
+
+impl<D: Draw> AsMut<Vec<D>> for Draws<D> {
+    fn as_mut(&mut self) -> &mut Vec<D> {
+        &mut self.0
+    }
+}
+
 impl<D: Draw> Resource for Draws<D> {}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct DrawKey {
+    pub material: AssetId,
+    pub mesh: AssetRef<Mesh>,
+    pub sub_mesh: Option<SubMesh>,
+}
+
+pub struct DrawCall<M: MaterialPhase> {
+    pub id: DrawId,
+    pub key: DrawKey,
+    pub item: M::Item,
+    pub instances: Range<u32>,
+}
+
+pub trait IntoDrawCall<M: MaterialPhase> {
+    fn into_draw_call(&self, range: &RangeFinder) -> M::Item;
+}
+
+pub struct ViewDrawCalls<V: ViewData, M: MaterialPhase>(
+    pub(crate) HashMap<Entity, Vec<DrawCall<M>>>,
+    std::marker::PhantomData<V>,
+);
+
+impl<V: ViewData, M: MaterialPhase> ViewDrawCalls<V, M> {
+    pub(crate) fn queue<D: Draw<View = V> + IntoDrawCall<M>>(
+        draws: Res<Draws<D>>,
+        views: Res<ViewBuffer<D::View>>,
+        draw_functions: Res<DrawFunctions<DrawView<D>>>,
+        mut mesh_buffer: ResMut<MeshDataBuffer<DrawMesh<D>>>,
+        mut view_draws: ResMut<ViewDrawCalls<V, M>>,
+    ) {
+        let draw_id = draw_functions
+            .get_id::<D>()
+            .expect("Draw function not found");
+
+        for view in views.views() {
+            let range_finder = RangeFinder::new(view.world().inverse().z_axis);
+
+            if D::BATCH && <D::Material as Material>::Phase::mode() != BlendMode::Transparent {
+                let mut batches = HashMap::new();
+
+                for (index, call) in draws.0.iter().enumerate() {
+                    let key = DrawKey {
+                        material: call.material().into(),
+                        mesh: call.mesh(),
+                        sub_mesh: call.sub_mesh(),
+                    };
+
+                    let (draw_index, data) = batches.entry(key).or_insert((index, vec![]));
+                    data.push(call.data());
+
+                    *draw_index = (*draw_index).min(index)
+                }
+
+                let draw_calls = batches.drain().map(|(key, (draw_index, data))| {
+                    let instances = mesh_buffer.append(data);
+                    let item = IntoDrawCall::<M>::into_draw_call(&draws[draw_index], &range_finder);
+
+                    DrawCall {
+                        id: draw_id,
+                        key,
+                        item,
+                        instances,
+                    }
+                });
+
+                view_draws
+                    .0
+                    .entry(view.entity())
+                    .or_default()
+                    .extend(draw_calls);
+            } else {
+                let draw_calls = draws.iter().map(|call| {
+                    let offset = mesh_buffer.push(call.data());
+                    let key = DrawKey {
+                        material: call.material().into(),
+                        mesh: call.mesh(),
+                        sub_mesh: call.sub_mesh(),
+                    };
+
+                    let item = IntoDrawCall::<M>::into_draw_call(call, &range_finder);
+                    let instances = offset..(offset + 1);
+                    DrawCall {
+                        id: draw_id,
+                        key,
+                        item,
+                        instances,
+                    }
+                });
+
+                view_draws
+                    .0
+                    .entry(view.entity())
+                    .or_default()
+                    .extend(draw_calls);
+            }
+        }
+    }
+}
+
+impl<V: ViewData, M: MaterialPhase> Default for ViewDrawCalls<V, M> {
+    fn default() -> Self {
+        Self(HashMap::new(), std::marker::PhantomData)
+    }
+}
+
+impl<V: ViewData, M: MaterialPhase> AsRef<HashMap<Entity, Vec<DrawCall<M>>>>
+    for ViewDrawCalls<V, M>
+{
+    fn as_ref(&self) -> &HashMap<Entity, Vec<DrawCall<M>>> {
+        &self.0
+    }
+}
+
+impl<V: ViewData, M: MaterialPhase> Resource for ViewDrawCalls<V, M> {}
 
 pub struct DrawPipline<D: Draw>(PipelineId, std::marker::PhantomData<D>);
 impl<D: Draw> DrawPipline<D> {
@@ -512,7 +531,7 @@ impl<D: Draw> RenderResource for DrawPipline<D> {
         ReadRes<AssetDatabase>,
         ReadRes<RenderDevice>,
         ReadRes<RenderSurface>,
-        Option<ReadRes<ViewBuffer<D::View>>>,
+        Option<ReadRes<ViewBuffer<DrawView<D>>>>,
         Option<ReadRes<MaterialLayout<D::Material>>>,
         WorldActions,
     );
@@ -536,7 +555,7 @@ impl<D: Draw> RenderResource for DrawPipline<D> {
             }
         };
 
-        let vertex_shader: Id<Shader> = match ShaderPath::new(D::shader()) {
+        let vertex_shader: Id<Shader> = match ShaderPath::new(D::Renderer::shader()) {
             ShaderPath::Id(id) => (*id).into(),
             ShaderPath::Path(path) => database
                 .path_id(&path.into())
@@ -556,14 +575,14 @@ impl<D: Draw> RenderResource for DrawPipline<D> {
 
         let mut vertex_buffer_layouts = vec![MeshLayout::into_vertex_buffer_layout(
             0,
-            D::vertex_layout(),
+            D::Renderer::vertex_layout(),
             VertexStepMode::Vertex,
         )];
 
-        if D::instance_layout().len() > 0 {
+        if D::Renderer::instance_layout().len() > 0 {
             vertex_buffer_layouts.push(MeshLayout::into_vertex_buffer_layout(
                 vertex_buffer_layouts[0].attributes.len() as u32,
-                D::instance_layout(),
+                D::Renderer::instance_layout(),
                 VertexStepMode::Instance,
             ));
         }
@@ -581,14 +600,17 @@ impl<D: Draw> RenderResource for DrawPipline<D> {
                 entry: "main".into(),
                 targets: vec![Some(ColorTargetState {
                     format: surface.format(),
-                    blend: Some(D::Material::mode().into()),
+                    blend: Some(<D::Material as Material>::Phase::mode().into()),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
             }),
-            primitive: D::primitive(),
+            primitive: D::Renderer::primitive_state(),
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: surface.depth_format(),
-                depth_write_enabled: matches!(D::depth_write(), DepthWrite::On),
+                depth_write_enabled: matches!(
+                    <D::Material as Material>::Phase::depth_write(),
+                    DepthWrite::On
+                ),
                 depth_compare: wgpu::CompareFunction::Less,
                 stencil: Default::default(),
                 bias: Default::default(),
@@ -601,182 +623,142 @@ impl<D: Draw> RenderResource for DrawPipline<D> {
     }
 }
 
-pub type DrawFunction<V> = fn(
-    &BatchKey,
-    Range<u32>,
-    &RenderContext,
-    &RenderView<V>,
-    &ViewBuffer<V>,
-    &RenderAssets<RenderMesh>,
-    &mut RenderState,
-);
-
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct DrawId(u32);
 
-pub struct DrawFunctions<V: View>(IndexMap<TypeId, DrawFunction<V>>);
-impl<V: View> Default for DrawFunctions<V> {
+pub type DrawFunction<V> = fn(
+    &mut RenderState,
+    &RenderContext,
+    &RenderAssets<RenderMesh>,
+    &ViewBuffer<V>,
+    &RenderView<V>,
+    &DrawKey,
+    Range<u32>,
+);
+
+pub struct DrawFunctions<V: ViewData>(IndexMap<TypeId, DrawFunction<V>>);
+impl<V: ViewData> Default for DrawFunctions<V> {
     fn default() -> Self {
         Self(IndexMap::new())
     }
 }
 
-impl<V: View> DrawFunctions<V> {
-    pub fn add<D: Draw<View = V>>(&mut self) -> DrawId {
+impl<V: ViewData> DrawFunctions<V> {
+    pub fn add<D: Draw<View = V>>(&mut self) {
         let id = TypeId::of::<D>();
-        if !self.0.contains_key(&id) {
-            self.0.insert(id, Self::draw_function::<D>());
+        if self.0.contains_key(&id) {
+            return;
         }
 
-        self.0
-            .get_index_of(&id)
-            .map(|index| DrawId(index as u32))
-            .unwrap()
-    }
-
-    pub fn get(&self, id: DrawId) -> &DrawFunction<V> {
-        &self.0[id.0 as usize]
-    }
-
-    pub fn get_id<D: Draw<View = V>>(&self) -> DrawId {
-        let id = TypeId::of::<D>();
-        self.0
-            .get_index_of(&id)
-            .map(|index| DrawId(index as u32))
-            .unwrap()
-    }
-
-    fn draw_function<D: Draw<View = V>>() -> DrawFunction<V> {
-        const VIEW_GROUP: u32 = 0;
-        const MATERIAL_GROUP: u32 = 1;
-        const VERTEX_BUFFER_SLOT: u32 = 0;
-        const INSTANCE_BUFFER_SLOT: u32 = 1;
-
-        |key,
-         instances,
-         ctx,
-         view,
-         view_buffer: &ViewBuffer<D::View>,
-         meshes: &RenderAssets<RenderMesh>,
-         state: &mut RenderState| {
-            let mesh_data = ctx.world().resource::<MeshDataBuffer<D::Mesh>>();
-
-            let mesh = match meshes.get(&(*key.mesh).into()) {
-                Some(mesh) => mesh,
-                None => return,
-            };
-
-            let materials = ctx
-                .world()
-                .resource::<RenderAssets<MaterialBinding<D::Material>>>();
-
-            let material = match materials.get(&(key.material.into())) {
-                Some(material) => material,
-                None => return,
-            };
-
-            let Some(pipeline) = ctx
-                .world()
-                .try_resource::<DrawPipline<D>>()
-                .and_then(|id| ctx.get_render_pipeline(id))
-            else {
-                return;
-            };
-
-            let (vertices, indices) = match key.sub_mesh {
-                Some(sub_mesh) => {
-                    let vertices = sub_mesh.start_vertex as u32
-                        ..(sub_mesh.start_vertex + sub_mesh.vertex_count) as u32;
-                    let indices = sub_mesh.start_index as u32
-                        ..(sub_mesh.start_index + sub_mesh.index_count) as u32;
-                    (vertices, indices)
-                }
-                None => (0..mesh.vertex_count() as u32, 0..mesh.index_count() as u32),
-            };
-
-            state.set_pipeline(pipeline);
-            state.set_vertex_buffer(INSTANCE_BUFFER_SLOT, mesh_data.buffer().slice(..));
-            state.set_bind_group(
-                VIEW_GROUP,
-                view_buffer.bind_group(),
-                &[view.dynamic_offset()],
-            );
-
-            state.set_vertex_buffer(VERTEX_BUFFER_SLOT, mesh.vertex_buffer().slice(..));
-            state.set_bind_group(MATERIAL_GROUP, material, &[]);
-
-            match mesh.index_buffer() {
-                Some(buffer) => {
-                    state.set_index_buffer(buffer.slice(..));
-                    state.draw_indexed(indices, vertices.start as i32, instances);
-                }
-                None => {
-                    state.draw(vertices, instances);
-                }
-            }
-        }
-    }
-}
-
-impl<V: View> Resource for DrawFunctions<V> {}
-
-pub trait DrawPhase: Send + Sync + 'static {
-    type View: View;
-}
-
-pub trait SortedPhase: 'static {
-    type Key: Hash + Eq + PartialOrd + Ord;
-
-    fn key(&self) -> Self::Key;
-}
-
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
-pub struct BatchKey {
-    pub material: AssetId,
-    pub mesh: AssetRef<Mesh>,
-    pub sub_mesh: Option<SubMesh>,
-}
-
-pub struct DrawCall<D: DrawPhase> {
-    pub id: DrawId,
-    pub key: BatchKey,
-    pub phase: D,
-    pub instances: Range<u32>,
-}
-
-impl<D: DrawPhase> DrawCall<D> {
-    pub fn new(id: DrawId, key: BatchKey, phase: D, instances: Range<u32>) -> Self {
-        Self {
+        self.0.insert(
             id,
-            key,
-            phase,
-            instances,
-        }
+            |state, ctx, meshes, view_buffer, view, key, instances| {
+                const VIEW_GROUP: u32 = 0;
+                const MATERIAL_GROUP: u32 = 1;
+                const VERTEX_BUFFER_SLOT: u32 = 0;
+                const INSTANCE_BUFFER_SLOT: u32 = 1;
+
+                let mesh_data = ctx.world().resource::<MeshDataBuffer<DrawMesh<D>>>();
+
+                let mesh = match meshes.get(&(*key.mesh).into()) {
+                    Some(mesh) => mesh,
+                    None => return,
+                };
+
+                let materials = ctx
+                    .world()
+                    .resource::<RenderAssets<MaterialBinding<D::Material>>>();
+
+                let material = match materials.get(&(key.material.into())) {
+                    Some(material) => material,
+                    None => return,
+                };
+
+                let Some(pipeline) = ctx
+                    .world()
+                    .try_resource::<DrawPipline<D>>()
+                    .and_then(|id| ctx.get_render_pipeline(id))
+                else {
+                    return;
+                };
+
+                let (vertices, indices) = match key.sub_mesh {
+                    Some(sub_mesh) => {
+                        let vertices = sub_mesh.start_vertex as u32
+                            ..(sub_mesh.start_vertex + sub_mesh.vertex_count) as u32;
+                        let indices = sub_mesh.start_index as u32
+                            ..(sub_mesh.start_index + sub_mesh.index_count) as u32;
+                        (vertices, indices)
+                    }
+                    None => (0..mesh.vertex_count() as u32, 0..mesh.index_count() as u32),
+                };
+
+                state.set_pipeline(pipeline);
+                state.set_vertex_buffer(INSTANCE_BUFFER_SLOT, mesh_data.buffer().slice(..));
+                state.set_bind_group(
+                    VIEW_GROUP,
+                    view_buffer.bind_group(),
+                    &[view.dynamic_offset()],
+                );
+
+                state.set_vertex_buffer(VERTEX_BUFFER_SLOT, mesh.vertex_buffer().slice(..));
+                state.set_bind_group(MATERIAL_GROUP, material, &[]);
+
+                match mesh.index_buffer() {
+                    Some(buffer) => {
+                        state.set_index_buffer(buffer.slice(..));
+                        state.draw_indexed(indices, vertices.start as i32, instances);
+                    }
+                    None => {
+                        state.draw(vertices, instances);
+                    }
+                }
+            },
+        );
+    }
+
+    pub fn get(&self, id: DrawId) -> DrawFunction<V> {
+        self.0[id.0 as usize]
+    }
+
+    pub fn get_id<D: Draw<View = V>>(&self) -> Option<DrawId> {
+        self.0
+            .get_index_of(&TypeId::of::<D>())
+            .map(|index| DrawId(index as u32))
+    }
+
+    pub fn draw<M: MaterialPhase>(
+        &self,
+        state: &mut RenderState,
+        ctx: &RenderContext,
+        meshes: &RenderAssets<RenderMesh>,
+        view_buffer: &ViewBuffer<V>,
+        view: &RenderView<V>,
+        draw: &DrawCall<M>,
+    ) {
+        let function = self.0[draw.id.0 as usize];
+        function(
+            state,
+            ctx,
+            meshes,
+            view_buffer,
+            view,
+            &draw.key,
+            draw.instances.clone(),
+        );
     }
 }
+
+impl<V: ViewData> Resource for DrawFunctions<V> {}
 
 pub trait ViewPass: Send + Sync + 'static {
-    type View: View;
+    type View: ViewData;
 
     const NAME: super::Name;
 
     fn setup(
         builder: &mut PassBuilder,
-    ) -> impl Fn(&mut RenderContext, &RenderView<Self::View>) + 'static;
-}
-
-pub trait DrawPass: ViewPass {
-    type Arg: SystemArg;
-
-    type Data<'a>: Send + Sync;
-
-    fn get<'a>(
-        view: Entity,
-        draw_id: DrawId,
-        key: BatchKey,
-        instances: Range<u32>,
-        arg: &'a mut ArgItem<Self::Arg>,
-    ) -> Self::Data<'a>;
+    ) -> impl Fn(&mut RenderContext, &RenderView<Self::View>, &ViewBuffer<Self::View>) + 'static;
 }
 
 pub struct ViewPassNode<V: ViewPass>(std::marker::PhantomData<V>);
@@ -791,52 +773,8 @@ impl<V: ViewPass> RenderGraphPass for ViewPassNode<V> {
             let view_buffer = ctx.world().resource::<ViewBuffer<V::View>>();
 
             for view in view_buffer.views() {
-                execute(ctx, view);
+                execute(ctx, view, view_buffer);
             }
         }
     }
-}
-
-pub trait Draw: Send + Sync + 'static {
-    type View: View;
-    type Mesh: MeshData;
-    type Material: Material;
-    type Query: BaseQuery;
-
-    const BATCH: bool = true;
-    const CULL: bool = true;
-
-    fn entity(&self) -> Entity;
-
-    fn data(&self) -> Self::Mesh;
-
-    fn material(&self) -> AssetRef<Self::Material>;
-
-    fn mesh(&self) -> AssetRef<Mesh>;
-
-    fn sub_mesh(&self) -> Option<SubMesh> {
-        None
-    }
-
-    fn shader() -> impl Into<ShaderPath>;
-
-    fn vertex_layout() -> &'static [VertexFormat];
-
-    fn instance_layout() -> &'static [VertexFormat] {
-        &[]
-    }
-
-    fn primitive() -> PrimitiveState {
-        PrimitiveState::default()
-    }
-
-    fn depth_write() -> DepthWrite {
-        DepthWrite::On
-    }
-
-    fn extract<'a>(query: <Self::Query as BaseQuery>::Item<'a>) -> Self;
-}
-
-pub trait IntoDrawCall<D: DrawPhase> {
-    fn into_draw_call(&self, view: &RenderView<D::View>) -> D;
 }

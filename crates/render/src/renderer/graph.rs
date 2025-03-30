@@ -1,7 +1,7 @@
 use crate::{
     ComputePipeline, PipelineCache, PipelineId, RenderDevice, RenderPipeline, RenderSurface,
 };
-use ecs::{Entity, IndexMap, derive::Resource, world::World};
+use ecs::{Entity, IndexMap, NonSendMut, Res, Resource, world::World};
 use std::{
     any::{Any, TypeId},
     collections::HashMap,
@@ -284,7 +284,6 @@ pub struct CompiledGraph {
     resources: Vec<ResourceInfo>,
 }
 
-#[derive(Resource)]
 pub struct RenderGraph {
     passes: Vec<PassNode>,
     resources: Vec<ResourceNode>,
@@ -317,7 +316,7 @@ impl RenderGraph {
         self.sub_graphs.insert(G::NAME, RenderGraph::new());
     }
 
-    pub fn import<R: GraphResource>(&mut self, resource: Option<R>) {
+    pub fn import<R: GraphResource>(&mut self, resource: R) {
         let id = self.entries.len() as u32;
         match self.entries.entry(TypeId::of::<R>()) {
             ecs::map::Entry::Occupied(mut entry) => {
@@ -325,16 +324,22 @@ impl RenderGraph {
                 if entry.ty == ResourceType::Transient {
                     panic!("transient resource already exists: {}", R::NAME);
                 } else {
-                    entry.object = resource.map(|o| Box::new(o) as Box<dyn Any>);
+                    entry.object = Some(Box::new(resource));
                 }
             }
             ecs::map::Entry::Vacant(entry) => {
                 let node = ResourceNode::new(self.resources.len() as u32, id);
-                let resource = ResourceEntry::import::<R>(id, resource);
+                let resource = ResourceEntry::import::<R>(id, Some(resource));
 
                 self.resources.push(node);
                 entry.insert(resource);
             }
+        }
+    }
+
+    pub fn destroy<R: GraphResource>(&mut self) {
+        if let Some(entry) = self.entries.get_mut(&TypeId::of::<R>()) {
+            entry.destroy();
         }
     }
 
@@ -465,7 +470,32 @@ impl RenderGraph {
             });
         }
     }
+
+    pub(crate) fn run_graph(
+        mut graph: NonSendMut<RenderGraph>,
+        device: Res<RenderDevice>,
+        surface: Res<RenderSurface>,
+        world: &World,
+    ) {
+        let Ok(surface_texture) = surface.texture() else {
+            return;
+        };
+
+        let view = surface_texture
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+
+        graph.import::<RenderTarget>(RenderTarget::new(view));
+
+        graph.run(world, &device, &surface, None);
+
+        graph.destroy::<RenderTarget>();
+
+        surface_texture.present();
+    }
 }
+
+impl Resource for RenderGraph {}
 
 pub struct RenderContext<'a> {
     view: Option<Entity>,
@@ -557,26 +587,21 @@ pub struct TextureDesc {
     pub format: wgpu::TextureFormat,
 }
 
-pub struct RenderTarget(Arc<wgpu::TextureView>);
+pub struct RenderTarget(wgpu::TextureView);
 impl From<wgpu::TextureView> for RenderTarget {
     fn from(value: wgpu::TextureView) -> Self {
-        Self(Arc::new(value))
-    }
-}
-impl From<Arc<wgpu::TextureView>> for RenderTarget {
-    fn from(value: Arc<wgpu::TextureView>) -> Self {
         Self(value)
     }
 }
 
 impl RenderTarget {
     pub fn new(view: wgpu::TextureView) -> Self {
-        Self(Arc::new(view))
+        Self(view)
     }
 }
 
 impl std::ops::Deref for RenderTarget {
-    type Target = Arc<wgpu::TextureView>;
+    type Target = wgpu::TextureView;
 
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -604,7 +629,6 @@ impl GraphResource for RenderTarget {
             view_formats: &[],
         });
 
-        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        Self(Arc::new(view))
+        Self(texture.create_view(&wgpu::TextureViewDescriptor::default()))
     }
 }

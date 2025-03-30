@@ -103,7 +103,6 @@ fn generate_create_bind_group(input: DeriveInput) -> Result<TokenStream> {
             type Arg = (
                 #ecs::system::unlifetime::ReadRes<#render::RenderAssets<#render::GpuTexture>>,
                 #ecs::system::unlifetime::ReadRes<#render::Fallbacks>,
-                #ecs::system::unlifetime::ReadRes<#render::DefaultSampler>,
             );
 
             fn label() -> Option< &'static str> {
@@ -117,7 +116,7 @@ fn generate_create_bind_group(input: DeriveInput) -> Result<TokenStream> {
                 arg: &#ecs::system::ArgItem<Self::Arg>
             ) -> Result<#render::BindGroup, #render::CreateBindGroupError> {
                 use #render::{BindGroupBuilder, AsOptionalId, UniformBuffer, GpuTexture, TextureDimension, wgpu::TextureViewDimension};
-                let (textures, fallbacks, default_sampler) = arg;
+                let (textures, fallbacks) = arg;
                 #binding_def
             }
 
@@ -291,7 +290,7 @@ impl ToTokens for BindingDefinition<'_> {
                         let id = self.#name.into_optional_id();
                         let sampler = match id.and_then(|id| textures.get(&id)) {
                             Some(texture) => texture.sampler(),
-                            None => default_sampler.inner(),
+                            None => fallbacks.sampler.clone(),
                         };
 
                         builder.with_sampler(

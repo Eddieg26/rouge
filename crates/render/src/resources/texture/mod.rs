@@ -106,7 +106,7 @@ pub struct Texture {
     pub wrap: WrapMode,
     pub usage: wgpu::TextureUsages,
     pub pixels: Vec<u8>,
-    pub faces: Vec<Range<usize>>,
+    pub layers: Vec<Range<usize>>,
 }
 
 impl Texture {
@@ -115,7 +115,7 @@ impl Texture {
         dimension: TextureDimension,
         format: wgpu::TextureFormat,
         pixels: Vec<u8>,
-        faces: Vec<Range<usize>>,
+        layers: Vec<Range<usize>>,
     ) -> Self {
         Self {
             label: None,
@@ -131,7 +131,7 @@ impl Texture {
                 | wgpu::TextureUsages::COPY_DST
                 | wgpu::TextureUsages::COPY_SRC,
             pixels,
-            faces,
+            layers,
         }
     }
 
@@ -145,8 +145,8 @@ impl Texture {
                 },
                 TextureDimension::D1,
                 wgpu::TextureFormat::Rgba8Unorm,
-                vec![255u8, 255, 255, 255],
-                vec![0..1],
+                vec![255, 255, 255, 255],
+                vec![0..4],
             ),
             TextureDimension::D2 => Self::new(
                 wgpu::Extent3d {
@@ -156,8 +156,8 @@ impl Texture {
                 },
                 TextureDimension::D2,
                 wgpu::TextureFormat::Rgba8Unorm,
-                vec![255u8, 255, 255, 255],
-                vec![0..1],
+                vec![255, 255, 255, 255],
+                vec![0..4],
             ),
             TextureDimension::D2Array => Self::new(
                 wgpu::Extent3d {
@@ -167,8 +167,8 @@ impl Texture {
                 },
                 TextureDimension::D2Array,
                 wgpu::TextureFormat::Rgba8Unorm,
-                vec![255u8, 255, 255, 255],
-                vec![0..1],
+                vec![255, 255, 255, 255],
+                vec![0..4],
             ),
             TextureDimension::D3 => Self::new(
                 wgpu::Extent3d {
@@ -178,8 +178,8 @@ impl Texture {
                 },
                 TextureDimension::D3,
                 wgpu::TextureFormat::Rgba8Unorm,
-                vec![255u8, 255, 255, 255],
-                vec![0..1],
+                vec![255, 255, 255, 255],
+                vec![0..4],
             ),
             TextureDimension::Cube => Self::new(
                 wgpu::Extent3d {
@@ -190,7 +190,7 @@ impl Texture {
                 TextureDimension::Cube,
                 wgpu::TextureFormat::Rgba8Unorm,
                 vec![[255u8, 255, 255, 255]; 6].concat(),
-                vec![0..1; 6],
+                (0..6).map(|i| i * 4..(i + 1) * 4).collect(),
             ),
             TextureDimension::CubeArray => Self::new(
                 wgpu::Extent3d {
@@ -201,7 +201,7 @@ impl Texture {
                 TextureDimension::CubeArray,
                 wgpu::TextureFormat::Rgba8Unorm,
                 vec![[255u8, 255, 255, 255]; 6].concat(),
-                vec![0..1; 6],
+                (0..6).map(|i| i * 4..(i + 1) * 4).collect(),
             ),
         }
     }
@@ -295,7 +295,7 @@ impl GpuTexture {
         });
 
         let block_size = format.block_copy_size(None).unwrap_or(0);
-        for (layer, face) in texture.faces.iter().enumerate() {
+        for (layer, range) in texture.layers.iter().enumerate() {
             device.queue.write_texture(
                 wgpu::ImageCopyTexture {
                     texture: &created,
@@ -307,7 +307,7 @@ impl GpuTexture {
                     },
                     aspect: TextureAspect::All,
                 },
-                &texture.pixels[face.clone()],
+                &texture.pixels[range.clone()],
                 wgpu::ImageDataLayout {
                     bytes_per_row: Some(block_size * size.width),
                     rows_per_image: Some(block_size * size.width / size.height),

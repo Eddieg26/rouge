@@ -1,9 +1,5 @@
 use super::{FilterMode, Texture, WrapMode};
-use crate::{
-    device::RenderDevice,
-    resources::{Label, RenderResource},
-};
-use ecs::{Resource, system::unlifetime::ReadRes};
+use crate::{device::RenderDevice, resources::Label};
 use std::sync::Arc;
 use wgpu::{CompareFunction, SamplerBorderColor};
 
@@ -98,47 +94,5 @@ impl AsRef<wgpu::Sampler> for Sampler {
 impl From<wgpu::Sampler> for Sampler {
     fn from(sampler: wgpu::Sampler) -> Self {
         Self(Arc::new(sampler))
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct DefaultSampler(Sampler);
-impl DefaultSampler {
-    pub fn inner(&self) -> &Sampler {
-        &self.0
-    }
-}
-
-impl std::ops::Deref for DefaultSampler {
-    type Target = Sampler;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl AsRef<wgpu::Sampler> for DefaultSampler {
-    fn as_ref(&self) -> &wgpu::Sampler {
-        self.0.as_ref()
-    }
-}
-
-impl Resource for DefaultSampler {}
-
-impl RenderResource for DefaultSampler {
-    type Arg = ReadRes<RenderDevice>;
-
-    fn extract(
-        device: ecs::system::ArgItem<Self::Arg>,
-    ) -> Result<Self, crate::resources::ExtractError<()>> {
-        Ok(Self(Sampler::new(
-            &device,
-            &SamplerDesc {
-                label: None,
-                wrap_mode: WrapMode::ClampToEdge,
-                filter_mode: FilterMode::Linear,
-                ..Default::default()
-            },
-        )))
     }
 }

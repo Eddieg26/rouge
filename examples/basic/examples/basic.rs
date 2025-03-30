@@ -11,11 +11,10 @@ use game::{Game, Init};
 use render::{
     derive::{AsBinding, ShaderType},
     wgpu::{RenderPassColorAttachment, RenderPassDescriptor},
-    BatchKey, Color, Draw, DrawCall, DrawFunctions, DrawId, DrawPass, DrawPhase, ExtractedView,
-    IntoDrawCall, Material, MaterialRef, Mesh, MeshAttribute, MeshAttributeType,
-    MeshAttributeValues, MeshTopology, PassBuilder, RenderAppExt, RenderContext, RenderGraphPass,
-    RenderMesh, RenderPlugin, RenderState, RenderTarget, RenderView, ShaderPath, ShaderSource,
-    SubGraph, ViewBuffer, ViewDrawCalls, ViewPass,
+    Color, Draw, ExtractedView, IntoDrawCall, Material, MaterialRef, Mesh, MeshAttribute,
+    MeshAttributeType, MeshAttributeValues, MeshTopology, PassBuilder, RenderAppExt, RenderContext,
+    RenderGraphPass, RenderMesh, RenderPlugin, RenderState, RenderTarget, RenderView, ShaderPath,
+    ShaderSource, SubGraph, ViewBuffer,
 };
 use spatial::Transform;
 use uuid::Uuid;
@@ -48,23 +47,20 @@ fn main() {
     let fs_id = AssetRef::<ShaderSource>::from(FRAGMENT_SHADER_ID);
     embed_asset!(embedded, fs_id, "assets/fragment.wgsl", ());
 
-    Game::new()
-        .add_plugin(RenderPlugin)
-        .add_draw::<DrawMesh2d<UnlitColor>, Opaque2d>()
-        .embed_assets("embedded", embedded)
-        .register::<Camera2d>()
-        .register::<Mesh2d>()
-        .add_asset(MATERIAL_ID, UnlitColor::new(Color::red()), vec![])
-        .add_asset(MESH_ID, quad, vec![])
-        .add_systems(Init, |actions: WorldActions| {
-            actions.add(Spawn::new().with(Camera2d { depth: 0 }));
-            actions.add(
-                Spawn::new()
-                    .with(Mesh2d::new(MESH_ID.into()))
-                    .with(MaterialRef::<UnlitColor>::new(MATERIAL_ID)),
-            );
-        })
-        .run();
+    Game::new().add_plugin(RenderPlugin).run();
+
+    // Game::new()
+    //     .add_plugin(RenderPlugin)
+    //     .embed_assets("embedded", embedded)
+    //     .register::<Camera2d>()
+    //     .register::<Mesh2d>()
+    //     .add_asset(MATERIAL_ID, UnlitColor::new(Color::red()), vec![])
+    //     .add_asset(MESH_ID, quad, vec![])
+    //     .add_systems(Init, |actions: WorldActions| {
+    //         actions.add(Spawn::new().with(Camera2d { depth: 0 }));
+    //         actions.add(Spawn::new().with(Mesh2d::new(MESH_ID.into())));
+    //     })
+    //     .run();
 }
 
 #[derive(AsBinding, Asset, Clone, serde::Serialize, serde::Deserialize)]
@@ -80,25 +76,9 @@ impl UnlitColor {
     }
 }
 
-impl Material for UnlitColor {
-    fn mode() -> render::BlendMode {
-        render::BlendMode::Opaque
-    }
-
-    fn shader() -> impl Into<render::ShaderPath> {
-        ShaderPath::from(FRAGMENT_SHADER_ID)
-    }
-}
-
 #[derive(ShaderType, Clone, Copy)]
 pub struct Mesh2dData {
     model: glam::Mat4,
-}
-
-impl render::MeshData for Mesh2dData {
-    fn world(&self) -> glam::Mat4 {
-        self.model
-    }
 }
 
 #[derive(Default, Component, Clone, Copy)]
@@ -113,7 +93,7 @@ pub struct Camera2dView {
     pub projection: glam::Mat4,
 }
 
-impl render::View for Camera2dView {
+impl render::ViewData for Camera2dView {
     type Query = (Entity, Read<Camera2d>, Read<Transform>);
 
     fn extract<'a>(
@@ -123,6 +103,7 @@ impl render::View for Camera2dView {
         ExtractedView {
             entity,
             depth: camera.depth,
+            world: transform.world(),
             view: Camera2dView {
                 world: transform.world(),
                 view: transform.world().inverse(),
@@ -136,16 +117,8 @@ pub struct Opaque2d {
     z_order: i32,
 }
 
-impl DrawPhase for Opaque2d {
-    type View = Camera2dView;
-}
-
 pub struct Transparent2d {
     z_order: i32,
-}
-
-impl DrawPhase for Transparent2d {
-    type View = Camera2dView;
 }
 
 #[derive(Component, Clone, Copy)]
@@ -170,90 +143,6 @@ impl AsRef<AssetRef<Mesh>> for Mesh2d {
     }
 }
 
-#[derive(Clone, Copy)]
-pub struct DrawMesh2d<M: Material> {
-    enitity: Entity,
-    material: AssetRef<M>,
-    mesh: AssetRef<render::Mesh>,
-    data: Mesh2dData,
-    z_order: i32,
-}
-
-impl<M: Material> Draw for DrawMesh2d<M> {
-    type View = Camera2dView;
-
-    type Mesh = Mesh2dData;
-
-    type Material = M;
-
-    type Query = (Entity, Read<MaterialRef<Self::Material>>, Read<Mesh2d>);
-
-    fn entity(&self) -> Entity {
-        self.enitity
-    }
-
-    fn data(&self) -> Self::Mesh {
-        self.data
-    }
-
-    fn material(&self) -> AssetRef<Self::Material> {
-        self.material
-    }
-
-    fn mesh(&self) -> AssetRef<render::Mesh> {
-        self.mesh
-    }
-
-    fn shader() -> impl Into<ShaderPath> {
-        ShaderPath::from(VERTEX_SHADER_ID)
-    }
-
-    fn vertex_layout() -> &'static [render::wgpu::VertexFormat] {
-        &[render::wgpu::VertexFormat::Float32x2]
-    }
-
-    fn instance_layout() -> &'static [render::wgpu::VertexFormat] {
-        &[
-            render::wgpu::VertexFormat::Float32x4,
-            render::wgpu::VertexFormat::Float32x4,
-            render::wgpu::VertexFormat::Float32x4,
-            render::wgpu::VertexFormat::Float32x4,
-        ]
-    }
-
-    fn extract<'a>(query: <Self::Query as ecs::prelude::query::BaseQuery>::Item<'a>) -> Self {
-        let (entity, material, mesh) = query;
-        Self {
-            enitity: entity,
-            material: (*material).into(),
-            mesh: mesh.as_ref().clone(),
-            data: Mesh2dData {
-                model: glam::Mat4::IDENTITY,
-            },
-            z_order: 0,
-        }
-    }
-}
-
-impl<M: Material> IntoDrawCall<Opaque2d> for DrawMesh2d<M> {
-    fn into_draw_call(&self, view: &RenderView<<Opaque2d as DrawPhase>::View>) -> Opaque2d {
-        Opaque2d {
-            z_order: self.z_order,
-        }
-    }
-}
-
-impl<M: Material> IntoDrawCall<Transparent2d> for DrawMesh2d<M> {
-    fn into_draw_call(
-        &self,
-        view: &RenderView<<Transparent2d as DrawPhase>::View>,
-    ) -> Transparent2d {
-        Transparent2d {
-            z_order: self.z_order,
-        }
-    }
-}
-
 pub struct Render2d;
 
 impl SubGraph for Render2d {
@@ -262,41 +151,41 @@ impl SubGraph for Render2d {
 
 pub struct Main2dRenderPass;
 
-impl ViewPass for Main2dRenderPass {
-    type View = Camera2dView;
+// impl ViewPass for Main2dRenderPass {
+//     type View = Camera2dView;
 
-    const NAME: render::Name = "Main2dRenderPass";
+//     const NAME: render::Name = "Main2dRenderPass";
 
-    fn setup(
-        builder: &mut PassBuilder,
-    ) -> impl Fn(&mut RenderContext, &RenderView<Self::View>) + 'static {
-        let target = builder.write::<RenderTarget>();
+//     fn setup(
+//         builder: &mut PassBuilder,
+//     ) -> impl Fn(&mut RenderContext, &RenderView<Self::View>) + 'static {
+//         let target = builder.write::<RenderTarget>();
 
-        move |ctx, view| {
-            let draw_functions = ctx.world().resource::<DrawFunctions<Self::View>>();
-            let meshes = ctx.world().resource::<render::RenderAssets<RenderMesh>>();
-            let view_buffer = ctx.world().resource::<ViewBuffer<Self::View>>();
+//         move |ctx, view| {
+//             let draw_functions = ctx.world().resource::<DrawFunctions<Self::View>>();
+//             let meshes = ctx.world().resource::<render::RenderAssets<RenderMesh>>();
+//             let view_buffer = ctx.world().resource::<ViewBuffer<Self::View>>();
 
-            let mut encoder = ctx.encoder();
-            // let mut pass = encoder.begin_render_pass(&RenderPassDescriptor {
-            //     label: Some(Self::NAME),
-            //     color_attachments: &[Some(RenderPassColorAttachment {
-            //         view: (),
-            //         resolve_target: (),
-            //         ops: (),
-            //     })],
-            //     depth_stencil_attachment: None,
-            //     timestamp_writes: None,
-            //     occlusion_query_set: None,
-            // });
+//             let mut encoder = ctx.encoder();
+//             let mut pass = encoder.begin_render_pass(&RenderPassDescriptor {
+//                 label: Some(Self::NAME),
+//                 color_attachments: &[Some(RenderPassColorAttachment {
+//                     view: (),
+//                     resolve_target: (),
+//                     ops: (),
+//                 })],
+//                 depth_stencil_attachment: None,
+//                 timestamp_writes: None,
+//                 occlusion_query_set: None,
+//             });
 
-            // let mut state = RenderState::new(&mut pass);
+//             let mut state = RenderState::new(&mut pass);
 
-            // let opaque = ctx.world().resource::<ViewDrawCalls<Opaque2d>>();
-            // opaque.draw(ctx, view, meshes, view_buffer, draw_functions, &mut state);
-        }
-    }
-}
+//             let opaque = ctx.world().resource::<ViewDrawCalls<Opaque2d>>();
+//             opaque.draw(ctx, view, meshes, view_buffer, draw_functions, &mut state);
+//         }
+//     }
+// }
 
 // fn main() {
 // let embedded = EmbeddedFs::new("assets");

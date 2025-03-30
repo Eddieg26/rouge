@@ -52,3 +52,19 @@ impl Mat3Ext for glam::Mat3 {
         (translation, rotation, scale)
     }
 }
+
+use glam::Vec4;
+
+pub struct RangeFinder {
+    view_forward_z: Vec4,
+}
+
+impl RangeFinder {
+    pub fn new(view_forward_z: Vec4) -> Self {
+        Self { view_forward_z }
+    }
+
+    pub fn distance(&self, point: Vec4) -> f32 {
+        self.view_forward_z.dot(point)
+    }
+}

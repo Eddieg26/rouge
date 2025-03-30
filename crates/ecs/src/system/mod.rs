@@ -545,6 +545,18 @@ impl<'w, 's, S: SystemArg> std::ops::DerefMut for StaticArg<'w, S> {
     }
 }
 
+impl<'w, 's, S: SystemArg> AsRef<ArgItem<'w, S>> for StaticArg<'w, S> {
+    fn as_ref(&self) -> &ArgItem<'w, S> {
+        &self.0
+    }
+}
+
+impl<'w, 's, S: SystemArg> AsMut<ArgItem<'w, S>> for StaticArg<'w, S> {
+    fn as_mut(&mut self) -> &mut ArgItem<'w, S> {
+        &mut self.0
+    }
+}
+
 impl<'w, S: SystemArg> StaticArg<'w, S> {
     pub fn into_inner(self) -> ArgItem<'w, S> {
         self.0

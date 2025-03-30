@@ -7,8 +7,8 @@ use crate::{
         shader::ShaderPath,
     },
 };
-use asset::asset::Asset;
-use ecs::{Resource, system::unlifetime::ReadRes};
+use asset::{AssetRef, asset::Asset};
+use ecs::{Component, Resource, system::unlifetime::ReadRes};
 
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
@@ -123,3 +123,49 @@ impl<M: Material> RenderAssetExtractor for M {
         })
     }
 }
+
+pub struct MaterialRef<M: Material>(AssetRef<M>);
+impl<M: Material> MaterialRef<M> {
+    pub fn new(asset: impl Into<AssetRef<M>>) -> Self {
+        Self(asset.into())
+    }
+
+    pub fn set(&mut self, asset: AssetRef<M>) {
+        self.0 = asset;
+    }
+}
+
+impl<M: Material> From<AssetRef<M>> for MaterialRef<M> {
+    fn from(asset: AssetRef<M>) -> Self {
+        Self::new(asset)
+    }
+}
+
+impl<M: Material> From<MaterialRef<M>> for AssetRef<M> {
+    fn from(asset: MaterialRef<M>) -> Self {
+        asset.0
+    }
+}
+
+impl<M: Material> std::ops::Deref for MaterialRef<M> {
+    type Target = AssetRef<M>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<M: Material> AsRef<AssetRef<M>> for MaterialRef<M> {
+    fn as_ref(&self) -> &AssetRef<M> {
+        &self.0
+    }
+}
+
+impl<M: Material> Copy for MaterialRef<M> {}
+impl<M: Material> Clone for MaterialRef<M> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+
+impl<M: Material> Component for MaterialRef<M> {}

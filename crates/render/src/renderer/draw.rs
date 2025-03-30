@@ -14,7 +14,10 @@ use crate::{
 use asset::{AssetId, AssetRef, database::AssetDatabase};
 use ecs::{
     Entity, IndexMap, Res, ResMut, Resource,
-    system::unlifetime::{ReadRes, WriteRes},
+    system::{
+        ArgItem, StaticArg, SystemArg,
+        unlifetime::{ReadRes, WriteRes},
+    },
     world::{
         action::WorldActions,
         builtin::actions::AddResource,
@@ -333,8 +336,8 @@ impl<D: DrawPhase> ViewDrawCalls<D> {
         self.0.get_mut(&entity)
     }
 
-    pub fn insert(&mut self, entity: Entity, ranges: Vec<DrawCall<D>>) {
-        self.0.insert(entity, ranges);
+    pub fn insert<I: IntoIterator<Item = DrawCall<D>>>(&mut self, entity: Entity, calls: I) {
+        self.0.entry(entity).or_default().extend(calls);
     }
 
     pub fn remove(&mut self, entity: Entity) -> Option<Vec<DrawCall<D>>> {
@@ -395,13 +398,15 @@ impl<D: Draw> Draws<D> {
         }
     }
 
-    pub(crate) fn queue_view_draws(
+    pub(crate) fn queue_view_draws<P: DrawPhase<View = D::View>>(
         draws: Res<Self>,
         views: Res<ViewBuffer<D::View>>,
         draw_functions: Res<DrawFunctions<D::View>>,
-        mut view_draws: ResMut<ViewDrawCalls<D::Phase>>,
         mut mesh_buffer: ResMut<MeshDataBuffer<D::Mesh>>,
-    ) {
+        mut view_draws: ResMut<ViewDrawCalls<P>>,
+    ) where
+        D: IntoDrawCall<P>,
+    {
         let draw_id = draw_functions.get_id::<D>();
 
         for view in views.views() {
@@ -421,20 +426,21 @@ impl<D: Draw> Draws<D> {
                     *draw_index = (*draw_index).min(index)
                 }
 
-                let calls = batches
-                    .drain()
-                    .map(|(key, (draw_index, data))| {
-                        let instances = mesh_buffer.append(data);
-                        let phase = draws[draw_index].phase(view);
-                        DrawCall::new(draw_id, key, phase, instances)
-                    })
-                    .collect::<Vec<_>>();
+                let draw_calls = batches.drain().map(|(key, (draw_index, data))| {
+                    let instances = mesh_buffer.append(data);
+                    let phase = draws[draw_index].into_draw_call(view);
 
-                view_draws.insert(view.entity(), calls);
+                    DrawCall {
+                        id: draw_id,
+                        key,
+                        phase,
+                        instances,
+                    }
+                });
+
+                view_draws.insert(view.entity(), draw_calls);
             } else {
-                let mut unbatched = vec![];
-
-                for call in draws.iter() {
+                let draw_calls = draws.iter().map(|call| {
                     let offset = mesh_buffer.push(call.data());
                     let key = BatchKey {
                         material: call.material().into(),
@@ -442,13 +448,17 @@ impl<D: Draw> Draws<D> {
                         sub_mesh: call.sub_mesh(),
                     };
 
-                    unbatched.push(DrawCall {
+                    let phase = call.into_draw_call(view);
+                    let instances = offset..(offset + 1);
+                    DrawCall {
                         id: draw_id,
                         key,
-                        phase: call.phase(view),
-                        instances: offset..offset + 1,
-                    });
-                }
+                        phase,
+                        instances,
+                    }
+                });
+
+                view_draws.insert(view.entity(), draw_calls);
             }
         }
     }
@@ -755,6 +765,20 @@ pub trait ViewPass: Send + Sync + 'static {
     ) -> impl Fn(&mut RenderContext, &RenderView<Self::View>) + 'static;
 }
 
+pub trait DrawPass: ViewPass {
+    type Arg: SystemArg;
+
+    type Data<'a>: Send + Sync;
+
+    fn get<'a>(
+        view: Entity,
+        draw_id: DrawId,
+        key: BatchKey,
+        instances: Range<u32>,
+        arg: &'a mut ArgItem<Self::Arg>,
+    ) -> Self::Data<'a>;
+}
+
 pub struct ViewPassNode<V: ViewPass>(std::marker::PhantomData<V>);
 
 impl<V: ViewPass> RenderGraphPass for ViewPassNode<V> {
@@ -777,7 +801,6 @@ pub trait Draw: Send + Sync + 'static {
     type View: View;
     type Mesh: MeshData;
     type Material: Material;
-    type Phase: DrawPhase;
     type Query: BaseQuery;
 
     const BATCH: bool = true;
@@ -794,8 +817,6 @@ pub trait Draw: Send + Sync + 'static {
     fn sub_mesh(&self) -> Option<SubMesh> {
         None
     }
-
-    fn phase(&self, view: &RenderView<Self::View>) -> Self::Phase;
 
     fn shader() -> impl Into<ShaderPath>;
 
@@ -814,4 +835,8 @@ pub trait Draw: Send + Sync + 'static {
     }
 
     fn extract<'a>(query: <Self::Query as BaseQuery>::Item<'a>) -> Self;
+}
+
+pub trait IntoDrawCall<D: DrawPhase> {
+    fn into_draw_call(&self, view: &RenderView<D::View>) -> D;
 }

@@ -1,11 +1,12 @@
 use crate::{
-    DrawPipline, ExtractedViews, MeshData, PostRender, PreRender, ProcessResources, RenderAssets,
+    DrawPhase, DrawPipline, ExtractedViews, IntoDrawCall, MeshData, PostRender, PreRender,
+    ProcessResources, RenderAssets,
     app::{
         Process, ProcessAssets, ProcessPipelines, Queue, QueueDraws, QueueViews, Render, RenderApp,
     },
     renderer::{
         Draw, DrawFunctions, Draws, MeshDataBuffer, RenderGraphPass, View, ViewBuffer,
-        ViewDrawCalls, ViewEntities, graph::RenderGraph,
+        ViewEntities, graph::RenderGraph,
     },
     resources::{
         AssetExtractors, DefaultSampler, ExtractError, ExtractInfo, Fallbacks, Material, Mesh,
@@ -85,7 +86,7 @@ impl Plugin for RenderPlugin {
 pub trait RenderAppExt {
     fn add_pass<P: RenderGraphPass>(&mut self, pass: P) -> &mut Self;
     fn add_view<V: View>(&mut self) -> &mut Self;
-    fn add_draw<D: Draw>(&mut self) -> &mut Self;
+    fn add_draw<D: Draw + IntoDrawCall<P>, P: DrawPhase<View = D::View>>(&mut self) -> &mut Self;
     fn extract_render_asset<R: RenderAssetExtractor>(&mut self) -> &mut Self;
     fn extract_render_resource<R: RenderResource>(&mut self) -> &mut Self;
 }
@@ -102,8 +103,8 @@ impl RenderAppExt for GameBuilder {
         self.add_plugin(ViewPlugin::<V>::new())
     }
 
-    fn add_draw<D: Draw>(&mut self) -> &mut Self {
-        self.add_plugin(DrawPlugin::<D>::new())
+    fn add_draw<D: Draw + IntoDrawCall<P>, P: DrawPhase<View = D::View>>(&mut self) -> &mut Self {
+        self.add_plugin(DrawPlugin::<D, P>::new())
     }
 
     fn extract_render_asset<R: RenderAssetExtractor>(&mut self) -> &mut Self {
@@ -170,14 +171,16 @@ impl<V: View> Plugin for ViewPlugin<V> {
     }
 }
 
-pub struct DrawPlugin<D: Draw>(std::marker::PhantomData<D>);
-impl<D: Draw> DrawPlugin<D> {
+pub struct DrawPlugin<D: Draw + IntoDrawCall<P>, P: DrawPhase<View = D::View>>(
+    std::marker::PhantomData<(D, P)>,
+);
+impl<D: Draw + IntoDrawCall<P>, P: DrawPhase<View = D::View>> DrawPlugin<D, P> {
     pub fn new() -> Self {
         Self(Default::default())
     }
 }
 
-impl<D: Draw> Plugin for DrawPlugin<D> {
+impl<D: Draw + IntoDrawCall<P>, P: DrawPhase<View = D::View>> Plugin for DrawPlugin<D, P> {
     fn name(&self) -> &'static str {
         std::any::type_name::<D>()
     }
@@ -185,9 +188,8 @@ impl<D: Draw> Plugin for DrawPlugin<D> {
     fn start(&mut self, game: &mut GameBuilder) {
         game.scoped_sub_app::<RenderApp>(|_, app| {
             app.add_resource(Draws::<D>::default());
-            app.add_resource(ViewDrawCalls::<D::Phase>::default());
             app.add_systems(Extract, Draws::<D>::extract_draws);
-            app.add_systems(QueueDraws, Draws::<D>::queue_view_draws);
+            app.add_systems(QueueDraws, Draws::<D>::queue_view_draws::<P>);
             app.add_systems(PostRender, Draws::<D>::clear_draws);
             match app.try_resource_mut::<DrawFunctions<D::View>>() {
                 Some(functions) => {

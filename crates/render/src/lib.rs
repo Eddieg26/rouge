@@ -21,9 +21,9 @@ pub mod encase {
 pub mod wgpu {
     pub use wgpu::{
         BlendState, BufferUsages, ColorTargetState, ColorWrites, DepthBiasState, DepthStencilState,
-        MultisampleState, PrimitiveState, SamplerBindingType, ShaderStages, TextureDimension,
-        TextureFormat, TextureSampleType, TextureUsages, TextureViewDimension, VertexFormat,
-        VertexStepMode,
+        MultisampleState, PrimitiveState, RenderPassColorAttachment, RenderPassDescriptor,
+        SamplerBindingType, ShaderStages, TextureDimension, TextureFormat, TextureSampleType,
+        TextureUsages, TextureViewDimension, VertexFormat, VertexStepMode,
     };
 }
 

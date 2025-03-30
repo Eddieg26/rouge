@@ -48,6 +48,12 @@ impl<T: ?Sized + 'static> std::ops::Deref for Static<T> {
     }
 }
 
+impl<T: ?Sized + 'static> AsRef<T> for Static<T> {
+    fn as_ref(&self) -> &T {
+        self.0
+    }
+}
+
 impl<T: ?Sized + 'static> Clone for Static<T> {
     fn clone(&self) -> Self {
         *self

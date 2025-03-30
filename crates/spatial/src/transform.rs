@@ -154,6 +154,10 @@ impl Transform {
         ));
     }
 
+    pub fn world(&self) -> Mat4 {
+        self.local_to_world
+    }
+
     pub fn update(&mut self, parent: Option<&Transform>) {
         self.local_to_world = self.matrix(parent.map(|p| p.local_to_world));
     }

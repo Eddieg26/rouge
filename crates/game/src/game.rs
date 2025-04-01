@@ -5,7 +5,7 @@ use crate::{
     App, MainActions, SubActions,
 };
 use ecs::{
-    core::{component::Component, resource::Resource, Type},
+    core::{component::Component, resource::Resource},
     event::{Event, EventId, Events},
     system::{schedule::Phase, IntoSystemConfigs},
     task::TaskPool,
@@ -14,7 +14,7 @@ use ecs::{
         World,
     },
 };
-use std::{error::Error, sync::Arc};
+use std::{any::TypeId, error::Error, sync::Arc};
 
 pub struct GameBuilder {
     apps: AppBuilders,
@@ -206,7 +206,7 @@ impl GameBuilder {
     ) -> &mut Self {
         let mut sub_app = self.apps.remove::<A>().unwrap();
         scope(self, &mut sub_app);
-        self.apps.insert(Type::of::<A>(), sub_app);
+        self.apps.insert(TypeId::of::<A>(), sub_app);
         self
     }
 

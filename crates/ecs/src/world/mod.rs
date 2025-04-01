@@ -183,6 +183,7 @@ impl World {
 
     pub fn register_event<E: Event>(&mut self) -> &mut Self {
         self.resources.add(Events::<E>::new(self.events.clone()));
+        self.register_resource::<Events<E>>();
         self
     }
 

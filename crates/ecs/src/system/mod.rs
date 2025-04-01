@@ -472,8 +472,10 @@ macro_rules! impl_into_system_configs {
             fn configs(self) -> Vec<SystemConfig> {
                 let name = std::any::type_name::<F>();
                 let run = move |world: WorldCell| {
+                    ($($arg::init(&world),)*);
                     let ($($arg,)*) = ($($arg::get(world),)*);
                     self($($arg),*);
+                    ($($arg::done(&world),)*);
                 };
                 let mut access = Vec::new();
                 $(access.extend($arg::access());)*
@@ -574,12 +576,28 @@ impl<'w, S: SystemArg> StaticArg<'w, S> {
 impl<S: SystemArg + 'static> SystemArg for StaticArg<'_, S> {
     type Item<'world> = StaticArg<'world, S>;
 
+    fn init(world: &WorldCell) {
+        S::init(world);
+    }
+
     fn get<'a>(world: WorldCell<'a>) -> Self::Item<'a> {
         StaticArg(S::get(world))
     }
 
     fn access() -> Vec<SystemAccess> {
         S::access()
+    }
+
+    fn send() -> bool {
+        S::send()
+    }
+
+    fn validate(world: &WorldCell) -> bool {
+        S::validate(world)
+    }
+
+    fn done(world: &WorldCell) {
+        S::done(world);
     }
 }
 

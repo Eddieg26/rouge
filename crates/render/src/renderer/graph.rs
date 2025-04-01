@@ -137,6 +137,7 @@ impl PassNode {
 
 pub struct PassBuilder<'a> {
     id: NodeId,
+    name: Name,
     creates: Vec<ResourceId>,
     reads: Vec<ResourceId>,
     writes: Vec<ResourceId>,
@@ -145,9 +146,10 @@ pub struct PassBuilder<'a> {
 }
 
 impl<'a> PassBuilder<'a> {
-    pub fn new(id: NodeId, graph: &'a mut RenderGraph) -> Self {
+    pub fn new(id: NodeId, name: Name, graph: &'a mut RenderGraph) -> Self {
         Self {
             id,
+            name,
             creates: vec![],
             reads: vec![],
             writes: vec![],
@@ -181,10 +183,15 @@ impl<'a> PassBuilder<'a> {
     }
 
     pub fn write<G: GraphResource>(&mut self) -> ResourceId {
-        let entry = self
-            .graph
-            .get_resource_entry::<G>()
-            .expect("resource not found");
+        let entry = match self.graph.get_resource_entry::<G>() {
+            Some(entry) => entry,
+            None => {
+                self.graph.import::<G>(None);
+                self.graph
+                    .get_resource_entry::<G>()
+                    .expect("resource not found")
+            }
+        };
 
         let id = entry.id;
 
@@ -224,7 +231,7 @@ impl<'a> PassBuilder<'a> {
         let executor = P::setup(pass, &mut self);
         PassNode {
             id: self.id,
-            name: P::NAME,
+            name: self.name,
             creates: self.creates,
             reads: self.reads,
             writes: self.writes,
@@ -240,23 +247,22 @@ pub trait RenderGraphPass {
     fn setup(self, builder: &mut PassBuilder) -> impl Fn(&mut RenderContext) + 'static;
 }
 
-pub trait SubGraph: 'static {
+pub trait SubGraph: Copy {
     const NAME: Name;
-}
 
-pub struct SubgraphPass<G: SubGraph>(std::marker::PhantomData<G>);
-impl<G: SubGraph> Default for SubgraphPass<G> {
-    fn default() -> Self {
-        Self(std::marker::PhantomData)
+    fn name(&self) -> Name {
+        Self::NAME
     }
 }
 
-impl<G: SubGraph> RenderGraphPass for SubgraphPass<G> {
-    const NAME: Name = G::NAME;
+pub struct SubgraphPass(pub Name);
+
+impl RenderGraphPass for SubgraphPass {
+    const NAME: Name = "SubgraphPass";
 
     fn setup(self, _: &mut PassBuilder) -> impl Fn(&mut RenderContext) + 'static {
         move |ctx| {
-            ctx.run_sub_graph(Self::NAME);
+            ctx.run_sub_graph(self.0);
         }
     }
 }
@@ -303,20 +309,21 @@ impl RenderGraph {
 
     pub fn add_pass<P: RenderGraphPass>(&mut self, pass: P) -> NodeId {
         let id = self.passes.len() as u32;
-        let node = PassBuilder::new(id, self).build::<P>(pass);
+        let node = PassBuilder::new(id, P::NAME, self).build::<P>(pass);
         self.passes.push(node);
 
         id
     }
 
-    pub fn add_sub_graph<G: SubGraph>(&mut self) {
-        let id = self.add_pass::<SubgraphPass<G>>(SubgraphPass::default());
+    pub fn add_sub_graph(&mut self, sub_graph: impl SubGraph) {
+        let id = self.add_pass(SubgraphPass(sub_graph.name()));
         self.passes[id as usize].has_side_effect = true;
+        self.passes[id as usize].name = sub_graph.name();
 
-        self.sub_graphs.insert(G::NAME, RenderGraph::new());
+        self.sub_graphs.insert(sub_graph.name(), RenderGraph::new());
     }
 
-    pub fn import<R: GraphResource>(&mut self, resource: R) {
+    pub fn import<R: GraphResource>(&mut self, resource: Option<R>) {
         let id = self.entries.len() as u32;
         match self.entries.entry(TypeId::of::<R>()) {
             ecs::map::Entry::Occupied(mut entry) => {
@@ -324,12 +331,12 @@ impl RenderGraph {
                 if entry.ty == ResourceType::Transient {
                     panic!("transient resource already exists: {}", R::NAME);
                 } else {
-                    entry.object = Some(Box::new(resource));
+                    entry.object = resource.map(|r| Box::new(r) as Box<dyn Any>);
                 }
             }
             ecs::map::Entry::Vacant(entry) => {
                 let node = ResourceNode::new(self.resources.len() as u32, id);
-                let resource = ResourceEntry::import::<R>(id, Some(resource));
+                let resource = ResourceEntry::import::<R>(id, resource);
 
                 self.resources.push(node);
                 entry.insert(resource);
@@ -341,6 +348,14 @@ impl RenderGraph {
         if let Some(entry) = self.entries.get_mut(&TypeId::of::<R>()) {
             entry.destroy();
         }
+    }
+
+    pub fn get_sub_graph(&self, sub_graph: impl SubGraph) -> Option<&RenderGraph> {
+        self.sub_graphs.get(sub_graph.name())
+    }
+
+    pub fn get_sub_graph_mut(&mut self, sub_graph: impl SubGraph) -> Option<&mut RenderGraph> {
+        self.sub_graphs.get_mut(sub_graph.name())
     }
 
     pub fn get_resource<G: GraphResource>(&self, id: ResourceId) -> Option<&G> {
@@ -409,7 +424,7 @@ impl RenderGraph {
         }
 
         let queue = passes.iter().enumerate().filter_map(|(pass, ref_count)| {
-            if *ref_count == 0 {
+            if *ref_count == 0 && !self.passes[pass].has_side_effect {
                 return None;
             }
 
@@ -485,7 +500,7 @@ impl RenderGraph {
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
 
-        graph.import::<RenderTarget>(RenderTarget::new(view));
+        graph.import::<RenderTarget>(Some(RenderTarget::new(view)));
 
         graph.run(world, &device, &surface, None);
 

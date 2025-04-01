@@ -65,6 +65,7 @@ pub trait BaseQuery: Send + Sync {
     type Item<'a>: Send + Sync;
 
     fn init(_: &World, _: &mut QueryState) {}
+    fn done(_: &WorldCell) {}
     fn fetch<'a>(world: WorldCell<'a>, entity: Entity) -> Self::Item<'a>;
     fn access() -> Vec<SystemAccess>;
 }
@@ -73,16 +74,28 @@ impl<C: Component> BaseQuery for &C {
     type Item<'a> = &'a C;
 
     fn init(world: &World, state: &mut QueryState) {
-        let id = ComponentId::of::<C>();
         #[cfg(debug_assertions)]
         {
-            let index = world.registry().index_of(&*id);
+            let (index, ty) = world.registry().index_of::<C>();
             if !world.access().read(index) {
-                let meta = world.registry().get(&*id);
+                let meta = world.registry().get(&ty);
                 panic!("Component {} is already borrowed", meta.name());
             }
+            state.add_component(ty.into());
         }
-        state.add_component(id);
+
+        #[cfg(not(debug_assertions))]
+        {
+            state.add_component(ComponentId::of::<C>());
+        }
+    }
+
+    fn done(world: &WorldCell) {
+        #[cfg(debug_assertions)]
+        {
+            let (index, _) = world.get().registry().index_of::<C>();
+            world.get().access().clear(index);
+        }
     }
 
     fn fetch<'a>(world: WorldCell<'a>, entity: Entity) -> Self::Item<'a> {
@@ -101,16 +114,28 @@ impl<C: Component> BaseQuery for &mut C {
     type Item<'a> = &'a mut C;
 
     fn init(world: &World, state: &mut QueryState) {
-        let id = ComponentId::of::<C>();
         #[cfg(debug_assertions)]
         {
-            let index = world.registry().index_of(&*id);
+            let (index, ty) = world.registry().index_of::<C>();
             if !world.access().write(index) {
-                let meta = world.registry().get(&*id);
+                let meta = world.registry().get(&ty);
                 panic!("Component {} is already borrowed", meta.name());
             }
+            state.add_component(ty.into());
         }
-        state.add_component(id);
+
+        #[cfg(not(debug_assertions))]
+        {
+            state.add_component(ComponentId::of::<C>());
+        }
+    }
+
+    fn done(world: &WorldCell) {
+        #[cfg(debug_assertions)]
+        {
+            let (index, _) = world.get().registry().index_of::<C>();
+            world.get().access().clear(index);
+        }
     }
 
     fn fetch<'a>(world: WorldCell<'a>, entity: Entity) -> Self::Item<'a> {
@@ -132,6 +157,10 @@ impl<C: Component> BaseQuery for Option<&C> {
         <&C as BaseQuery>::init(world, state);
     }
 
+    fn done(world: &WorldCell) {
+        <&C as BaseQuery>::done(world);
+    }
+
     fn fetch<'a>(world: WorldCell<'a>, entity: Entity) -> Self::Item<'a> {
         world.get().get_component(entity)
     }
@@ -146,6 +175,10 @@ impl<C: Component> BaseQuery for Option<&mut C> {
 
     fn init(world: &World, state: &mut QueryState) {
         <&mut C as BaseQuery>::init(world, state);
+    }
+
+    fn done(world: &WorldCell) {
+        <&mut C as BaseQuery>::done(world);
     }
 
     fn fetch<'a>(world: WorldCell<'a>, entity: Entity) -> Self::Item<'a> {
@@ -330,6 +363,8 @@ impl<Q: BaseQuery, F: QueryFilter> SystemArg for Query<'_, Q, F> {
         Query::new(world)
     }
 
+    fn init(_world: &WorldCell) {}
+
     fn access() -> Vec<SystemAccess> {
         let mut access = Q::access();
         access.push(SystemAccess {
@@ -340,6 +375,10 @@ impl<Q: BaseQuery, F: QueryFilter> SystemArg for Query<'_, Q, F> {
         access
     }
 
+    fn done(world: &WorldCell) {
+        Q::done(world);
+    }
+
     fn send() -> bool {
         true
     }
@@ -347,26 +386,32 @@ impl<Q: BaseQuery, F: QueryFilter> SystemArg for Query<'_, Q, F> {
 
 #[macro_export]
 macro_rules! impl_base_query_for_tuples {
-    ($(($($name:ident),+)),+) => {
+    ($(($($name:ident),*)),*) => {
         $(
-            impl<$($name: BaseQuery),+> BaseQuery for ($($name,)+) {
-                type Item<'a> = ($($name::Item<'a>,)+);
+            impl<$($name: BaseQuery),*> BaseQuery for ($($name,)*) {
+                type Item<'a> = ($($name::Item<'a>,)*);
 
                 fn init(world: &World, state: &mut QueryState) {
                     $(
                         $name::init(world, state);
-                    )+
+                    )*
+                }
+
+                fn done(world: &WorldCell) {
+                    $(
+                        $name::done(world);
+                    )*
                 }
 
                 fn fetch<'a>(world: WorldCell<'a>, entity: Entity) -> Self::Item<'a> {
-                    ($($name::fetch(world, entity),)+)
+                    ($($name::fetch(world, entity),)*)
                 }
 
                 fn access() -> Vec<SystemAccess> {
                     let mut metas = Vec::new();
                     $(
                         metas.extend($name::access());
-                    )+
+                    )*
                     metas
                 }
             }
@@ -381,6 +426,12 @@ macro_rules! impl_filter_query_for_tuple {
             fn init(world: &World, state: &mut QueryState) {
                 $(
                     $filter::init(world, state);
+                )*
+            }
+
+            fn done(world: &WorldCell) {
+                $(
+                    $filter::done(world);
                 )*
             }
         }

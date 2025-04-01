@@ -16,6 +16,8 @@ use ecs::{Component, Resource, system::unlifetime::ReadRes};
 pub enum BlendMode {
     Opaque,
     Transparent,
+    Transmissive,
+    AlphaMask,
 }
 
 impl Into<wgpu::BlendState> for BlendMode {
@@ -23,6 +25,19 @@ impl Into<wgpu::BlendState> for BlendMode {
         match self {
             BlendMode::Opaque => wgpu::BlendState::REPLACE,
             BlendMode::Transparent => wgpu::BlendState::ALPHA_BLENDING,
+            BlendMode::Transmissive => wgpu::BlendState::ALPHA_BLENDING,
+            BlendMode::AlphaMask => wgpu::BlendState {
+                color: wgpu::BlendComponent {
+                    src_factor: wgpu::BlendFactor::One,
+                    dst_factor: wgpu::BlendFactor::Zero,
+                    operation: wgpu::BlendOperation::Add,
+                },
+                alpha: wgpu::BlendComponent {
+                    src_factor: wgpu::BlendFactor::One,
+                    dst_factor: wgpu::BlendFactor::Zero,
+                    operation: wgpu::BlendOperation::Add,
+                },
+            },
         }
     }
 }

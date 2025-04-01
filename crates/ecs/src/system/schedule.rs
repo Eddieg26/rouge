@@ -1,5 +1,7 @@
+use std::any::TypeId;
+
 use super::{IntoSystemConfigs, RunMode, SystemConfig, SystemGraph};
-use crate::{core::Type, world::cell::WorldCell};
+use crate::world::cell::WorldCell;
 use hashbrown::HashMap;
 use indexmap::IndexMap;
 
@@ -14,20 +16,20 @@ pub trait Phase: Sized + 'static {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct PhaseId(Type);
+pub struct PhaseId(TypeId);
 
 impl PhaseId {
     pub fn of<P: Phase>() -> Self {
-        Self(Type::of::<P>())
+        Self(TypeId::of::<P>())
     }
 
-    pub fn dynamic(ty: u32) -> Self {
-        Self(Type::dynamic(ty))
+    pub fn dynamic(ty: u128) -> Self {
+        unsafe { Self(std::mem::transmute(ty)) }
     }
 }
 
-impl Into<Type> for PhaseId {
-    fn into(self) -> Type {
+impl Into<TypeId> for PhaseId {
+    fn into(self) -> TypeId {
         self.0
     }
 }

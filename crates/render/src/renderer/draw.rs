@@ -27,6 +27,8 @@ use super::{PassBuilder, RenderContext, RenderGraphPass, RenderState};
 pub trait ViewData: ShaderType + WriteInto + Sized + Send + Sync + 'static {
     type Query: BaseQuery;
 
+    fn world(&self) -> &Mat4;
+
     fn extract<'a>(query: <Self::Query as BaseQuery>::Item<'a>) -> ExtractedView<Self>;
 }
 
@@ -34,7 +36,6 @@ pub struct ExtractedView<V: ViewData> {
     pub entity: Entity,
     pub view: V,
     pub depth: i32,
-    pub world: Mat4,
 }
 
 pub struct ExtractedViews<V: ViewData>(pub(crate) Vec<ExtractedView<V>>);
@@ -49,17 +50,15 @@ pub struct RenderView<V: ViewData> {
     entity: Entity,
     view: V,
     depth: i32,
-    world: Mat4,
     dynamic_offset: u32,
 }
 
 impl<V: ViewData> RenderView<V> {
-    pub fn new(entity: Entity, view: V, depth: i32, world: Mat4, dynamic_offset: u32) -> Self {
+    pub fn new(entity: Entity, view: V, depth: i32, dynamic_offset: u32) -> Self {
         Self {
             entity,
             view,
             depth,
-            world,
             dynamic_offset,
         }
     }
@@ -77,7 +76,7 @@ impl<V: ViewData> RenderView<V> {
     }
 
     pub fn world(&self) -> &Mat4 {
-        &self.world
+        self.view.world()
     }
 
     pub fn dynamic_offset(&self) -> u32 {
@@ -138,7 +137,6 @@ impl<V: ViewData> ViewBuffer<V> {
             extracted.entity,
             extracted.view,
             extracted.depth,
-            extracted.world,
             dynamic_offset,
         ));
     }
@@ -201,6 +199,8 @@ impl<V: ViewData> RenderResource for ViewBuffer<V> {
 }
 
 pub trait MeshData: ShaderType + WriteInto + Send + Sync + 'static {}
+
+impl<S: ShaderType + WriteInto + Send + Sync + 'static> MeshData for S {}
 
 pub struct MeshDataBuffer<T: MeshData> {
     buffer: Buffer,
@@ -298,10 +298,7 @@ pub trait Renderer {
     type Mesh: MeshData;
 
     fn vertex_layout() -> &'static [VertexFormat];
-
-    fn instance_layout() -> &'static [VertexFormat] {
-        &[]
-    }
+    fn instance_layout() -> &'static [VertexFormat];
 
     fn primitive_state() -> wgpu::PrimitiveState {
         wgpu::PrimitiveState {
@@ -316,7 +313,7 @@ pub trait Renderer {
 pub type DrawMesh<D> = <<D as Draw>::Renderer as Renderer>::Mesh;
 pub type DrawView<D> = <<D as Draw>::Renderer as Renderer>::View;
 
-pub trait Draw: IntoDrawCall<<Self::Material as Material>::Phase> + Send + Sync + 'static {
+pub trait Draw: Send + Sync + 'static {
     type View: ViewData;
     type Material: Material;
     type Renderer: Renderer<View = Self::View>;
@@ -483,6 +480,37 @@ impl<V: ViewData, M: MaterialPhase> ViewDrawCalls<V, M> {
                     .or_default()
                     .extend(draw_calls);
             }
+        }
+    }
+
+    pub(crate) fn clear_draws(mut view_draws: ResMut<Self>) {
+        view_draws.0.clear();
+    }
+
+    pub fn draw(
+        &self,
+        state: &mut RenderState,
+        ctx: &RenderContext,
+        draw_functions: &DrawFunctions<V>,
+        meshes: &RenderAssets<RenderMesh>,
+        view_buffer: &ViewBuffer<V>,
+        view: &RenderView<V>,
+    ) {
+        let Some(draws) = self.0.get(&view.entity()) else {
+            return;
+        };
+
+        for draw in draws {
+            let function = draw_functions.get(draw.id);
+            function(
+                state,
+                ctx,
+                meshes,
+                view_buffer,
+                view,
+                &draw.key,
+                draw.instances.clone(),
+            );
         }
     }
 }
@@ -726,27 +754,6 @@ impl<V: ViewData> DrawFunctions<V> {
             .get_index_of(&TypeId::of::<D>())
             .map(|index| DrawId(index as u32))
     }
-
-    pub fn draw<M: MaterialPhase>(
-        &self,
-        state: &mut RenderState,
-        ctx: &RenderContext,
-        meshes: &RenderAssets<RenderMesh>,
-        view_buffer: &ViewBuffer<V>,
-        view: &RenderView<V>,
-        draw: &DrawCall<M>,
-    ) {
-        let function = self.0[draw.id.0 as usize];
-        function(
-            state,
-            ctx,
-            meshes,
-            view_buffer,
-            view,
-            &draw.key,
-            draw.instances.clone(),
-        );
-    }
 }
 
 impl<V: ViewData> Resource for DrawFunctions<V> {}
@@ -762,6 +769,11 @@ pub trait ViewPass: Send + Sync + 'static {
 }
 
 pub struct ViewPassNode<V: ViewPass>(std::marker::PhantomData<V>);
+impl<V: ViewPass> ViewPassNode<V> {
+    pub fn new() -> Self {
+        Self(std::marker::PhantomData)
+    }
+}
 
 impl<V: ViewPass> RenderGraphPass for ViewPassNode<V> {
     const NAME: super::Name = V::NAME;

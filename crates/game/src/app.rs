@@ -1,6 +1,6 @@
 use crate::phases::{Extract, Update};
 use ecs::{
-    core::{component::Component, resource::Resource, IndexMap, Type},
+    core::{component::Component, resource::Resource, IndexMap},
     event::Event,
     system::{schedule::Phase, ArgItem, IntoSystemConfigs, SystemAccess, SystemArg},
     task::TaskPool,
@@ -10,7 +10,7 @@ use ecs::{
         World,
     },
 };
-use std::thread::JoinHandle;
+use std::{any::TypeId, thread::JoinHandle};
 
 pub trait AppTag: 'static + Send {
     const NAME: &'static str;
@@ -194,7 +194,7 @@ impl Default for App {
 
 pub struct AppBuilders {
     main: App,
-    apps: IndexMap<Type, App>,
+    apps: IndexMap<TypeId, App>,
 }
 
 impl AppBuilders {
@@ -222,23 +222,23 @@ impl AppBuilders {
     }
 
     pub fn sub<A: AppTag>(&self) -> Option<&App> {
-        self.apps.get(&Type::of::<A>())
+        self.apps.get(&TypeId::of::<A>())
     }
 
     pub fn sub_mut<A: AppTag>(&mut self) -> Option<&mut App> {
-        self.apps.get_mut(&Type::of::<A>())
+        self.apps.get_mut(&TypeId::of::<A>())
     }
 
-    pub fn sub_dyn(&self, tag: Type) -> Option<&App> {
+    pub fn sub_dyn(&self, tag: TypeId) -> Option<&App> {
         self.apps.get(&tag)
     }
 
-    pub fn sub_dyn_mut(&mut self, tag: Type) -> Option<&mut App> {
+    pub fn sub_dyn_mut(&mut self, tag: TypeId) -> Option<&mut App> {
         self.apps.get_mut(&tag)
     }
 
     pub fn add<A: AppTag>(&mut self) -> &mut App {
-        let ty = Type::of::<A>();
+        let ty = TypeId::of::<A>();
         if !self.apps.contains_key(&ty) {
             let mut app = App::new(World::sub());
             app.register_resource::<MainWorld>();
@@ -252,10 +252,10 @@ impl AppBuilders {
     }
 
     pub fn remove<A: AppTag>(&mut self) -> Option<App> {
-        self.apps.shift_remove(&Type::of::<A>())
+        self.apps.shift_remove(&TypeId::of::<A>())
     }
 
-    pub fn insert(&mut self, tag: Type, app: App) {
+    pub fn insert(&mut self, tag: TypeId, app: App) {
         self.apps.insert(tag, app);
     }
 
@@ -440,6 +440,11 @@ impl<'w, P: SystemArg> Main<'w, P> {
 impl<S: SystemArg + 'static> SystemArg for Main<'_, S> {
     type Item<'world> = Main<'world, S>;
 
+    fn init(world: &WorldCell) {
+        let world = world.resource::<MainWorld>();
+        S::init(unsafe { &world.inner().cell() });
+    }
+
     fn get<'a>(world: WorldCell<'a>) -> Self::Item<'a> {
         let world = world.resource::<MainWorld>();
         Main(S::get(world.inner().into()))
@@ -447,6 +452,19 @@ impl<S: SystemArg + 'static> SystemArg for Main<'_, S> {
 
     fn access() -> Vec<SystemAccess> {
         S::access()
+    }
+
+    fn done(world: &WorldCell) {
+        let world = world.resource::<MainWorld>();
+        S::done(unsafe { &world.inner().cell() });
+    }
+
+    fn send() -> bool {
+        S::send()
+    }
+
+    fn validate(world: &WorldCell) -> bool {
+        S::validate(world)
     }
 }
 

@@ -1,28 +1,23 @@
-use super::Type;
+use std::any::TypeId;
 
 pub trait Component: Send + Sync + 'static {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct ComponentId(Type);
+pub struct ComponentId(TypeId);
 impl ComponentId {
     pub fn of<C: Component>() -> Self {
-        Self(Type::of::<C>())
+        Self(TypeId::of::<C>())
     }
 }
 impl std::ops::Deref for ComponentId {
-    type Target = Type;
+    type Target = TypeId;
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
-impl Into<Type> for ComponentId {
-    fn into(self) -> Type {
-        self.0
-    }
-}
 
-impl Into<Type> for &ComponentId {
-    fn into(self) -> Type {
-        self.0
+impl From<TypeId> for ComponentId {
+    fn from(type_id: TypeId) -> Self {
+        Self(type_id)
     }
 }

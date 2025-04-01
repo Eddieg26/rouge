@@ -2,7 +2,6 @@ use crate::{
     core::{
         bitset::Bitset,
         resource::{NonSend, NonSendMut, Res, ResMut, Resource},
-        Type,
     },
     system::SystemArg,
 };
@@ -23,6 +22,14 @@ impl WorldAccessTracker {
         Self {
             access: Arc::new(Mutex::new(Bitset::new())),
         }
+    }
+
+    pub fn get(&self, index: usize) -> (bool, bool) {
+        let access = self.access.lock().unwrap();
+        let index = index * 2;
+        let read = access.get(index);
+        let write = access.get(index + 1);
+        (read, write)
     }
 
     pub fn read(&self, index: usize) -> bool {
@@ -66,8 +73,7 @@ impl<R: Resource + Send> SystemArg for Res<'_, R> {
     fn init(world: &super::cell::WorldCell) {
         #[cfg(debug_assertions)]
         {
-            let ty = Type::of::<R>();
-            let index = world.get().registry().index_of(&ty);
+            let (index, ty) = world.get().registry().index_of::<R>();
             if !world.get().access().read(index) {
                 let meta = world.get().registry().get(&ty);
                 panic!("Resource {} is already borrowed mutably", meta.name());
@@ -82,8 +88,7 @@ impl<R: Resource + Send> SystemArg for Res<'_, R> {
     fn done(world: &super::cell::WorldCell) {
         #[cfg(debug_assertions)]
         {
-            let ty = Type::of::<R>();
-            let index = world.get().registry().index_of(&ty);
+            let (index, _) = world.get().registry().index_of::<R>();
             world.get().access().clear(index);
         }
     }
@@ -110,8 +115,7 @@ impl<R: Resource + Send> SystemArg for ResMut<'_, R> {
     fn init(world: &super::cell::WorldCell) {
         #[cfg(debug_assertions)]
         {
-            let ty = Type::of::<R>();
-            let index = world.get().registry().index_of(&ty);
+            let (index, ty) = world.get().registry().index_of::<R>();
             if !world.get().access().write(index) {
                 let meta = world.get().registry().get(&ty);
                 panic!("Resource {} is already borrowed", meta.name());
@@ -126,8 +130,7 @@ impl<R: Resource + Send> SystemArg for ResMut<'_, R> {
     fn done(world: &super::cell::WorldCell) {
         #[cfg(debug_assertions)]
         {
-            let ty = Type::of::<R>();
-            let index = world.get().registry().index_of(&ty);
+            let (index, _) = world.get().registry().index_of::<R>();
             world.get().access().clear(index);
         }
     }
@@ -162,8 +165,7 @@ impl<R: Resource> SystemArg for NonSend<'_, R> {
     fn init(world: &super::cell::WorldCell) {
         #[cfg(debug_assertions)]
         {
-            let ty = Type::of::<R>();
-            let index = world.get().registry().index_of(&ty);
+            let (index, ty) = world.get().registry().index_of::<R>();
             if !world.get().access().read(index) {
                 let meta = world.get().registry().get(&ty);
                 panic!("Resource {} is already borrowed mutably", meta.name());
@@ -178,8 +180,7 @@ impl<R: Resource> SystemArg for NonSend<'_, R> {
     fn done(world: &super::cell::WorldCell) {
         #[cfg(debug_assertions)]
         {
-            let ty = Type::of::<R>();
-            let index = world.get().registry().index_of(&ty);
+            let (index, _) = world.get().registry().index_of::<R>();
             world.get().access().clear(index);
         }
     }
@@ -206,8 +207,7 @@ impl<R: Resource> SystemArg for NonSendMut<'_, R> {
     fn init(world: &super::cell::WorldCell) {
         #[cfg(debug_assertions)]
         {
-            let ty = Type::of::<R>();
-            let index = world.get().registry().index_of(&ty);
+            let (index, ty) = world.get().registry().index_of::<R>();
             if !world.get().access().read(index) {
                 let meta = world.get().registry().get(&ty);
                 panic!("Resource {} is already borrowed mutably", meta.name());
@@ -222,8 +222,7 @@ impl<R: Resource> SystemArg for NonSendMut<'_, R> {
     fn done(world: &super::cell::WorldCell) {
         #[cfg(debug_assertions)]
         {
-            let ty = Type::of::<R>();
-            let index = world.get().registry().index_of(&ty);
+            let (index, _) = world.get().registry().index_of::<R>();
             world.get().access().clear(index);
         }
     }

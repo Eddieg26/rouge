@@ -1,7 +1,7 @@
 use super::{builtin::events::ComponentUpdate, World};
 use crate::{
     archetype::table::ColumnCell,
-    core::{component::Component, entity::Entity, resource::Resource, Type},
+    core::{component::Component, entity::Entity, resource::Resource},
     event::Events,
 };
 use indexmap::IndexMap;
@@ -104,7 +104,7 @@ impl Metadata {
 }
 
 pub struct Registry {
-    metadatas: IndexMap<Type, Metadata>,
+    metadatas: IndexMap<TypeId, Metadata>,
 }
 
 impl Registry {
@@ -114,40 +114,44 @@ impl Registry {
         }
     }
 
-    pub fn get(&self, ty: &Type) -> &Metadata {
+    pub fn get(&self, ty: &TypeId) -> &Metadata {
         self.metadatas
             .get(ty)
             .expect(&format!("Type not registered: {:?}", ty))
     }
 
-    pub fn get_extension<T: MetadataExtension>(&self, ty: &Type) -> &T {
+    pub fn get_extension<T: MetadataExtension>(&self, ty: &TypeId) -> &T {
         self.get(ty).extension_as()
     }
 
-    pub fn register_component<C: Component>(&mut self) -> Type {
+    pub fn register_component<C: Component>(&mut self) -> TypeId {
         self.register::<C>(ComponentExtension::new::<C>())
     }
 
-    pub fn register_resource<R: Resource>(&mut self) -> Type {
+    pub fn register_resource<R: Resource>(&mut self) -> TypeId {
         self.register::<R>(())
     }
 
-    pub fn index_of(&self, ty: &Type) -> usize {
-        self.metadatas
-            .get_index_of(ty)
-            .expect(&format!("Type not registered: {:?}", ty))
+    pub fn index_of<T: 'static>(&self) -> (usize, TypeId) {
+        let ty = TypeId::of::<T>();
+        let index = self.metadatas.get_index_of(&ty).expect(&format!(
+            "Type not registered: {:?}",
+            std::any::type_name::<T>()
+        ));
+
+        (index, ty)
     }
 
     pub fn len(&self) -> usize {
         self.metadatas.len()
     }
 
-    pub fn contains(&self, ty: &Type) -> bool {
+    pub fn contains(&self, ty: &TypeId) -> bool {
         self.metadatas.contains_key(ty)
     }
 
-    fn register<T: 'static>(&mut self, hooks: impl MetadataExtension) -> Type {
-        let ty = Type::of::<T>();
+    fn register<T: 'static>(&mut self, hooks: impl MetadataExtension) -> TypeId {
+        let ty = TypeId::of::<T>();
         if !self.contains(&ty) {
             let metadata = Metadata::new::<T>(hooks);
             self.metadatas.insert(ty, metadata);

@@ -1,6 +1,6 @@
 use crate::{
-    DrawFunctions, DrawMesh, DrawPipline, ExtractedViews, MaterialRef, MeshData, PostRender,
-    PreRender, ProcessResources, RenderAssets, ViewDrawCalls,
+    DrawFunctions, DrawMesh, DrawPipline, ExtractedViews, IntoDrawCall, MaterialPhase, MaterialRef,
+    MeshData, PostRender, PreRender, ProcessResources, RenderAssets, SubGraph, ViewDrawCalls,
     app::{
         Process, ProcessAssets, ProcessPipelines, Queue, QueueDraws, QueueViews, Render, RenderApp,
     },
@@ -21,6 +21,7 @@ use asset::{
 };
 use ecs::{Res, ResMut, event::Events};
 use game::{Extract, GameBuilder, Plugin, Update};
+use spatial::plugin::SpatialPlugin;
 use window::{
     events::{WindowCreated, WindowResized},
     plugin::WindowPlugin,
@@ -74,6 +75,7 @@ impl Plugin for RenderPlugin {
         let mut plugins = game::Plugins::default();
         plugins.add(WindowPlugin);
         plugins.add(AssetPlugin);
+        plugins.add(SpatialPlugin);
 
         plugins
     }
@@ -81,8 +83,15 @@ impl Plugin for RenderPlugin {
 
 pub trait RenderAppExt {
     fn add_pass<P: RenderGraphPass>(&mut self, pass: P) -> &mut Self;
+    fn add_sub_graph(&mut self, sub_graph: impl SubGraph) -> &mut Self;
+    fn add_sub_graph_pass<P: RenderGraphPass>(
+        &mut self,
+        sub_graph: impl SubGraph,
+        pass: P,
+    ) -> &mut Self;
     fn add_view<V: ViewData>(&mut self) -> &mut Self;
-    fn add_draw<M: Material, D: Draw<Material = M>>(&mut self) -> &mut Self;
+    fn add_draw<D: Draw + IntoDrawCall<<D::Material as Material>::Phase>>(&mut self) -> &mut Self;
+    fn add_material_phase<V: ViewData, P: MaterialPhase>(&mut self) -> &mut Self;
     fn extract_render_asset<R: RenderAssetExtractor>(&mut self) -> &mut Self;
     fn extract_render_resource<R: RenderResource>(&mut self) -> &mut Self;
 }
@@ -95,12 +104,47 @@ impl RenderAppExt for GameBuilder {
         self
     }
 
+    fn add_sub_graph(&mut self, sub_graph: impl SubGraph) -> &mut Self {
+        self.sub_app_mut::<RenderApp>()
+            .non_send_resource_mut::<RenderGraph>()
+            .add_sub_graph(sub_graph);
+        self
+    }
+
+    fn add_sub_graph_pass<P: RenderGraphPass>(
+        &mut self,
+        sub_graph: impl SubGraph,
+        pass: P,
+    ) -> &mut Self {
+        let render_graph = self
+            .sub_app_mut::<RenderApp>()
+            .non_send_resource_mut::<RenderGraph>();
+
+        if let Some(graph) = render_graph.get_sub_graph_mut(sub_graph) {
+            graph.add_pass::<P>(pass);
+        } else {
+            render_graph.add_sub_graph(sub_graph);
+            render_graph
+                .get_sub_graph_mut(sub_graph)
+                .unwrap()
+                .add_pass::<P>(pass);
+        }
+
+        self
+    }
+
     fn add_view<V: ViewData>(&mut self) -> &mut Self {
         self.add_plugin(ViewPlugin::<V>::new())
     }
 
-    fn add_draw<M: Material, D: Draw<Material = M>>(&mut self) -> &mut Self {
-        self.add_plugin(DrawPlugin::<M, D>::new())
+    fn add_draw<D: Draw + IntoDrawCall<<D::Material as Material>::Phase>>(&mut self) -> &mut Self {
+        self.add_plugin(DrawPlugin::<D>::new())
+    }
+
+    fn add_material_phase<V: ViewData, P: MaterialPhase>(&mut self) -> &mut Self {
+        self.sub_app_mut::<RenderApp>()
+            .add_resource(ViewDrawCalls::<V, P>::default());
+        self
     }
 
     fn extract_render_asset<R: RenderAssetExtractor>(&mut self) -> &mut Self {
@@ -111,6 +155,7 @@ impl RenderAppExt for GameBuilder {
                 app.add_resource(RenderAssets::<R::RenderAsset>::new());
 
                 game.add_resource(RenderAssetEvents::<R>::new());
+                game.register_asset::<R>();
                 game.observe::<AssetEvent<R>, _>(
                     |events: Res<Events<AssetEvent<R>>>,
                      mut other: ResMut<RenderAssetEvents<R>>| {
@@ -131,7 +176,7 @@ impl RenderAppExt for GameBuilder {
             }
         });
 
-        self.register_asset::<R>()
+        self
     }
 
     fn extract_render_resource<R: RenderResource>(&mut self) -> &mut Self {
@@ -167,14 +212,16 @@ impl<V: ViewData> Plugin for ViewPlugin<V> {
     }
 }
 
-pub struct DrawPlugin<M: Material, D: Draw<Material = M>>(std::marker::PhantomData<(D, M)>);
-impl<M: Material, D: Draw<Material = M>> DrawPlugin<M, D> {
+pub struct DrawPlugin<D: Draw + IntoDrawCall<<D::Material as Material>::Phase>>(
+    std::marker::PhantomData<D>,
+);
+impl<D: Draw + IntoDrawCall<<D::Material as Material>::Phase>> DrawPlugin<D> {
     pub fn new() -> Self {
         Self(Default::default())
     }
 }
 
-impl<M: Material, D: Draw<Material = M>> Plugin for DrawPlugin<M, D> {
+impl<D: Draw + IntoDrawCall<<D::Material as Material>::Phase>> Plugin for DrawPlugin<D> {
     fn name(&self) -> &'static str {
         std::any::type_name::<D>()
     }
@@ -182,8 +229,16 @@ impl<M: Material, D: Draw<Material = M>> Plugin for DrawPlugin<M, D> {
     fn start(&mut self, game: &mut GameBuilder) {
         game.scoped_sub_app::<RenderApp>(|_, app| {
             app.add_resource(Draws::<D>::default());
+            app.add_resource(ViewDrawCalls::<D::View, <D::Material as Material>::Phase>::default());
             app.add_systems(Extract, Draws::<D>::extract);
-            app.add_systems(QueueDraws, ViewDrawCalls::<D::View, M::Phase>::queue::<D>);
+            app.add_systems(
+                QueueDraws,
+                ViewDrawCalls::<D::View, <D::Material as Material>::Phase>::queue::<D>,
+            );
+            app.add_systems(
+                PostRender,
+                ViewDrawCalls::<D::View, <D::Material as Material>::Phase>::clear_draws,
+            );
             app.add_systems(PostRender, Draws::<D>::clear_draws);
             match app.try_resource_mut::<DrawFunctions<D::View>>() {
                 Some(functions) => functions.add::<D>(),

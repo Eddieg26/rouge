@@ -1,5 +1,6 @@
 use crate::game::GameBuilder;
-use ecs::core::{IndexMap, Type};
+use ecs::core::IndexMap;
+use std::any::TypeId;
 
 pub trait Plugin: 'static {
     fn name(&self) -> &'static str;
@@ -12,10 +13,10 @@ pub trait Plugin: 'static {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct PluginId(Type);
+pub struct PluginId(TypeId);
 impl PluginId {
     pub fn of<P: Plugin>() -> Self {
-        Self(Type::of::<P>())
+        Self(TypeId::of::<P>())
     }
 }
 

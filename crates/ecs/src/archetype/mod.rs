@@ -260,7 +260,9 @@ impl ArchetypeId {
 
 impl From<&ComponentId> for ArchetypeId {
     fn from(component: &ComponentId) -> Self {
-        Self(component.value())
+        let mut hasher = crc32fast::Hasher::new();
+        component.hash(&mut hasher);
+        Self(hasher.finalize())
     }
 }
 

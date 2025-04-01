@@ -216,4 +216,8 @@ impl<'a> RenderState<'a> {
         self.bind_groups.clear();
         self.pipeline = None;
     }
+
+    pub fn finish(self) {
+        // No need to do anything here, the pass will be dropped and cleaned up automatically.
+    }
 }

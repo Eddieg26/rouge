@@ -1,6 +1,7 @@
-use crate::core::{resource::Resource, Type};
+use crate::core::resource::Resource;
 use indexmap::IndexSet;
 use std::{
+    any::TypeId,
     hash::Hash,
     sync::{Arc, Mutex},
 };
@@ -8,20 +9,20 @@ use std::{
 pub trait Event: Send + 'static {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct EventId(Type);
+pub struct EventId(TypeId);
 impl EventId {
     pub fn of<E: Event>() -> Self {
-        Self(Type::of::<E>())
+        Self(TypeId::of::<E>())
     }
 }
 impl std::ops::Deref for EventId {
-    type Target = Type;
+    type Target = TypeId;
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
-impl Into<Type> for EventId {
-    fn into(self) -> Type {
+impl Into<TypeId> for EventId {
+    fn into(self) -> TypeId {
         self.0
     }
 }

@@ -1,7 +1,7 @@
-use ecs::core::{internal::blob::BlobCell, resource::Resource, Type};
+use ecs::core::{internal::blob::BlobCell, resource::Resource};
 use hashbrown::HashMap;
 use serde::ser::SerializeStruct;
-use std::{fmt::Debug, hash::Hash, marker::PhantomData};
+use std::{any::TypeId, fmt::Debug, hash::Hash, marker::PhantomData};
 use uuid::Uuid;
 
 pub trait Asset: Send + Sync + serde::Serialize + for<'a> serde::Deserialize<'a> + 'static {}
@@ -25,7 +25,7 @@ impl AssetId {
 
         unsafe {
             let addr = std::ptr::addr_of_mut!(id) as *mut u32;
-            std::ptr::write(addr, ty.value().to_be());
+            std::ptr::write(addr, ty.0.to_be());
         }
 
         Self(id)
@@ -43,7 +43,7 @@ impl AssetId {
 
         unsafe {
             let addr = std::ptr::addr_of_mut!(id) as *mut u32;
-            std::ptr::write(addr, ty.value().to_be());
+            std::ptr::write(addr, ty.0.to_be());
         }
 
         Self(id)
@@ -54,7 +54,7 @@ impl AssetId {
 
         unsafe {
             let addr = std::ptr::addr_of_mut!(id) as *mut u32;
-            std::ptr::write(addr, ty.value().to_be());
+            std::ptr::write(addr, ty.0.to_be());
         }
 
         Self(id)
@@ -88,7 +88,11 @@ pub struct AssetType(u32);
 
 impl AssetType {
     pub fn of<A: Asset>() -> Self {
-        Self(Type::of::<A>().value())
+        let ty = TypeId::of::<A>();
+        let mut hasher = crc32fast::Hasher::new();
+        ty.hash(&mut hasher);
+
+        Self(hasher.finalize())
     }
 
     pub fn value(&self) -> u32 {
